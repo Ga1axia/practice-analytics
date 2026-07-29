@@ -1,0 +1,33 @@
+{
+  "name": "practice-analytics",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "seed": "tsx scripts/extract-and-seed.ts",
+    "dev:api": "vercel dev --listen 3000"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
+    "chart.js": "^4.5.1",
+    "react": "^19.2.7",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vercel/node": "^5.9.2",
+    "@vitejs/plugin-react": "^6.0.3",
+    "dotenv": "^17.4.2",
+    "oxlint": "^1.71.0",
+    "tsx": "^4.23.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1"
+  }
+}

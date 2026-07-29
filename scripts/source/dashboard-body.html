@@ -1,0 +1,229 @@
+
+
+<header class="titleblock">
+  <div class="tb-brand">
+    <div class="firm display">M · DESIGNS ARCHITECTS</div>
+    <div class="sub">Practice Analytics — Drawing Set</div>
+  </div>
+  <div class="tb-meta">
+    <div class="tb-cell"><div class="k">Data As Of</div><div class="v" id="tb-asof">—</div></div>
+    <div class="tb-cell"><div class="k">Active Projects</div><div class="v" id="tb-activeprojects">—</div></div>
+    <div class="tb-cell"><div class="k">Total Contract Value</div><div class="v" id="tb-totalcontract">—</div></div>
+    <div class="tb-cell"><div class="k">Employees Tracked</div><div class="v" id="tb-employees">—</div></div>
+  </div>
+</header>
+
+<nav class="sheets">
+  <button class="active" data-sheet="s1"><span class="num">SHEET A-1</span>Project Analysis</button>
+  <button data-sheet="s2"><span class="num">SHEET A-2</span>Workload &amp; Performance</button>
+  <button data-sheet="s3"><span class="num">SHEET A-3</span>Financial &amp; A/R</button>
+</nav>
+
+<main>
+
+<!-- ============ SHEET 1: PROJECT ANALYSIS ============ -->
+<section class="sheet active" id="s1">
+  <div class="filters">
+    <span class="f-label">Filter</span>
+    <select id="f-status"><option value="">Status: All</option></select>
+    <select id="f-manager"><option value="">Employee: All</option></select>
+    <select id="f-type"><option value="">Contract Type: All</option></select>
+    <select id="f-month"><option value="">Period: All</option></select>
+    <input type="text" id="f-search" placeholder="Search project or client…">
+    <button class="reset-btn" id="f-reset">RESET</button>
+  </div>
+
+  <div class="kpi-row" id="s1-kpis"></div>
+
+  <div class="panel qa-panel">
+    <h3>Ask This Sheet <span class="tag">computed live from Project Analysis data</span></h3>
+    <div class="qa-input-row">
+      <input type="text" id="s1-qa-input" placeholder="e.g. How much has been billed to [client]?">
+      <button id="s1-qa-ask">Ask</button>
+    </div>
+    <div class="qa-chips" id="s1-qa-chips"></div>
+    <div class="qa-answer" id="s1-qa-answer"></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <h3>Project Details <span class="tag" id="s1-count-tag">— rows</span></h3>
+      <div class="table-scroll">
+        <table class="data" id="s1-table">
+          <thead><tr>
+            <th data-key="project">Project</th>
+            <th data-key="client">Client</th>
+            <th data-key="manager">Employee</th>
+            <th data-key="status">Status</th>
+            <th data-key="type">Type</th>
+            <th data-key="contract" class="num">Contract</th>
+            <th data-key="spent" class="num">Spent</th>
+            <th data-key="billed" class="num">Billed</th>
+            <th data-key="ar" class="num">Receivable</th>
+            <th data-key="margin" class="num">Margin</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="s1-pageinfo"></span>
+        <div><button id="s1-prev">‹ Prev</button> <button id="s1-next">Next ›</button></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3>Billing Progress <span class="tag">billed vs contract</span></h3>
+        <div class="chart-wrap"><canvas id="chart-billing"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>Profit Margin <span class="tag">profit vs cost</span></h3>
+        <div class="chart-wrap"><canvas id="chart-margin"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-3">
+    <div class="panel">
+      <h3>Top Clients <span class="tag">by billed $</span></h3>
+      <div class="chart-wrap tall"><canvas id="chart-clients"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Contract Value by Phase</h3>
+      <div class="chart-wrap tall"><canvas id="chart-phase"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Top Project Managers <span class="tag">by contract $</span></h3>
+      <div class="chart-wrap tall"><canvas id="chart-managers"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SHEET 2: WORKLOAD & PERFORMANCE ============ -->
+<section class="sheet" id="s2">
+  <div class="filters">
+    <span class="f-label">Filter</span>
+    <select id="s2-f-employee"><option value="">Employee: Whole Firm</option></select>
+    <span class="f-label" style="margin-left:10px;">View By</span>
+    <div id="s2-granularity" style="display:flex; border:1px solid var(--border); border-radius:2px; overflow:hidden;">
+      <button type="button" class="gran-btn active" data-gran="month">Month</button>
+      <button type="button" class="gran-btn" data-gran="quarter">Quarter</button>
+      <button type="button" class="gran-btn" data-gran="year">Year</button>
+    </div>
+    <select id="s2-f-period"><option value="">Period: All</option></select>
+    <button class="reset-btn" id="s2-f-reset">RESET</button>
+  </div>
+
+  <div class="grid" style="grid-template-columns:300px 1fr;">
+    <div class="panel" style="margin-bottom:0;">
+      <h3>Employees <span class="tag" id="s2-emp-count"></span></h3>
+      <input type="text" id="emp-search" placeholder="Search employee…" style="width:100%;padding:6px 10px;border:1px solid var(--border);margin:8px 0;font-family:'Inter',sans-serif;font-size:12.5px;">
+      <div class="emp-list" id="emp-list"></div>
+    </div>
+
+    <div>
+      <div class="kpi-row" id="s2-kpis"></div>
+
+      <div class="panel qa-panel">
+        <h3>Ask This Sheet <span class="tag">computed live from Workload &amp; Performance data</span></h3>
+        <div class="qa-input-row">
+          <input type="text" id="s2-qa-input" placeholder="e.g. Who has the highest efficiency?">
+          <button id="s2-qa-ask">Ask</button>
+        </div>
+        <div class="qa-chips" id="s2-qa-chips"></div>
+        <div class="qa-answer" id="s2-qa-answer"></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="panel">
+          <h3 id="s2-trend-title">Bill vs Non-Bill Hours</h3>
+          <div class="chart-wrap"><canvas id="chart-emp-trend"></canvas></div>
+          <div class="legend-row">
+            <span><span class="legend-dot" style="background:var(--teal)"></span>Billable</span>
+            <span><span class="legend-dot" style="background:var(--rust)"></span>Non-Billable</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h3 id="s2-eff-title">Efficiency Trend <span class="tag">bill hrs / total hrs</span></h3>
+          <div class="chart-wrap"><canvas id="chart-emp-efficiency"></canvas></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 id="s2-topproj-title">Top Projects by Hours Worked</h3>
+        <div class="chart-wrap"><canvas id="chart-emp-projects"></canvas></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SHEET 3: FINANCIAL & AR ============ -->
+<section class="sheet" id="s3">
+  <div class="filters">
+    <span class="f-label">Aging Bucket</span>
+    <div id="s3-bucket-filter" style="display:flex; border:1px solid var(--border); border-radius:2px; overflow:hidden;">
+      <button type="button" class="gran-btn active" data-bucket="">All</button>
+      <button type="button" class="gran-btn" data-bucket="d0_30">0–30</button>
+      <button type="button" class="gran-btn" data-bucket="d31_60">31–60</button>
+      <button type="button" class="gran-btn" data-bucket="d61_90">61–90</button>
+      <button type="button" class="gran-btn" data-bucket="d91_plus">91+</button>
+    </div>
+    <span class="f-label" style="margin-left:10px;">As Of Date</span>
+    <input type="date" id="s3-asof-date">
+    <button class="reset-btn" id="s3-asof-reset">TODAY (LIVE)</button>
+    <span class="f-label" id="s3-bucket-summary" style="margin-left:6px;"></span>
+  </div>
+  <div id="s3-mode-note" style="display:none; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--ink-soft); background:var(--gold-soft); border:1px solid var(--border); padding:6px 12px; margin:-8px 0 14px;"></div>
+
+  <div class="kpi-row" id="s3-kpis"></div>
+
+  <div class="panel qa-panel">
+    <h3>Ask This Sheet <span class="tag">computed live from Financial &amp; A/R data</span></h3>
+    <div class="qa-input-row">
+      <input type="text" id="s3-qa-input" placeholder="e.g. Which client owes the most?">
+      <button id="s3-qa-ask">Ask</button>
+    </div>
+    <div class="qa-chips" id="s3-qa-chips"></div>
+    <div class="qa-answer" id="s3-qa-answer"></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <h3>Billed vs Cash Collected <span class="tag">monthly, all clients</span></h3>
+      <div class="chart-wrap tall"><canvas id="chart-revenue"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>A/R Aging Buckets <span class="tag">firm-wide</span></h3>
+      <div class="chart-wrap tall"><canvas id="chart-aging"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="panel">
+      <h3 id="s3-overdue-title">Top Overdue Clients <span class="tag">by balance</span></h3>
+      <div class="table-scroll" style="max-height:420px;">
+        <table class="data" id="s3-overdue-table">
+          <thead><tr>
+            <th>Client</th><th class="num">0–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">91+</th><th class="num">Balance</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>All Clients — A/R Detail <span class="tag" id="s3-ar-count"></span></h3>
+      <input type="text" id="ar-search" placeholder="Search client…" style="width:100%;padding:6px 10px;border:1px solid var(--border);margin:0 0 8px;font-family:'Inter',sans-serif;font-size:12.5px;">
+      <div class="table-scroll" style="max-height:380px;">
+        <table class="data" id="s3-all-table">
+          <thead><tr>
+            <th>Client</th><th class="num">0–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">91+</th><th class="num">Credit</th><th class="num">Balance</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>M. DESIGNS ARCHITECTS — PRACTICE ANALYTICS &nbsp;·&nbsp; BUILT FROM AJERA/BQE CORE EXPORTS &nbsp;·&nbsp; ALL FIGURES REFLECT SOURCE DATA AS EXTRACTED</footer>
+

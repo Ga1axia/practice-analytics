@@ -23,7 +23,7 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 |------|-------|----------|----------|
 | Admin | `admin@mdesigns.test` | `DemoAdmin2026!` | — |
 | Employee | `employee@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
-| Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Junaid Qurashi |
+| Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
 
 ## Supabase project
 
@@ -68,6 +68,6 @@ npm run dev:api
 
 - Sign in as admin → all three sheets
 - Sign in as employee → only own projects / workload; no A/R sheet
-- Sign in as customer → status tracker for Junaid Qurashi projects only
+- Sign in as customer → status tracker for Elena Vargas (single project, no billing figures)
 - Signed-out users cannot read `pa_*` tables
 - Q&A requires auth; customers blocked from Ask This Sheet

@@ -1,49 +1,53 @@
-import { useMemo, useState } from 'react';
-import { fmtPct, fmtUSD } from '../lib/format';
+import { useMemo } from 'react';
 import type { DashboardData, ProjectRow } from '../lib/types';
 import type { Profile } from '../lib/authTypes';
 
-function progressPct(p: ProjectRow) {
-  if (p.pct_billed != null && isFinite(p.pct_billed)) return Math.max(0, Math.min(1, p.pct_billed));
-  if (p.contract > 0) return Math.max(0, Math.min(1, p.billed / p.contract));
-  return 0;
-}
+const PHASE_STEPS = [
+  'Pre-Design',
+  'Schematic Design',
+  'Design Development',
+  'Construction Documents',
+  'Permitting',
+  'Construction Support',
+];
 
 function StatusBadge({ status }: { status: string | null }) {
   const s = (status || 'unknown').toLowerCase();
   return <span className={`badge ${s}`}>{status || '—'}</span>;
 }
 
+function normalizePhase(phase: string | null) {
+  if (!phase) return null;
+  const p = phase.trim().toLowerCase();
+  const hit = PHASE_STEPS.find((step) => p.includes(step.toLowerCase()));
+  return hit || phase;
+}
+
+function phaseIndex(phase: string | null) {
+  const n = normalizePhase(phase);
+  if (!n) return -1;
+  return PHASE_STEPS.findIndex((step) => step.toLowerCase() === n.toLowerCase());
+}
+
+function pickProject(projects: ProjectRow[]) {
+  if (!projects.length) return null;
+  const active = projects.filter((p) => p.status === 'ACTIVE');
+  const pool = active.length ? active : projects;
+  return pool.slice().sort((a, b) => a.project.localeCompare(b.project))[0];
+}
+
 export function CustomerPortal({ data, profile }: { data: DashboardData; profile: Profile }) {
-  const projects = useMemo(
-    () =>
-      data.projects
-        .slice()
-        .sort((a, b) => {
-          const rank = (s: string | null) =>
-            s === 'ACTIVE' ? 0 : s === 'HOLD' ? 1 : s === 'COMPLETED' ? 2 : 3;
-          return rank(a.status) - rank(b.status) || a.project.localeCompare(b.project);
-        }),
-    [data.projects],
-  );
+  const project = useMemo(() => pickProject(data.projects), [data.projects]);
+  const currentPhase = normalizePhase(project?.phase || null);
+  const currentIdx = phaseIndex(project?.phase || null);
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const active = projects.find((p) => p.project === selected) || projects[0] || null;
-
-  const summary = useMemo(() => {
-    const activeN = projects.filter((p) => p.status === 'ACTIVE').length;
-    const contract = projects.reduce((a, p) => a + (p.contract || 0), 0);
-    const billed = projects.reduce((a, p) => a + (p.billed || 0), 0);
-    return { activeN, contract, billed, total: projects.length };
-  }, [projects]);
-
-  if (!projects.length) {
+  if (!project) {
     return (
       <main className="customer-portal">
         <div className="panel">
-          <h3>No projects found</h3>
+          <h3>No project found</h3>
           <p style={{ color: 'var(--ink-soft)', fontSize: 13.5 }}>
-            There are no projects linked to {profile.client_name || 'this account'} yet.
+            There is no project linked to {profile.client_name || 'this account'} yet.
           </p>
         </div>
       </main>
@@ -57,123 +61,77 @@ export function CustomerPortal({ data, profile }: { data: DashboardData; profile
           <p className="customer-kicker">Client portal</p>
           <h1 className="display">{profile.client_name || profile.display_name}</h1>
           <p className="customer-lede">
-            Track status and billing progress across your active and completed work packages.
+            A live status view of your project with M. Designs — where things stand and who to
+            contact.
           </p>
         </div>
-        <div className="customer-summary">
+        <div className="customer-summary single">
           <div>
-            <span className="k">Projects</span>
-            <span className="v">{summary.total}</span>
+            <span className="k">Status</span>
+            <span className="v">
+              <StatusBadge status={project.status} />
+            </span>
           </div>
           <div>
-            <span className="k">Active</span>
-            <span className="v">{summary.activeN}</span>
-          </div>
-          <div>
-            <span className="k">Contract</span>
-            <span className="v mono">{fmtUSD(summary.contract)}</span>
-          </div>
-          <div>
-            <span className="k">Billed</span>
-            <span className="v mono">{fmtUSD(summary.billed)}</span>
+            <span className="k">Current phase</span>
+            <span className="v" style={{ fontSize: 16 }}>
+              {currentPhase || '—'}
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="customer-layout">
-        <div className="panel customer-list">
-          <h3>
-            Your projects <span className="tag">{projects.length}</span>
-          </h3>
-          <div className="customer-list-scroll">
-            {projects.map((p) => {
-              const pct = progressPct(p);
-              const isSel = active?.project === p.project;
-              return (
-                <button
-                  key={p.project}
-                  type="button"
-                  className={`customer-row ${isSel ? 'selected' : ''}`}
-                  onClick={() => setSelected(p.project)}
-                >
-                  <div className="customer-row-top">
-                    <span className="name">{p.project}</span>
-                    <StatusBadge status={p.status} />
-                  </div>
-                  <div className="customer-row-meta">
-                    <span>{p.phase || '—'}</span>
-                    <span className="mono">{fmtPct(pct)} billed</span>
-                  </div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${pct * 100}%` }} />
-                  </div>
-                </button>
-              );
-            })}
+      <div className="panel customer-detail customer-detail-solo">
+        <h3>
+          Your project <span className="tag">1 active engagement</span>
+        </h3>
+        <h2 className="display customer-detail-title">{project.project}</h2>
+
+        <div className="customer-detail-grid">
+          <div>
+            <span className="k">Phase</span>
+            <span className="v">{currentPhase || '—'}</span>
+          </div>
+          <div>
+            <span className="k">Status</span>
+            <span className="v">
+              <StatusBadge status={project.status} />
+            </span>
+          </div>
+          <div>
+            <span className="k">Project manager</span>
+            <span className="v">{project.manager || '—'}</span>
+          </div>
+          <div>
+            <span className="k">Location</span>
+            <span className="v">{project.city || '—'}</span>
           </div>
         </div>
 
-        {active ? (
-          <div className="panel customer-detail">
-            <h3>
-              Project status <span className="tag">{active.status}</span>
-            </h3>
-            <h2 className="display customer-detail-title">{active.project}</h2>
-            <div className="customer-detail-grid">
-              <div>
-                <span className="k">Phase</span>
-                <span className="v">{active.phase || '—'}</span>
-              </div>
-              <div>
-                <span className="k">Contract type</span>
-                <span className="v">{active.type || '—'}</span>
-              </div>
-              <div>
-                <span className="k">Project manager</span>
-                <span className="v">{active.manager || '—'}</span>
-              </div>
-              <div>
-                <span className="k">Status</span>
-                <span className="v">
-                  <StatusBadge status={active.status} />
-                </span>
-              </div>
-            </div>
-
-            <div className="customer-metrics">
-              <div className="kpi">
-                <div className="k">Contract</div>
-                <div className="v">{fmtUSD(active.contract)}</div>
-              </div>
-              <div className="kpi accent-gold">
-                <div className="k">Billed to date</div>
-                <div className="v">{fmtUSD(active.billed)}</div>
-              </div>
-              <div className="kpi accent-teal">
-                <div className="k">Spent</div>
-                <div className="v">{fmtUSD(active.spent)}</div>
-              </div>
-              <div className="kpi">
-                <div className="k">Receivable</div>
-                <div className="v">{fmtUSD(active.ar)}</div>
-              </div>
-            </div>
-
-            <div className="customer-progress-block">
-              <div className="customer-progress-label">
-                <span>Billing progress</span>
-                <span className="mono">{fmtPct(progressPct(active))}</span>
-              </div>
-              <div className="progress-track tall">
-                <div className="progress-fill" style={{ width: `${progressPct(active) * 100}%` }} />
-              </div>
-              <p className="customer-note">
-                Figures reflect the latest Ajera/BQE export for your account. Contact your project
-                manager for schedule or deliverable questions.
-              </p>
-            </div>
+        <div className="customer-phase-track">
+          <div className="customer-progress-label">
+            <span>Design & delivery progress</span>
+            <span className="mono">
+              {currentIdx >= 0 ? `Step ${currentIdx + 1} of ${PHASE_STEPS.length}` : 'In progress'}
+            </span>
           </div>
-        ) : null}
+          <ol className="phase-steps">
+            {PHASE_STEPS.map((step, i) => {
+              const state =
+                currentIdx < 0 ? 'upcoming' : i < currentIdx ? 'done' : i === currentIdx ? 'current' : 'upcoming';
+              return (
+                <li key={step} className={`phase-step ${state}`}>
+                  <span className="phase-dot" aria-hidden="true" />
+                  <span className="phase-label">{step}</span>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="customer-note">
+            This tracker shows project status only. For schedule questions or deliverable reviews,
+            reach out to your project manager{project.manager ? ` (${project.manager})` : ''}.
+          </p>
+        </div>
       </div>
     </main>
   );

@@ -167,6 +167,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'Ask with a client, project, or employee name for a grounded answer.',
   ];
 
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Sign in required for Ask This Sheet.' });
+    return;
+  }
+  const accessToken = authHeader.slice(7);
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     res.status(200).json({
@@ -177,26 +184,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) {
+  const anon =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
     res.status(200).json({
       stub: true,
       answer:
-        'Q&A proxy is missing Supabase credentials (SUPABASE_URL + key). Set them on Vercel and retry.',
+        'Q&A proxy is missing Supabase credentials (SUPABASE_URL + anon key). Set them on Vercel and retry.',
     });
     return;
   }
 
   try {
-    const supabase = createClient(url, key, { auth: { persistSession: false } });
+    const supabase = createClient(url, anon, {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data: userData, error: userErr } = await supabase.auth.getUser(accessToken);
+    if (userErr || !userData.user) {
+      res.status(401).json({ error: 'Invalid or expired session.' });
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('pa_profiles')
+      .select('role,employee_name,client_name')
+      .eq('id', userData.user.id)
+      .maybeSingle();
+
+    if (!profile) {
+      res.status(403).json({ error: 'No profile linked to this account.' });
+      return;
+    }
+    if (profile.role === 'customer') {
+      res.status(403).json({ error: 'Ask This Sheet is not available in the client portal.' });
+      return;
+    }
+    if (profile.role === 'employee' && sheet === 's3') {
+      res.status(403).json({ error: 'Financial Q&A is admin-only.' });
+      return;
+    }
+
     const { ctx, sheetLabel, examples } = await buildContext(
-      supabase,
+      supabase as Db,
       sheet,
       question,
-      filters || {},
+      {
+        ...(filters || {}),
+        auth_role: profile.role,
+        auth_employee: profile.employee_name || '',
+      },
     );
 
     const prompt = `You are a financial/operations analyst embedded inside an interactive practice-management dashboard for M. Designs Architects, an architecture firm. You are answering a question about the "${sheetLabel}" sheet. Use ONLY the JSON data provided below — it is a real slice of the firm's underlying Ajera/BQE export data that powers this dashboard. Do not invent figures that aren't derivable from this data. If the provided data doesn't contain enough detail to fully answer, say what you can determine and briefly note what's missing rather than guessing. Answer in 1-4 concise sentences. Format dollar amounts with $ and commas, percentages with %, and bold key figures using **double asterisks**.

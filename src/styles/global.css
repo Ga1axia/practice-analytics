@@ -360,3 +360,138 @@ footer{
 }
 ::-webkit-scrollbar{ width:9px; height:9px; }
 ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:4px; }
+
+/* ---------- Auth / login ---------- */
+.signout-btn{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.35);
+  color:#fff;
+  padding:8px 12px;
+  cursor:pointer;
+  border-radius:2px;
+  letter-spacing:0.04em;
+}
+.signout-btn:hover{ background:rgba(255,255,255,0.08); }
+
+.login-page{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(168,120,58,0.18), transparent 45%),
+    linear-gradient(160deg, #101B2D 0%, #17293F 45%, #1a3048 100%);
+}
+.login-card{
+  width:min(440px,100%);
+  background:var(--card);
+  border:1px solid var(--border);
+  padding:28px 26px 22px;
+  box-shadow:0 24px 60px rgba(0,0,0,0.28);
+}
+.login-brand{ margin-bottom:22px; padding-bottom:16px; border-bottom:3px solid var(--gold); }
+.login-brand .firm{ color:var(--navy); font-size:22px; font-weight:700; }
+.login-brand .sub{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);
+  letter-spacing:0.08em; text-transform:uppercase; margin-top:6px;
+}
+.login-form{ display:flex; flex-direction:column; gap:12px; }
+.login-form label{ display:flex; flex-direction:column; gap:6px; }
+.login-form label span{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.08em;
+  text-transform:uppercase; color:var(--ink-soft);
+}
+.login-form input{
+  font-family:'IBM Plex Sans',sans-serif; font-size:14px; padding:10px 12px;
+  border:1px solid var(--border); border-radius:2px; color:var(--ink);
+}
+.login-form button{
+  margin-top:6px; font-family:'IBM Plex Mono',monospace; font-size:12.5px;
+  letter-spacing:0.04em; background:var(--navy); color:#fff; border:none;
+  padding:12px 16px; cursor:pointer; border-radius:2px;
+}
+.login-form button:hover{ background:var(--navy-2); }
+.login-form button:disabled{ opacity:0.6; cursor:default; }
+.login-error{ color:var(--rust); font-size:13px; margin:0; }
+.login-demos{ margin-top:20px; display:flex; flex-direction:column; gap:8px; }
+.login-demos-label{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.08em;
+  text-transform:uppercase; color:var(--ink-soft); margin:0 0 2px;
+}
+.login-demo-btn{
+  display:flex; justify-content:space-between; gap:12px; align-items:center;
+  text-align:left; background:var(--paper); border:1px solid var(--border);
+  padding:10px 12px; cursor:pointer; border-radius:2px; font-size:12.5px; color:var(--ink);
+}
+.login-demo-btn strong{ font-family:'Space Grotesk',sans-serif; font-size:13px; }
+.login-demo-btn span{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); }
+.login-demo-btn:hover{ border-color:var(--gold); background:rgba(168,120,58,0.08); }
+
+/* ---------- Customer portal ---------- */
+.customer-portal{ max-width:1440px; margin:0 auto; padding:20px 24px 60px; }
+.customer-hero{
+  display:flex; justify-content:space-between; gap:24px; flex-wrap:wrap;
+  margin-bottom:22px; padding:8px 2px 18px; border-bottom:1px solid var(--border);
+}
+.customer-kicker{
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.1em;
+  text-transform:uppercase; color:var(--gold); margin:0 0 6px;
+}
+.customer-hero h1{ margin:0; font-size:34px; color:var(--navy); }
+.customer-lede{ max-width:42ch; color:var(--ink-soft); font-size:14.5px; margin:10px 0 0; line-height:1.45; }
+.customer-summary{
+  display:grid; grid-template-columns:repeat(2,minmax(110px,1fr)); gap:10px; min-width:260px;
+}
+.customer-summary > div{
+  background:var(--card); border:1px solid var(--border); padding:12px 14px;
+}
+.customer-summary .k{
+  display:block; font-family:'IBM Plex Mono',monospace; font-size:10px;
+  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-soft);
+}
+.customer-summary .v{
+  display:block; margin-top:6px; font-family:'IBM Plex Mono',monospace;
+  font-size:20px; font-weight:600; color:var(--navy);
+}
+.customer-layout{ display:grid; grid-template-columns:1.05fr 1.2fr; gap:18px; }
+@media(max-width:1000px){ .customer-layout{ grid-template-columns:1fr; } }
+.customer-list-scroll{ max-height:620px; overflow:auto; margin-top:10px; border:1px solid var(--border); }
+.customer-row{
+  display:block; width:100%; text-align:left; background:#fff; border:none;
+  border-bottom:1px solid var(--border); padding:12px 14px; cursor:pointer;
+}
+.customer-row:hover{ background:rgba(168,120,58,0.08); }
+.customer-row.selected{ background:var(--gold-soft); }
+.customer-row-top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+.customer-row-top .name{ font-size:13px; font-weight:500; color:var(--ink); }
+.customer-row-meta{
+  display:flex; justify-content:space-between; margin-top:6px;
+  font-size:11.5px; color:var(--ink-soft);
+}
+.progress-track{
+  margin-top:8px; height:6px; background:#E4E8EE; border-radius:2px; overflow:hidden;
+}
+.progress-track.tall{ height:10px; }
+.progress-fill{ height:100%; background:var(--gold); }
+.customer-detail-title{ font-size:22px; margin:8px 0 16px; color:var(--navy); }
+.customer-detail-grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; margin-bottom:18px;
+}
+.customer-detail-grid .k{
+  display:block; font-family:'IBM Plex Mono',monospace; font-size:10px;
+  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-soft);
+}
+.customer-detail-grid .v{ display:block; margin-top:4px; font-size:14px; color:var(--ink); }
+.customer-metrics{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:2px; background:var(--border); border:1px solid var(--border); margin-bottom:18px;
+}
+.customer-progress-block{ margin-top:4px; }
+.customer-progress-label{
+  display:flex; justify-content:space-between; font-family:'IBM Plex Mono',monospace;
+  font-size:11px; color:var(--ink-soft); margin-bottom:8px;
+}
+.customer-note{ font-size:12.5px; color:var(--ink-soft); line-height:1.45; margin:12px 0 0; }

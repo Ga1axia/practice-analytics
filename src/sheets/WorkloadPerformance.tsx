@@ -83,8 +83,14 @@ function teamMonthly(data: DashboardData, team: string): EmpMonthly[] {
   return Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
 }
 
-export function WorkloadPerformance({ data }: { data: DashboardData }) {
-  const [selectedEmp, setSelectedEmp] = useState<string | null>(null);
+export function WorkloadPerformance({
+  data,
+  lockedEmployee,
+}: {
+  data: DashboardData;
+  lockedEmployee?: string | null;
+}) {
+  const [selectedEmp, setSelectedEmp] = useState<string | null>(lockedEmployee || null);
   const [granularity, setGranularity] = useState<'month' | 'quarter' | 'year'>('month');
   const [periodValue, setPeriodValue] = useState('');
   const [empSearch, setEmpSearch] = useState('');
@@ -105,19 +111,21 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
     return { efficiency: std > 0 ? bill / std : 0 };
   }
 
+  const effectiveEmp = lockedEmployee || selectedEmp;
+
   let monthlyRows: (EmpMonthly | CompanyMonthly)[];
   let topProj: { project: string; hours: number }[] = [];
   let title = 'Whole Firm';
-  if (selectedEmp?.startsWith('TEAM:')) {
-    const team = selectedEmp.slice(5);
+  if (effectiveEmp?.startsWith('TEAM:')) {
+    const team = effectiveEmp.slice(5);
     monthlyRows = teamMonthly(data, team);
     title = `${team} (aggregate)`;
-  } else if (selectedEmp) {
+  } else if (effectiveEmp) {
     monthlyRows = data.emp_monthly
-      .filter((m) => m.employee === selectedEmp)
+      .filter((m) => m.employee === effectiveEmp)
       .sort((a, b) => a.month.localeCompare(b.month));
-    topProj = data.emp_top_projects[selectedEmp] || [];
-    title = selectedEmp;
+    topProj = data.emp_top_projects[effectiveEmp] || [];
+    title = effectiveEmp;
   } else {
     monthlyRows = data.company_monthly.slice().sort((a, b) => a.month.localeCompare(b.month));
   }
@@ -172,7 +180,7 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
   const granLabel =
     granularity === 'month' ? 'Monthly' : granularity === 'quarter' ? 'Quarterly' : 'Yearly';
   const periodTag = periodValue ? ` — ${periodLabel(periodValue, granularity)}` : ' — trailing';
-  const isIndividual = !!selectedEmp && !selectedEmp.startsWith('TEAM:');
+  const isIndividual = !!effectiveEmp && !effectiveEmp.startsWith('TEAM:');
 
   const filterText = empSearch.toLowerCase();
   let empCount = 0;
@@ -181,25 +189,29 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
     <section className="sheet active">
       <div className="filters">
         <span className="f-label">Filter</span>
-        <select
-          value={selectedEmp || ''}
-          onChange={(e) => {
-            setSelectedEmp(e.target.value || null);
-            setPeriodValue('');
-          }}
-        >
-          <option value="">Employee: Whole Firm</option>
-          {Object.entries(data.employee_roster).map(([team, names]) => (
-            <optgroup key={team} label={team}>
-              <option value={'TEAM:' + team}>All {team} (aggregate)</option>
-              {names.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        {lockedEmployee ? (
+          <span className="f-label">Employee: {lockedEmployee}</span>
+        ) : (
+          <select
+            value={selectedEmp || ''}
+            onChange={(e) => {
+              setSelectedEmp(e.target.value || null);
+              setPeriodValue('');
+            }}
+          >
+            <option value="">Employee: Whole Firm</option>
+            {Object.entries(data.employee_roster).map(([team, names]) => (
+              <optgroup key={team} label={team}>
+                <option value={'TEAM:' + team}>All {team} (aggregate)</option>
+                {names.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        )}
         <span className="f-label" style={{ marginLeft: 10 }}>
           View By
         </span>
@@ -230,7 +242,7 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
           type="button"
           className="reset-btn"
           onClick={() => {
-            setSelectedEmp(null);
+            setSelectedEmp(lockedEmployee || null);
             setGranularity('month');
             setPeriodValue('');
             setEmpSearch('');
@@ -240,7 +252,8 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
         </button>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: '300px 1fr' }}>
+      <div className="grid" style={{ gridTemplateColumns: lockedEmployee ? '1fr' : '300px 1fr' }}>
+        {!lockedEmployee ? (
         <div className="panel" style={{ marginBottom: 0 }}>
           <h3>
             Employees <span className="tag">{/* count filled below */}</span>
@@ -312,6 +325,7 @@ export function WorkloadPerformance({ data }: { data: DashboardData }) {
           </div>
           <p style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>{empCount} people</p>
         </div>
+        ) : null}
 
         <div>
           <KpiRow

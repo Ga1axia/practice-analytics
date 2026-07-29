@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { escapeHtml } from '../lib/format';
+import { supabase } from '../lib/supabase';
 import type { SheetId } from '../lib/types';
 
 type Props = {
@@ -23,9 +24,14 @@ export function QAPanel({ sheet, chips, examples, filters }: Props) {
       `<div class="qa-bubble"><div class="qa-q">Q: ${escapeHtml(text)}</div><div class="qa-a"><i>Thinking…</i></div></div>`,
     );
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
       const res = await fetch('/api/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ sheet, question: text, filters: filters || {} }),
       });
       const body = (await res.json()) as { answer?: string; stub?: boolean; error?: string };

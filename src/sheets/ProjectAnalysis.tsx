@@ -31,9 +31,15 @@ function topEntries(map: Record<string, number>, n: number) {
     .slice(0, n);
 }
 
-export function ProjectAnalysis({ data }: { data: DashboardData }) {
+export function ProjectAnalysis({
+  data,
+  lockedEmployee,
+}: {
+  data: DashboardData;
+  lockedEmployee?: string | null;
+}) {
   const [status, setStatus] = useState('');
-  const [manager, setManager] = useState('');
+  const [manager, setManager] = useState(lockedEmployee || '');
   const [type, setType] = useState('');
   const [month, setMonth] = useState('');
   const [search, setSearch] = useState('');
@@ -128,25 +134,31 @@ export function ProjectAnalysis({ data }: { data: DashboardData }) {
               </option>
             ))}
         </select>
-        <select
-          value={manager}
-          onChange={(e) => {
-            setManager(e.target.value);
-            setPage(0);
-          }}
-        >
-          <option value="">Employee: All</option>
-          {Object.entries(data.employee_roster).map(([team, names]) => (
-            <optgroup key={team} label={team}>
-              <option value={'TEAM:' + team}>All {team} (aggregate)</option>
-              {names.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        {lockedEmployee ? (
+          <span className="f-label" style={{ marginLeft: 4 }}>
+            Employee: {lockedEmployee}
+          </span>
+        ) : (
+          <select
+            value={manager}
+            onChange={(e) => {
+              setManager(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">Employee: All</option>
+            {Object.entries(data.employee_roster).map(([team, names]) => (
+              <optgroup key={team} label={team}>
+                <option value={'TEAM:' + team}>All {team} (aggregate)</option>
+                {names.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        )}
         <select
           value={type}
           onChange={(e) => {
@@ -189,7 +201,7 @@ export function ProjectAnalysis({ data }: { data: DashboardData }) {
           className="reset-btn"
           onClick={() => {
             setStatus('');
-            setManager('');
+            setManager(lockedEmployee || '');
             setType('');
             setMonth('');
             setSearch('');

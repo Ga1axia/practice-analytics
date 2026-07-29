@@ -5,6 +5,7 @@ import type {
   EmpMonthly,
   EmpTotal,
   InvoiceRow,
+  KpiSnapshot,
   MonthlyRevenue,
   ProjectRow,
 } from './types';
@@ -43,6 +44,23 @@ function nestAmount(rows: { key: string; month: string; amount: number }[]) {
     map[r.key][r.month] = r.amount;
   });
   return map;
+}
+
+function kpiFromProjects(rows: ProjectRow[]): KpiSnapshot {
+  return {
+    contract_amount: rows.reduce((a, r) => a + (r.contract || 0), 0),
+    spent: rows.reduce((a, r) => a + (r.spent || 0), 0),
+    billed: rows.reduce((a, r) => a + (r.billed || 0), 0),
+    receivable: rows.reduce((a, r) => a + (r.ar || 0), 0),
+    retainer_balance: rows.reduce((a, r) => a + (r.retainer_balance || 0), 0),
+    cost: rows.reduce((a, r) => a + ((r.billed || 0) - (r.profit || 0)), 0),
+    profit: rows.reduce((a, r) => a + (r.profit || 0), 0),
+    project_count: rows.length,
+  };
+}
+
+function uniq(values: (string | null | undefined)[]) {
+  return [...new Set(values.filter((v): v is string => !!v))].sort();
 }
 
 export async function loadDashboardData(): Promise<DashboardData> {
@@ -91,13 +109,23 @@ export async function loadDashboardData(): Promise<DashboardData> {
     b: r.balance || 0,
   }));
 
+  const project_monthly_billed = nestAmount(
+    pmb.map((r) => ({ key: r.project, month: r.month, amount: r.amount })),
+  );
+  const billingMonthsFromPmb = uniq(pmb.map((r) => r.month));
+
+  const kpi_all = (meta.kpi_all as DashboardData['kpi_all']) || kpiFromProjects(projects);
+  const kpi_active =
+    (meta.kpi_active as DashboardData['kpi_active']) ||
+    kpiFromProjects(projects.filter((p) => p.status === 'ACTIVE'));
+
   return {
-    kpi_all: meta.kpi_all as DashboardData['kpi_all'],
-    kpi_active: meta.kpi_active as DashboardData['kpi_active'],
-    statuses: (meta.statuses as string[]) || [],
-    managers: (meta.managers as string[]) || [],
-    contract_types: (meta.contract_types as string[]) || [],
-    cities: (meta.cities as string[]) || [],
+    kpi_all,
+    kpi_active,
+    statuses: (meta.statuses as string[]) || uniq(projects.map((p) => p.status)),
+    managers: (meta.managers as string[]) || uniq(projects.map((p) => p.manager)),
+    contract_types: (meta.contract_types as string[]) || uniq(projects.map((p) => p.type)),
+    cities: (meta.cities as string[]) || uniq(projects.map((p) => p.city)),
     projects,
     top_clients: (meta.top_clients as DashboardData['top_clients']) || [],
     phase_analysis: (meta.phase_analysis as DashboardData['phase_analysis']) || [],
@@ -116,10 +144,8 @@ export async function loadDashboardData(): Promise<DashboardData> {
     emp_top_projects: (meta.emp_top_projects as DashboardData['emp_top_projects']) || {},
     monthly_revenue: monthlyRevenue.sort((a, b) => a.month.localeCompare(b.month)),
     company_monthly: companyMonthly.sort((a, b) => a.month.localeCompare(b.month)),
-    project_monthly_billed: nestAmount(
-      pmb.map((r) => ({ key: r.project, month: r.month, amount: r.amount })),
-    ),
-    billing_months: (meta.billing_months as string[]) || [],
+    project_monthly_billed,
+    billing_months: (meta.billing_months as string[]) || billingMonthsFromPmb,
     client_monthly_billed: nestAmount(
       cmb.map((r) => ({ key: r.client, month: r.month, amount: r.amount })),
     ),

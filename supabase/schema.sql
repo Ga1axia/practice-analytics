@@ -147,3 +147,7 @@ end $$;
 
 grant select on all tables in schema public to anon, authenticated;
 grant usage on all sequences in schema public to anon, authenticated;
+
+-- Auth profiles + role RLS (applied via migration pa_auth_profiles_and_rls)
+-- See pa_profiles, pa_profile_role(), and per-table authenticated SELECT policies.
+-- Anon SELECT is revoked; clients must sign in.

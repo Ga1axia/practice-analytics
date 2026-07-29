@@ -1,20 +1,25 @@
 import {
   ArcElement,
+  BarController,
   BarElement,
   CategoryScale,
   Chart as ChartJS,
+  DoughnutController,
   Filler,
   Legend,
   LinearScale,
+  LineController,
   LineElement,
   PointElement,
   Tooltip,
 } from 'chart.js';
-import { useEffect, useRef } from 'react';
 import { Chart } from 'react-chartjs-2';
 import { fmtUSD, fmtUSDk, palette } from '../lib/format';
 
 ChartJS.register(
+  DoughnutController,
+  BarController,
+  LineController,
   ArcElement,
   BarElement,
   CategoryScale,
@@ -170,10 +175,6 @@ export function RevenueChart({
   gross: number[];
   paid: number[];
 }) {
-  const ref = useRef(false);
-  useEffect(() => {
-    ref.current = true;
-  }, []);
   return (
     <Chart
       type="bar"

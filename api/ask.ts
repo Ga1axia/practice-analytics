@@ -1,7 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 type SheetId = 's1' | 's2' | 's3';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Db = SupabaseClient<any, 'public', any>;
 
 function findEntity(text: string, names: (string | null | undefined)[]) {
   const t = text.toLowerCase();
@@ -24,7 +26,7 @@ function stubMessage(examples: string[]) {
   );
 }
 
-async function loadMeta(supabase: ReturnType<typeof createClient>) {
+async function loadMeta(supabase: Db) {
   const { data, error } = await supabase.from('pa_meta').select('key,value');
   if (error) throw error;
   const meta: Record<string, unknown> = {};
@@ -35,7 +37,7 @@ async function loadMeta(supabase: ReturnType<typeof createClient>) {
 }
 
 async function buildContext(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Db,
   sheet: SheetId,
   question: string,
   filters: Record<string, string>,

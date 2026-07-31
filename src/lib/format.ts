@@ -35,13 +35,38 @@ export function escapeHtml(s: string) {
 }
 
 export function findEntity(text: string, names: (string | null | undefined)[]) {
-  const t = text.toLowerCase();
+  const STOP = new Set([
+    'the', 'and', 'for', 'what', 'which', 'how', 'many', 'much', 'who', 'is', 'are',
+    'of', 'to', 'a', 'an', 'in', 'on', 'at', 'by', 'with', 'from', 'total', 'amount',
+    'client', 'project', 'manager', 'billed', 'contract', 'profit', 'active',
+  ]);
+  const q = text.toLowerCase();
+  const score = (name: string) => {
+    const n = name.toLowerCase().trim();
+    if (n.length < 3) return 0;
+    if (q.includes(n)) return 1000 + n.length;
+    const tokens = n.split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !STOP.has(t));
+    let hit = 0;
+    let hitLen = 0;
+    for (const t of tokens) {
+      const re = new RegExp(`(^|[^a-z0-9])${t}([^a-z0-9]|$)`);
+      if (re.test(q)) {
+        hit += 1;
+        hitLen += t.length;
+      }
+    }
+    if (!hit) return 0;
+    if (hit === 1 && hitLen < 5 && tokens.length > 1) return 0;
+    return hit * 50 + hitLen;
+  };
   let best: string | null = null;
+  let bestScore = 0;
   names.forEach((name) => {
     if (!name) return;
-    const n = String(name).toLowerCase();
-    if (n.length >= 3 && t.includes(n)) {
-      if (!best || n.length > best.length) best = name;
+    const s = score(name);
+    if (s > bestScore) {
+      bestScore = s;
+      best = name;
     }
   });
   return best;

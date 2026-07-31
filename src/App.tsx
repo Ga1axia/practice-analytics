@@ -6,6 +6,7 @@ import { fmtUSDk } from './lib/format';
 import { CustomerPortal } from './sheets/CustomerPortal';
 import { FinancialAR } from './sheets/FinancialAR';
 import { ProjectAnalysis } from './sheets/ProjectAnalysis';
+import { ProjectSchedule } from './sheets/ProjectSchedule';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
 import type { SheetId } from './lib/types';
 import './styles/global.css';
@@ -15,6 +16,7 @@ function StaffShell() {
   const { data, loading, error } = useDashboard();
   const isEmployee = profile?.role === 'employee';
   const [sheet, setSheet] = useState<SheetId>('s1');
+  const scheduleSheetLabel = isEmployee ? 'SHEET A-3' : 'SHEET A-4';
 
   if (loading) {
     return (
@@ -98,6 +100,13 @@ function StaffShell() {
             <span className="num">SHEET A-3</span>Financial &amp; A/R
           </button>
         ) : null}
+        <button
+          type="button"
+          className={sheet === 's4' ? 'active' : ''}
+          onClick={() => setSheet('s4')}
+        >
+          <span className="num">{scheduleSheetLabel}</span>Project Schedule
+        </button>
       </nav>
 
       <main>
@@ -108,6 +117,7 @@ function StaffShell() {
           <WorkloadPerformance data={data} lockedEmployee={lockedEmployee} />
         ) : null}
         {sheet === 's3' && !isEmployee ? <FinancialAR data={data} /> : null}
+        {sheet === 's4' ? <ProjectSchedule mode="staff" /> : null}
       </main>
 
       <footer>

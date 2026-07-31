@@ -13,9 +13,9 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 
 | Role | Access |
 |------|--------|
-| **Admin** | Full Practice Analytics (all three sheets) |
-| **Employee** | Own assigned projects + own workload (no firm A/R) |
-| **Customer** | Client status tracker for their projects only |
+| **Admin** | Full Practice Analytics (Project Analysis, Workload, Financial A/R, Project Schedule) |
+| **Employee** | Own assigned projects + workload + Project Schedule (no firm A/R) |
+| **Customer** | Client status tracker + Project Schedule (Client’s Comments editable only) |
 
 ### Demo accounts
 
@@ -66,8 +66,8 @@ npm run dev:api
 
 ## Manual test plan
 
-- Sign in as admin → all three sheets
-- Sign in as employee → only own projects / workload; no A/R sheet
-- Sign in as customer → status tracker for Elena Vargas (single project, no billing figures)
+- Sign in as admin → sheets A-1–A-4 including Project Schedule (editable)
+- Sign in as employee → A-1, A-2, A-3 Project Schedule for Avery projects; no A/R
+- Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable
 - Signed-out users cannot read `pa_*` tables
 - Q&A requires auth; customers blocked from Ask This Sheet

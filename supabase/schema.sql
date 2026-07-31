@@ -151,3 +151,37 @@ grant usage on all sequences in schema public to anon, authenticated;
 -- Auth profiles + role RLS (applied via migration pa_auth_profiles_and_rls)
 -- See pa_profiles, pa_profile_role(), and per-table authenticated SELECT policies.
 -- Anon SELECT is revoked; clients must sign in.
+
+-- Project schedules (applied via migration; RLS by role)
+create table if not exists public.pa_schedules (
+  id uuid primary key default gen_random_uuid(),
+  project_key text not null unique,
+  client_name text,
+  title text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.pa_schedule_rows (
+  id uuid primary key default gen_random_uuid(),
+  schedule_id uuid not null references public.pa_schedules(id) on delete cascade,
+  sort_order int not null default 0,
+  row_kind text not null check (row_kind in ('phase', 'task', 'subtask')),
+  task text not null default '',
+  budget_remaining text not null default '',
+  target_start text not null default '',
+  target_end text not null default '',
+  actual_start text not null default '',
+  actual_end text not null default '',
+  action text not null default '',
+  estimate_time text not null default '',
+  mdesigns_comments text not null default '',
+  client_comments text not null default '',
+  updated_at timestamptz default now()
+);
+
+create index if not exists pa_schedule_rows_schedule_idx
+  on public.pa_schedule_rows (schedule_id, sort_order);
+
+-- Staff (admin / assigned employee) may write schedules.
+-- Customers may UPDATE client_comments only (enforced by pa_schedule_rows_guard trigger).

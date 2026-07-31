@@ -121,4 +121,4 @@ export type DashboardData = {
   invoice_ledger: InvoiceRow[];
 };
 
-export type SheetId = 's1' | 's2' | 's3';
+export type SheetId = 's1' | 's2' | 's3' | 's4';

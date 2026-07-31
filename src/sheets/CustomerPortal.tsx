@@ -1,32 +1,13 @@
 import { useMemo } from 'react';
 import type { DashboardData, ProjectRow } from '../lib/types';
 import type { Profile } from '../lib/authTypes';
-
-const PHASE_STEPS = [
-  'Pre-Design',
-  'Schematic Design',
-  'Design Development',
-  'Construction Documents',
-  'Permitting',
-  'Construction Support',
-];
+import { processPhaseLabel } from '../lib/architecturalProcess';
+import { ProcessProgress } from '../components/ProcessProgress';
+import { ProjectSchedule } from './ProjectSchedule';
 
 function StatusBadge({ status }: { status: string | null }) {
   const s = (status || 'unknown').toLowerCase();
   return <span className={`badge ${s}`}>{status || '—'}</span>;
-}
-
-function normalizePhase(phase: string | null) {
-  if (!phase) return null;
-  const p = phase.trim().toLowerCase();
-  const hit = PHASE_STEPS.find((step) => p.includes(step.toLowerCase()));
-  return hit || phase;
-}
-
-function phaseIndex(phase: string | null) {
-  const n = normalizePhase(phase);
-  if (!n) return -1;
-  return PHASE_STEPS.findIndex((step) => step.toLowerCase() === n.toLowerCase());
 }
 
 function pickProject(projects: ProjectRow[]) {
@@ -38,8 +19,7 @@ function pickProject(projects: ProjectRow[]) {
 
 export function CustomerPortal({ data, profile }: { data: DashboardData; profile: Profile }) {
   const project = useMemo(() => pickProject(data.projects), [data.projects]);
-  const currentPhase = normalizePhase(project?.phase || null);
-  const currentIdx = phaseIndex(project?.phase || null);
+  const currentPhase = processPhaseLabel(project?.phase || null);
 
   if (!project) {
     return (
@@ -61,8 +41,8 @@ export function CustomerPortal({ data, profile }: { data: DashboardData; profile
           <p className="customer-kicker">Client portal</p>
           <h1 className="display">{profile.client_name || profile.display_name}</h1>
           <p className="customer-lede">
-            A live status view of your project with M. Designs — where things stand and who to
-            contact.
+            Follow where your project sits in M. Designs’ architectural process — what we’re doing
+            now, and what we need from you.
           </p>
         </div>
         <div className="customer-summary single">
@@ -75,7 +55,7 @@ export function CustomerPortal({ data, profile }: { data: DashboardData; profile
           <div>
             <span className="k">Current phase</span>
             <span className="v" style={{ fontSize: 16 }}>
-              {currentPhase || '—'}
+              {currentPhase}
             </span>
           </div>
         </div>
@@ -90,7 +70,7 @@ export function CustomerPortal({ data, profile }: { data: DashboardData; profile
         <div className="customer-detail-grid">
           <div>
             <span className="k">Phase</span>
-            <span className="v">{currentPhase || '—'}</span>
+            <span className="v">{currentPhase}</span>
           </div>
           <div>
             <span className="k">Status</span>
@@ -108,30 +88,25 @@ export function CustomerPortal({ data, profile }: { data: DashboardData; profile
           </div>
         </div>
 
-        <div className="customer-phase-track">
-          <div className="customer-progress-label">
-            <span>Design & delivery progress</span>
-            <span className="mono">
-              {currentIdx >= 0 ? `Step ${currentIdx + 1} of ${PHASE_STEPS.length}` : 'In progress'}
-            </span>
-          </div>
-          <ol className="phase-steps">
-            {PHASE_STEPS.map((step, i) => {
-              const state =
-                currentIdx < 0 ? 'upcoming' : i < currentIdx ? 'done' : i === currentIdx ? 'current' : 'upcoming';
-              return (
-                <li key={step} className={`phase-step ${state}`}>
-                  <span className="phase-dot" aria-hidden="true" />
-                  <span className="phase-label">{step}</span>
-                </li>
-              );
-            })}
-          </ol>
-          <p className="customer-note">
-            This tracker shows project status only. For schedule questions or deliverable reviews,
-            reach out to your project manager{project.manager ? ` (${project.manager})` : ''}.
-          </p>
-        </div>
+        <ProcessProgress projectPhase={project.phase} />
+
+        <p className="customer-note">
+          Open a process phase for architect/client subtasks, or expand a schedule section below to
+          review tasks and leave comments for
+          {project.manager ? ` ${project.manager}` : ' your project manager'}.
+        </p>
+      </div>
+
+      <div className="panel customer-schedule">
+        <h3>
+          Project schedule <span className="tag">editable comments</span>
+        </h3>
+        <ProjectSchedule
+          mode="customer"
+          preferredProjectKey={project.project}
+          highlightPhase={project.phase}
+          embedded
+        />
       </div>
     </main>
   );

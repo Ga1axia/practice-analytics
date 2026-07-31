@@ -1,22 +1,41 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-type SheetId = 's1' | 's2' | 's3';
+type SheetId = 's1' | 's2' | 's3' | 's4';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, 'public', any>;
 
-function findEntity(text: string, names: (string | null | undefined)[]) {
-  const t = text.toLowerCase();
-  let best: string | null = null;
-  names.forEach((name) => {
-    if (!name) return;
-    const n = String(name).toLowerCase();
-    if (n.length >= 3 && t.includes(n)) {
-      if (!best || n.length > best.length) best = name;
-    }
-  });
-  return best;
-}
+type ProjectRow = {
+  project: string;
+  client: string | null;
+  manager: string | null;
+  status: string | null;
+  type: string | null;
+  phase: string | null;
+  city: string | null;
+  contract: number | null;
+  spent: number | null;
+  billed: number | null;
+  ar: number | null;
+  profit: number | null;
+  margin: number | null;
+  retainer_balance: number | null;
+  pct_used: number | null;
+  pct_billed: number | null;
+};
+
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'what', 'which', 'how', 'many', 'much', 'who', 'whose',
+  'is', 'are', 'was', 'were', 'of', 'to', 'a', 'an', 'in', 'on', 'at', 'by',
+  'with', 'from', 'total', 'amount', 'value', 'number', 'count', 'highest',
+  'lowest', 'most', 'least', 'active', 'completed', 'project', 'projects',
+  'client', 'clients', 'manager', 'managers', 'employee', 'employees', 'team',
+  'billed', 'billing', 'contract', 'contracts', 'profit', 'margin', 'owed',
+  'overdue', 'aging', 'receivable', 'efficiency', 'hours', 'month', 'monthly',
+  'year', 'there', 'their', 'this', 'that', 'have', 'has', 'been', 'about',
+  'show', 'give', 'tell', 'please', 'sheet', 'firm', 'practice', 'design',
+  'designs', 'architect', 'architects',
+]);
 
 function stubMessage(examples: string[]) {
   return (
@@ -26,14 +45,167 @@ function stubMessage(examples: string[]) {
   );
 }
 
+function tokensOf(text: string) {
+  return String(text)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+}
+
+/** Score how well a catalog name appears in the question (full match or distinctive tokens). */
+function nameScore(question: string, name: string | null | undefined): number {
+  if (!name) return 0;
+  const q = question.toLowerCase();
+  const n = String(name).toLowerCase().trim();
+  if (n.length < 3) return 0;
+  if (q.includes(n)) return 1000 + n.length;
+
+  const nameTokens = tokensOf(n);
+  if (!nameTokens.length) return 0;
+  let hit = 0;
+  let hitLen = 0;
+  for (const t of nameTokens) {
+    // word-boundary-ish check so "ann" doesn't match inside "planning"
+    const re = new RegExp(`(^|[^a-z0-9])${t}([^a-z0-9]|$)`);
+    if (re.test(q)) {
+      hit += 1;
+      hitLen += t.length;
+    }
+  }
+  if (!hit) return 0;
+  // Prefer multi-token hits; allow a single strong token (e.g. Vargas, Balakrishnan)
+  if (hit === 1 && hitLen < 5 && nameTokens.length > 1) return 0;
+  return hit * 50 + hitLen + (hit === nameTokens.length ? 100 : 0);
+}
+
+function findEntities(question: string, names: (string | null | undefined)[], limit = 5): string[] {
+  const uniq = [...new Set(names.filter((n): n is string => !!n && n.trim().length >= 3))];
+  const scored = uniq
+    .map((name) => ({ name, score: nameScore(question, name) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || b.name.length - a.name.length);
+  if (!scored.length) return [];
+  const top = scored[0].score;
+  return scored.filter((x) => x.score >= top * 0.6 || x.score >= 1000).slice(0, limit).map((x) => x.name);
+}
+
+async function fetchAll<T>(supabase: Db, table: string, pageSize = 1000): Promise<T[]> {
+  const out: T[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase.from(table).select('*').range(from, from + pageSize - 1);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    const chunk = (data || []) as T[];
+    out.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return out;
+}
+
 async function loadMeta(supabase: Db) {
-  const { data, error } = await supabase.from('pa_meta').select('key,value');
-  if (error) throw error;
+  const rows = await fetchAll<{ key: string; value: unknown }>(supabase, 'pa_meta');
   const meta: Record<string, unknown> = {};
-  (data || []).forEach((r: { key: string; value: unknown }) => {
+  rows.forEach((r) => {
     meta[r.key] = r.value;
   });
   return meta;
+}
+
+function sumField(rows: ProjectRow[], key: keyof ProjectRow) {
+  return rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
+}
+
+function kpiFromProjects(rows: ProjectRow[]) {
+  return {
+    contract_amount: sumField(rows, 'contract'),
+    spent: sumField(rows, 'spent'),
+    billed: sumField(rows, 'billed'),
+    receivable: sumField(rows, 'ar'),
+    retainer_balance: sumField(rows, 'retainer_balance'),
+    profit: sumField(rows, 'profit'),
+    project_count: rows.length,
+  };
+}
+
+function topClientsByBilled(rows: ProjectRow[], n = 15) {
+  const map = new Map<
+    string,
+    { client: string; billed: number; contract: number; profit: number; ar: number; projects: number }
+  >();
+  for (const p of rows) {
+    const client = p.client || 'Unknown';
+    const cur = map.get(client) || {
+      client,
+      billed: 0,
+      contract: 0,
+      profit: 0,
+      ar: 0,
+      projects: 0,
+    };
+    cur.billed += p.billed || 0;
+    cur.contract += p.contract || 0;
+    cur.profit += p.profit || 0;
+    cur.ar += p.ar || 0;
+    cur.projects += 1;
+    map.set(client, cur);
+  }
+  return [...map.values()].sort((a, b) => b.billed - a.billed).slice(0, n);
+}
+
+function topManagersByContract(rows: ProjectRow[], n = 15) {
+  const map = new Map<
+    string,
+    { manager: string; contract: number; billed: number; profit: number; projects: number }
+  >();
+  for (const p of rows) {
+    const manager = p.manager || 'Unknown';
+    const cur = map.get(manager) || {
+      manager,
+      contract: 0,
+      billed: 0,
+      profit: 0,
+      projects: 0,
+    };
+    cur.contract += p.contract || 0;
+    cur.billed += p.billed || 0;
+    cur.profit += p.profit || 0;
+    cur.projects += 1;
+    map.set(manager, cur);
+  }
+  return [...map.values()].sort((a, b) => b.contract - a.contract).slice(0, n);
+}
+
+function contractByPhase(rows: ProjectRow[]) {
+  const map = new Map<string, { phase: string; contract: number; billed: number; projects: number }>();
+  for (const p of rows) {
+    const phase = p.phase || 'Unknown';
+    const cur = map.get(phase) || { phase, contract: 0, billed: 0, projects: 0 };
+    cur.contract += p.contract || 0;
+    cur.billed += p.billed || 0;
+    cur.projects += 1;
+    map.set(phase, cur);
+  }
+  return [...map.values()].sort((a, b) => b.contract - a.contract);
+}
+
+function applyProjectFilters(rows: ProjectRow[], filters: Record<string, string>) {
+  let out = rows;
+  const status = filters.status;
+  if (status && status !== 'All') out = out.filter((p) => p.status === status);
+  const manager = filters.employee_filter || filters.manager;
+  if (manager && manager !== 'All') out = out.filter((p) => p.manager === manager);
+  const type = filters.contract_type || filters.type;
+  if (type && type !== 'All') out = out.filter((p) => p.type === type);
+  return out;
+}
+
+function rowsForEntities(rows: ProjectRow[], entities: string[]) {
+  if (!entities.length) return [];
+  const set = new Set(entities);
+  return rows.filter(
+    (p) => set.has(p.project) || (p.client && set.has(p.client)) || (p.manager && set.has(p.manager)),
+  );
 }
 
 async function buildContext(
@@ -45,75 +217,104 @@ async function buildContext(
   const meta = await loadMeta(supabase);
 
   if (sheet === 's1') {
-    const { data: projects } = await supabase.from('pa_projects').select('*').limit(5000);
-    const rows = projects || [];
-    const clients = [...new Set(rows.map((p: { client: string }) => p.client))];
-    const managers = (meta.managers as string[]) || [];
-    const entity = findEntity(question, [
-      ...rows.map((p: { project: string }) => p.project),
+    const projects = await fetchAll<ProjectRow>(supabase, 'pa_projects');
+    const filtered = applyProjectFilters(projects, filters);
+    const clients = [...new Set(projects.map((p) => p.client).filter(Boolean))] as string[];
+    const managers =
+      (meta.managers as string[]) ||
+      ([...new Set(projects.map((p) => p.manager).filter(Boolean))] as string[]);
+    const entities = findEntities(question, [
+      ...projects.map((p) => p.project),
       ...clients,
       ...managers,
     ]);
+    const matchedRows = rowsForEntities(projects, entities);
     const ctx: Record<string, unknown> = {
-      firmwide_totals_all_projects: meta.kpi_all,
-      firmwide_totals_active_only: meta.kpi_active,
+      row_counts: {
+        projects_visible_via_rls: projects.length,
+        projects_after_dashboard_filters: filtered.length,
+      },
+      firmwide_totals_from_live_rows: kpiFromProjects(projects),
+      filtered_view_totals: kpiFromProjects(filtered),
+      firmwide_totals_meta_all_projects: meta.kpi_all,
+      firmwide_totals_meta_active_only: meta.kpi_active,
+      active_project_count_live: projects.filter((p) => p.status === 'ACTIVE').length,
       status_options: meta.statuses,
       contract_types: meta.contract_types,
-      top_15_clients_by_billed: meta.top_clients,
-      contract_value_by_phase: meta.phase_analysis,
-      top_managers_by_contract_value: meta.manager_perf,
+      top_15_clients_by_billed_live: topClientsByBilled(projects),
+      top_15_clients_by_billed_meta: meta.top_clients,
+      contract_value_by_phase_live: contractByPhase(projects),
+      contract_value_by_phase_meta: meta.phase_analysis,
+      top_managers_by_contract_value_live: topManagersByContract(projects),
+      top_managers_by_contract_value_meta: meta.manager_perf,
       currently_active_dashboard_filters: filters,
+      matched_entities_from_question: entities,
     };
-    if (entity) {
-      ctx.matched_entity_from_question = entity;
-      ctx.matching_project_rows = rows.filter(
-        (p: { project: string; client: string; manager: string }) =>
-          p.project === entity || p.client === entity || p.manager === entity,
-      );
+    if (matchedRows.length) {
+      ctx.matching_project_rows = matchedRows.slice(0, 80);
+      ctx.matching_project_totals = kpiFromProjects(matchedRows);
+      if (matchedRows.length > 80) {
+        ctx.matching_project_rows_truncated = true;
+        ctx.matching_project_row_count = matchedRows.length;
+      }
     } else {
       ctx.note =
-        "No specific project/client/manager name was detected — only firm-wide aggregates are included. If needed, ask again with the entity name.";
+        'No specific project/client/manager name was detected — use the live ranking tables and totals above. Ask again with a name for row-level detail.';
     }
-    return { ctx, sheetLabel: 'Project Analysis', examples: [
-      'How much has been billed to [client]?',
-      'What is the contract for [project]?',
-    ]};
+    return {
+      ctx,
+      sheetLabel: 'Project Analysis',
+      examples: [
+        'How much has been billed to [client]?',
+        'What is the contract for [project]?',
+      ],
+    };
   }
 
   if (sheet === 's2') {
-    const [{ data: totals }, { data: roster }, { data: monthly }, { data: company }] =
-      await Promise.all([
-        supabase.from('pa_employee_totals').select('*'),
-        supabase.from('pa_employee_roster').select('*'),
-        supabase.from('pa_employee_monthly').select('*').limit(2000),
-        supabase.from('pa_company_monthly').select('*'),
-      ]);
+    const [totals, roster, monthly, company] = await Promise.all([
+      fetchAll<{ employee: string; bill_hours: number; efficiency: number }>(
+        supabase,
+        'pa_employee_totals',
+      ),
+      fetchAll<{ team: string; employee: string }>(supabase, 'pa_employee_roster'),
+      fetchAll<{ employee: string; month: string }>(supabase, 'pa_employee_monthly'),
+      fetchAll(supabase, 'pa_company_monthly'),
+    ]);
     const employee_roster: Record<string, string[]> = {};
-    (roster || []).forEach((r: { team: string; employee: string }) => {
+    roster.forEach((r) => {
       if (!employee_roster[r.team]) employee_roster[r.team] = [];
       employee_roster[r.team].push(r.employee);
     });
     const allEmployees = Object.values(employee_roster).flat();
-    const emp = findEntity(question, allEmployees);
-    const team = Object.keys(employee_roster).find((t) =>
-      question.toLowerCase().includes(t.toLowerCase()),
-    );
+    const empEntities = findEntities(question, allEmployees, 3);
+    const team =
+      Object.keys(employee_roster).find((t) => nameScore(question, t) > 0) ||
+      null;
     const ctx: Record<string, unknown> = {
       employee_roster_by_team: employee_roster,
       all_time_totals_per_employee: totals,
       firmwide_monthly_hours: company,
       emp_top_projects: meta.emp_top_projects,
+      top_employees_by_efficiency: [...totals]
+        .sort((a, b) => (b.efficiency || 0) - (a.efficiency || 0))
+        .slice(0, 15),
       note_on_efficiency:
         'efficiency = billable hours / standard hours, where standard hours = (business days × 8) − PTO',
       currently_selected: filters,
+      matched_employees_from_question: empEntities,
     };
-    if (emp) {
-      ctx.matched_employee = emp;
-      ctx.matched_employee_monthly_detail = (monthly || []).filter(
-        (m: { employee: string }) => m.employee === emp,
+    if (empEntities.length) {
+      ctx.matched_employee_monthly_detail = monthly.filter((m) =>
+        empEntities.includes(m.employee),
       );
-      ctx.matched_employee_top_projects =
-        ((meta.emp_top_projects as Record<string, unknown>) || {})[emp] || [];
+      ctx.matched_employee_top_projects = Object.fromEntries(
+        empEntities.map((e) => [
+          e,
+          ((meta.emp_top_projects as Record<string, unknown>) || {})[e] || [],
+        ]),
+      );
+      ctx.matched_employee_totals = totals.filter((t) => empEntities.includes(t.employee));
     }
     if (team) ctx.matched_team = team;
     return {
@@ -123,22 +324,88 @@ async function buildContext(
     };
   }
 
-  // s3
-  const [{ data: arClients }, { data: revenue }] = await Promise.all([
-    supabase.from('pa_ar_clients').select('*'),
-    supabase.from('pa_monthly_revenue').select('*').order('month'),
+  if (sheet === 's4') {
+    const schedules = await fetchAll<{
+      id: string;
+      project_key: string;
+      client_name: string | null;
+      title: string | null;
+    }>(supabase, 'pa_schedules');
+    const entities = findEntities(question, [
+      ...schedules.map((s) => s.project_key),
+      ...schedules.map((s) => s.client_name),
+    ]);
+    const schedule =
+      schedules.find(
+        (s) =>
+          entities.includes(s.project_key) ||
+          (s.client_name ? entities.includes(s.client_name) : false),
+      ) ||
+      schedules[0] ||
+      null;
+
+    let scheduleRows: unknown[] = [];
+    if (schedule) {
+      const { data, error } = await supabase
+        .from('pa_schedule_rows')
+        .select(
+          'row_kind,task,budget_remaining,target_start,target_end,actual_start,actual_end,action,estimate_time,mdesigns_comments,client_comments,sort_order',
+        )
+        .eq('schedule_id', schedule.id)
+        .order('sort_order');
+      if (error) throw new Error(`pa_schedule_rows: ${error.message}`);
+      scheduleRows = data || [];
+    }
+
+    const ctx: Record<string, unknown> = {
+      available_schedules: schedules,
+      selected_schedule: schedule,
+      matched_entities_from_question: entities,
+      schedule_rows: scheduleRows,
+    };
+    return {
+      ctx,
+      sheetLabel: 'Project Schedule',
+      examples: ['What phase is active?', 'Which tasks are still open?'],
+    };
+  }
+
+  // s3 Financial & A/R
+  const [arClients, revenue] = await Promise.all([
+    fetchAll<{
+      client: string;
+      balance: number;
+      d0_30: number;
+      d31_60: number;
+      d61_90: number;
+      d91_plus: number;
+      credit: number;
+    }>(supabase, 'pa_ar_clients'),
+    fetchAll(supabase, 'pa_monthly_revenue'),
   ]);
-  const client = findEntity(
+  const clientEntities = findEntities(
     question,
-    (arClients || []).map((c: { client: string }) => c.client),
+    arClients.map((c) => c.client),
   );
   const ctx: Record<string, unknown> = {
-    aging_totals_firmwide: meta.ar_totals,
+    aging_totals_firmwide_meta: meta.ar_totals,
+    aging_totals_live: {
+      balance: arClients.reduce((a, c) => a + (c.balance || 0), 0),
+      d0_30: arClients.reduce((a, c) => a + (c.d0_30 || 0), 0),
+      d31_60: arClients.reduce((a, c) => a + (c.d31_60 || 0), 0),
+      d61_90: arClients.reduce((a, c) => a + (c.d61_90 || 0), 0),
+      d91_plus: arClients.reduce((a, c) => a + (c.d91_plus || 0), 0),
+      credit: arClients.reduce((a, c) => a + (c.credit || 0), 0),
+    },
+    top_clients_by_ar_balance: [...arClients].sort((a, b) => b.balance - a.balance).slice(0, 20),
     aging_by_client: arClients,
     monthly_billed_vs_collected: revenue,
     currently_active_view: filters,
+    matched_clients_from_question: clientEntities,
   };
-  if (client) ctx.matched_client = client;
+  if (clientEntities.length) {
+    ctx.matched_client_rows = arClients.filter((c) => clientEntities.includes(c.client));
+  }
   return {
     ctx,
     sheetLabel: 'Financial & A/R',
@@ -184,9 +451,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const anon =
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY;
+  const anon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !anon) {
     res.status(200).json({
       stub: true,
@@ -238,7 +503,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     );
 
-    const prompt = `You are a financial/operations analyst embedded inside an interactive practice-management dashboard for M. Designs Architects, an architecture firm. You are answering a question about the "${sheetLabel}" sheet. Use ONLY the JSON data provided below — it is a real slice of the firm's underlying Ajera/BQE export data that powers this dashboard. Do not invent figures that aren't derivable from this data. If the provided data doesn't contain enough detail to fully answer, say what you can determine and briefly note what's missing rather than guessing. Answer in 1-4 concise sentences. Format dollar amounts with $ and commas, percentages with %, and bold key figures using **double asterisks**.
+    const prompt = `You are a financial/operations analyst embedded inside an interactive practice-management dashboard for M. Designs Architects, an architecture firm. You are answering a question about the "${sheetLabel}" sheet. Use ONLY the JSON data provided below — it is loaded live from the firm's Supabase tables (Ajera/BQE exports) under this user's permissions. Prefer *_live fields over *_meta when both exist. Do not invent figures that aren't derivable from this data. If the provided data doesn't contain enough detail to fully answer, say what you can determine and briefly note what's missing rather than guessing. Answer in 1-4 concise sentences. Format dollar amounts with $ and commas, percentages with %, and bold key figures using **double asterisks**.
 
 DATA:
 ${JSON.stringify(ctx)}

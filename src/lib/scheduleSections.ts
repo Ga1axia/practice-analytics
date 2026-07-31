@@ -1,0 +1,99 @@
+import type { ScheduleRow } from './scheduleTypes';
+
+export type ScheduleSection = {
+  id: string;
+  title: string;
+  phaseRow: ScheduleRow | null;
+  items: ScheduleRow[];
+};
+
+/** Group flat schedule rows into phase sections (plus a kickoff block before the first phase). */
+export function groupScheduleSections(rows: ScheduleRow[]): ScheduleSection[] {
+  const sections: ScheduleSection[] = [];
+  let current: ScheduleSection = {
+    id: 'kickoff',
+    title: 'Project kickoff',
+    phaseRow: null,
+    items: [],
+  };
+
+  for (const row of rows) {
+    if (row.row_kind === 'phase') {
+      if (current.items.length > 0 || current.phaseRow) {
+        sections.push(current);
+      } else if (sections.length === 0 && current.items.length === 0) {
+        // drop empty kickoff if first row is a phase
+      }
+      current = {
+        id: row.id,
+        title: row.task || 'Untitled phase',
+        phaseRow: row,
+        items: [],
+      };
+      continue;
+    }
+    current.items.push(row);
+  }
+
+  if (current.phaseRow || current.items.length) {
+    sections.push(current);
+  }
+
+  return sections;
+}
+
+export function sectionStatus(section: ScheduleSection): string {
+  const fromPhase = (section.phaseRow?.budget_remaining || '').trim();
+  if (fromPhase) return fromPhase;
+
+  const statuses = section.items
+    .map((r) => r.budget_remaining.trim())
+    .filter(Boolean);
+  if (!statuses.length) return '';
+  if (statuses.some((s) => /active/i.test(s) && !/not\s*active/i.test(s))) return 'Active';
+  if (statuses.every((s) => /completed|n\/a/i.test(s))) return 'Completed';
+  return '';
+}
+
+export type StatusTone = 'done' | 'active' | 'idle' | 'na' | 'date' | 'muted';
+
+export function statusTone(value: string): StatusTone {
+  const v = value.trim().toLowerCase();
+  if (!v) return 'muted';
+  if (v === 'completed' || v === 'done') return 'done';
+  if (v === 'n/a' || v.includes('not applicable')) return 'na';
+  if (v.includes('not active')) return 'idle';
+  if (v === 'active' || (v.includes('active') && !v.includes('not'))) return 'active';
+  if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v) || v === 'tbd') return 'date';
+  return 'muted';
+}
+
+export function sectionProgress(section: ScheduleSection) {
+  const countable = section.items.filter((r) => {
+    const t = statusTone(r.budget_remaining);
+    return t === 'done' || t === 'active' || t === 'idle' || t === 'date' || t === 'na';
+  });
+  const done = countable.filter((r) => {
+    const t = statusTone(r.budget_remaining);
+    return t === 'done' || t === 'na';
+  }).length;
+  return { done, total: countable.length || section.items.length };
+}
+
+export function defaultExpandedSectionIds(
+  sections: ScheduleSection[],
+  highlightPhase?: string | null,
+): string[] {
+  if (!sections.length) return [];
+  const needle = (highlightPhase || '').trim().toLowerCase();
+  if (needle) {
+    const hit = sections.find((s) => {
+      const title = s.title.toLowerCase();
+      return title.includes(needle) || needle.includes(title) || title.includes(needle.split(' ')[0] || '');
+    });
+    if (hit) return [hit.id];
+  }
+  const active = sections.find((s) => /active/i.test(sectionStatus(s)) && !/not\s*active/i.test(sectionStatus(s)));
+  if (active) return [active.id];
+  return [];
+}

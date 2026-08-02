@@ -19,7 +19,13 @@ create table if not exists public.pa_projects (
   retainer_balance double precision default 0,
   ar double precision default 0,
   profit double precision default 0,
-  margin double precision
+  margin double precision,
+  row_kind text not null default 'phase' check (row_kind in ('project', 'phase')),
+  parent_project text,
+  billed_hours double precision default 0,
+  spent_hours double precision default 0,
+  contract_outstanding double precision default 0,
+  sort_order int not null default 0
 );
 
 create table if not exists public.pa_employee_monthly (
@@ -185,3 +191,6 @@ create index if not exists pa_schedule_rows_schedule_idx
 
 -- Staff (admin / assigned employee) may write schedules.
 -- Customers may UPDATE client_comments only (enforced by pa_schedule_rows_guard trigger).
+
+-- Project List upload (admin): pa_replace_project_list(jsonb)
+-- Admin INSERT/UPDATE/DELETE policies on pa_projects (see migration pa_projects_upload_hierarchy).

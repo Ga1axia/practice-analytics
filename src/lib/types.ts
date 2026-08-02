@@ -9,6 +9,8 @@ export type KpiSnapshot = {
   project_count: number;
 };
 
+export type ProjectRowKind = 'project' | 'phase';
+
 export type ProjectRow = {
   project: string;
   client: string | null;
@@ -27,6 +29,13 @@ export type ProjectRow = {
   ar: number;
   profit: number;
   margin: number | null;
+  /** Explicit hierarchy from Project List upload (optional on older rows). */
+  row_kind?: ProjectRowKind | null;
+  parent_project?: string | null;
+  billed_hours?: number | null;
+  spent_hours?: number | null;
+  contract_outstanding?: number | null;
+  sort_order?: number | null;
 };
 
 export type EmpMonthly = {
@@ -121,4 +130,4 @@ export type DashboardData = {
   invoice_ledger: InvoiceRow[];
 };
 
-export type SheetId = 's1' | 's2' | 's3' | 's4';
+export type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5';

@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-type SheetId = 's1' | 's2' | 's3' | 's4';
+type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, 'public', any>;
 
@@ -216,7 +216,7 @@ async function buildContext(
 ) {
   const meta = await loadMeta(supabase);
 
-  if (sheet === 's1') {
+  if (sheet === 's1' || sheet === 'exec' || sheet === 'main' || sheet === 's5') {
     const projects = await fetchAll<ProjectRow>(supabase, 'pa_projects');
     const filtered = applyProjectFilters(projects, filters);
     const clients = [...new Set(projects.map((p) => p.client).filter(Boolean))] as string[];
@@ -261,9 +261,17 @@ async function buildContext(
       ctx.note =
         'No specific project/client/manager name was detected — use the live ranking tables and totals above. Ask again with a name for row-level detail.';
     }
+    const label =
+      sheet === 'exec'
+        ? 'Executive'
+        : sheet === 'main'
+          ? 'Main Report'
+          : sheet === 's5'
+            ? 'Project List'
+            : 'Project Analysis';
     return {
       ctx,
-      sheetLabel: 'Project Analysis',
+      sheetLabel: label,
       examples: [
         'How much has been billed to [client]?',
         'What is the contract for [project]?',

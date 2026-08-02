@@ -57,6 +57,7 @@ export function DoughnutChart({
         ],
       }}
       options={{
+        maintainAspectRatio: false,
         cutout: '68%',
         plugins: {
           legend: {
@@ -87,6 +88,7 @@ export function HBarChart({
         datasets: [{ data: values, backgroundColor: color, borderRadius: 2 }],
       }}
       options={{
+        maintainAspectRatio: false,
         indexAxis: 'y',
         plugins: {
           legend: { display: false },
@@ -229,6 +231,86 @@ export function HoursHBar({ labels, values }: { labels: string[]; values: number
         scales: {
           x: { grid: { color: '#E4E8EE' } },
           y: { ticks: { font: { size: 10.5 } }, grid: { display: false } },
+        },
+      }}
+    />
+  );
+}
+
+/** Ring gauge with center percentage label (Power BI style). */
+export function GaugeRing({
+  pct,
+  color,
+  track = '#E4E8EE',
+}: {
+  pct: number;
+  color: string;
+  track?: string;
+}) {
+  const clamped = Math.max(0, Math.min(pct, 1.5));
+  const filled = Math.min(clamped, 1);
+  const rest = 1 - filled;
+  const label = Math.round(pct * 100) + '%';
+  return (
+    <div className="gauge-ring">
+      <Chart
+        type="doughnut"
+        data={{
+          labels: ['Value', 'Rest'],
+          datasets: [
+            {
+              data: [filled, rest],
+              backgroundColor: [color, track],
+              borderWidth: 0,
+            },
+          ],
+        }}
+        options={{
+          maintainAspectRatio: false,
+          cutout: '72%',
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          events: [],
+        }}
+      />
+      <div className="gauge-ring-center mono">{label}</div>
+    </div>
+  );
+}
+
+export function VBarChart({
+  labels,
+  datasets,
+}: {
+  labels: string[];
+  datasets: { label: string; values: number[]; color: string }[];
+}) {
+  return (
+    <Chart
+      type="bar"
+      data={{
+        labels,
+        datasets: datasets.map((d) => ({
+          label: d.label,
+          data: d.values,
+          backgroundColor: d.color,
+          borderRadius: 2,
+        })),
+      }}
+      options={{
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { family: 'IBM Plex Mono', size: 10 }, boxWidth: 10 },
+          },
+          tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmtUSD(Number(c.raw)) } },
+        },
+        scales: {
+          x: { ticks: { font: { family: 'IBM Plex Mono', size: 10 } } },
+          y: {
+            ticks: { callback: (v) => fmtUSDk(Number(v)), font: { family: 'IBM Plex Mono', size: 10 } },
+            grid: { color: '#E4E8EE' },
+          },
         },
       }}
     />

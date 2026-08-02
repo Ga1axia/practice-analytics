@@ -3,6 +3,7 @@ import { DoughnutChart, HBarChart } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { QAPanel } from '../components/QAPanel';
 import { fmtPct, fmtUSD, monthLabel, palette } from '../lib/format';
+import { sumAmountReceivable } from '../lib/receivable';
 import type { DashboardData, ProjectRow } from '../lib/types';
 
 const PAGE_SIZE = 25;
@@ -95,6 +96,7 @@ export function ProjectAnalysis({
   const profit = sum(filtered, 'profit');
   const profitPos = Math.max(profit, 0);
   const costBasis = Math.max(sum(filtered, 'billed') - profitPos, 0);
+  const receivable = sumAmountReceivable(filtered, data.ar_clients).amount;
 
   const clientTop = topEntries(
     groupSum(filtered, (r) => r.client, (r) => getBilled(r)),
@@ -138,7 +140,7 @@ export function ProjectAnalysis({
           <span className="f-label" style={{ marginLeft: 4 }}>
             Employee: {lockedEmployee}
           </span>
-        ) : (
+        ) : Object.keys(data.employee_roster).length > 0 ? (
           <select
             value={manager}
             onChange={(e) => {
@@ -158,35 +160,54 @@ export function ProjectAnalysis({
               </optgroup>
             ))}
           </select>
+        ) : (
+          <select
+            value={manager}
+            onChange={(e) => {
+              setManager(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">Manager: All</option>
+            {data.managers.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
         )}
-        <select
-          value={type}
-          onChange={(e) => {
-            setType(e.target.value);
-            setPage(0);
-          }}
-        >
-          <option value="">Contract Type: All</option>
-          {data.contract_types.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <select
-          value={month}
-          onChange={(e) => {
-            setMonth(e.target.value);
-            setPage(0);
-          }}
-        >
-          <option value="">Period: All</option>
-          {[...data.billing_months].reverse().map((m) => (
-            <option key={m} value={m}>
-              {monthLabel(m)}
-            </option>
-          ))}
-        </select>
+        {data.contract_types.length > 0 ? (
+          <select
+            value={type}
+            onChange={(e) => {
+              setType(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">Contract Type: All</option>
+            {data.contract_types.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {data.billing_months.length > 0 ? (
+          <select
+            value={month}
+            onChange={(e) => {
+              setMonth(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">Period: All</option>
+            {[...data.billing_months].reverse().map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <input
           type="text"
           value={search}
@@ -221,7 +242,7 @@ export function ProjectAnalysis({
             v: fmtUSD(billedTotal),
             cls: 'accent-gold',
           },
-          { k: 'Amount Receivable', v: fmtUSD(sum(filtered, 'ar')), cls: 'accent-rust' },
+          { k: 'Amount Receivable', v: fmtUSD(receivable), cls: 'accent-rust' },
           { k: 'Retainer Balance', v: fmtUSD(sum(filtered, 'retainer_balance')) },
           { k: 'Net Profit', v: fmtUSD(profit), cls: 'accent-green' },
         ]}

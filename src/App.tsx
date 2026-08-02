@@ -1,11 +1,16 @@
 import { useState } from 'react';
+import { FloatingChat } from './components/FloatingChat';
 import { LoginPage } from './components/LoginPage';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { DataProvider, useDashboard } from './hooks/useDashboard';
+import type { ChatViewAction } from './lib/chatViewAction';
 import { fmtUSDk } from './lib/format';
 import { CustomerPortal } from './sheets/CustomerPortal';
+import { Executive } from './sheets/Executive';
 import { FinancialAR } from './sheets/FinancialAR';
+import { MainReport } from './sheets/MainReport';
 import { ProjectAnalysis } from './sheets/ProjectAnalysis';
+import { ProjectList } from './sheets/ProjectList';
 import { ProjectSchedule } from './sheets/ProjectSchedule';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
 import type { SheetId } from './lib/types';
@@ -15,8 +20,17 @@ function StaffShell() {
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
   const isEmployee = profile?.role === 'employee';
-  const [sheet, setSheet] = useState<SheetId>('s1');
+  const [sheet, setSheet] = useState<SheetId>('exec');
+  const [viewAction, setViewAction] = useState<{ seq: number; action: ChatViewAction } | null>(
+    null,
+  );
   const scheduleSheetLabel = isEmployee ? 'SHEET A-3' : 'SHEET A-4';
+  const projectListSheetLabel = isEmployee ? 'SHEET A-4' : 'SHEET A-5';
+
+  function applyChatView(action: ChatViewAction) {
+    setSheet('main');
+    setViewAction((prev) => ({ seq: (prev?.seq || 0) + 1, action }));
+  }
 
   if (loading) {
     return (
@@ -32,10 +46,15 @@ function StaffShell() {
   }
 
   const lockedEmployee = isEmployee ? profile?.employee_name || null : null;
-  const activeProjects = data.projects.filter((p) => p.status === 'ACTIVE').length;
+  const projectHeaders = data.projects.filter((p) => p.row_kind === 'project');
+  const activeProjects = (projectHeaders.length ? projectHeaders : data.projects).filter(
+    (p) => !p.status || p.status === 'ACTIVE',
+  ).length;
+
+  const fillViewport = sheet === 'main';
 
   return (
-    <>
+    <div className={`app-shell${fillViewport ? ' fill-viewport' : ''}`}>
       <header className="titleblock">
         <div className="tb-brand">
           <div className="firm display">M · DESIGNS ARCHITECTS</div>
@@ -46,10 +65,10 @@ function StaffShell() {
         <div className="tb-meta">
           <div className="tb-cell">
             <div className="k">Data As Of</div>
-            <div className="v">Jul 2026</div>
+            <div className="v">Project List</div>
           </div>
           <div className="tb-cell">
-            <div className="k">{isEmployee ? 'My Active Projects' : 'Active Projects'}</div>
+            <div className="k">{isEmployee ? 'My Active Projects' : 'Projects'}</div>
             <div className="v">{isEmployee ? activeProjects : data.kpi_active.project_count}</div>
           </div>
           <div className="tb-cell">
@@ -57,7 +76,9 @@ function StaffShell() {
             <div className="v">
               {fmtUSDk(
                 isEmployee
-                  ? data.projects.reduce((a, p) => a + (p.contract || 0), 0)
+                  ? data.projects
+                      .filter((p) => p.row_kind !== 'project')
+                      .reduce((a, p) => a + (p.contract || 0), 0)
                   : data.kpi_all.contract_amount,
               )}
             </div>
@@ -77,6 +98,20 @@ function StaffShell() {
       </header>
 
       <nav className="sheets">
+        <button
+          type="button"
+          className={sheet === 'exec' ? 'active' : ''}
+          onClick={() => setSheet('exec')}
+        >
+          <span className="num">EXEC</span>Executive
+        </button>
+        <button
+          type="button"
+          className={sheet === 'main' ? 'active' : ''}
+          onClick={() => setSheet('main')}
+        >
+          <span className="num">MAIN</span>Main Report
+        </button>
         <button
           type="button"
           className={sheet === 's1' ? 'active' : ''}
@@ -107,9 +142,24 @@ function StaffShell() {
         >
           <span className="num">{scheduleSheetLabel}</span>Project Schedule
         </button>
+        <button
+          type="button"
+          className={sheet === 's5' ? 'active' : ''}
+          onClick={() => setSheet('s5')}
+        >
+          <span className="num">{projectListSheetLabel}</span>Project List
+        </button>
       </nav>
 
-      <main>
+      <main className={fillViewport ? 'main-fill' : undefined}>
+        {sheet === 'exec' ? <Executive data={data} /> : null}
+        {sheet === 'main' ? (
+          <MainReport
+            data={data}
+            lockedEmployee={lockedEmployee}
+            viewAction={viewAction}
+          />
+        ) : null}
         {sheet === 's1' ? (
           <ProjectAnalysis data={data} lockedEmployee={lockedEmployee} />
         ) : null}
@@ -118,13 +168,18 @@ function StaffShell() {
         ) : null}
         {sheet === 's3' && !isEmployee ? <FinancialAR data={data} /> : null}
         {sheet === 's4' ? <ProjectSchedule mode="staff" /> : null}
+        {sheet === 's5' ? <ProjectList data={data} /> : null}
       </main>
 
-      <footer>
-        M. DESIGNS ARCHITECTS — PRACTICE ANALYTICS &nbsp;·&nbsp; BUILT FROM AJERA/BQE CORE EXPORTS
-        &nbsp;·&nbsp; ALL FIGURES REFLECT SOURCE DATA AS EXTRACTED
-      </footer>
-    </>
+      {!fillViewport ? (
+        <footer>
+          M. DESIGNS ARCHITECTS — PRACTICE ANALYTICS &nbsp;·&nbsp; BUILT FROM AJERA/BQE CORE EXPORTS
+          &nbsp;·&nbsp; ALL FIGURES REFLECT SOURCE DATA AS EXTRACTED
+        </footer>
+      ) : null}
+
+      <FloatingChat sheet={sheet} data={data} onViewAction={applyChatView} />
+    </div>
   );
 }
 

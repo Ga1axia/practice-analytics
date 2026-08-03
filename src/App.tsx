@@ -6,12 +6,13 @@ import { DataProvider, useDashboard } from './hooks/useDashboard';
 import type { ChatViewAction } from './lib/chatViewAction';
 import { fmtUSDk } from './lib/format';
 import { CustomerPortal } from './sheets/CustomerPortal';
+import { EmployeePortal } from './sheets/EmployeePortal';
 import { Executive } from './sheets/Executive';
 import { FinancialAR } from './sheets/FinancialAR';
 import { MainReport } from './sheets/MainReport';
 import { ProjectAnalysis } from './sheets/ProjectAnalysis';
 import { ProjectList } from './sheets/ProjectList';
-import { ProjectSchedule } from './sheets/ProjectSchedule';
+import { ProjectDashboard } from './sheets/ProjectDashboard';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
 import type { SheetId } from './lib/types';
 import './styles/global.css';
@@ -19,13 +20,10 @@ import './styles/global.css';
 function StaffShell() {
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
-  const isEmployee = profile?.role === 'employee';
   const [sheet, setSheet] = useState<SheetId>('exec');
   const [viewAction, setViewAction] = useState<{ seq: number; action: ChatViewAction } | null>(
     null,
   );
-  const scheduleSheetLabel = isEmployee ? 'SHEET A-3' : 'SHEET A-4';
-  const projectListSheetLabel = isEmployee ? 'SHEET A-4' : 'SHEET A-5';
 
   function applyChatView(action: ChatViewAction) {
     setSheet('main');
@@ -45,12 +43,6 @@ function StaffShell() {
     );
   }
 
-  const lockedEmployee = isEmployee ? profile?.employee_name || null : null;
-  const projectHeaders = data.projects.filter((p) => p.row_kind === 'project');
-  const activeProjects = (projectHeaders.length ? projectHeaders : data.projects).filter(
-    (p) => !p.status || p.status === 'ACTIVE',
-  ).length;
-
   const fillViewport = sheet === 'main';
 
   return (
@@ -58,9 +50,7 @@ function StaffShell() {
       <header className="titleblock">
         <div className="tb-brand">
           <div className="firm display">M · DESIGNS ARCHITECTS</div>
-          <div className="sub">
-            Practice Analytics — {isEmployee ? `Employee · ${lockedEmployee}` : 'Admin'}
-          </div>
+          <div className="sub">Practice Analytics — Admin</div>
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -68,20 +58,12 @@ function StaffShell() {
             <div className="v">Project List</div>
           </div>
           <div className="tb-cell">
-            <div className="k">{isEmployee ? 'My Active Projects' : 'Projects'}</div>
-            <div className="v">{isEmployee ? activeProjects : data.kpi_active.project_count}</div>
+            <div className="k">Projects</div>
+            <div className="v">{data.kpi_active.project_count}</div>
           </div>
           <div className="tb-cell">
-            <div className="k">{isEmployee ? 'My Contract Value' : 'Total Contract Value'}</div>
-            <div className="v">
-              {fmtUSDk(
-                isEmployee
-                  ? data.projects
-                      .filter((p) => p.row_kind !== 'project')
-                      .reduce((a, p) => a + (p.contract || 0), 0)
-                  : data.kpi_all.contract_amount,
-              )}
-            </div>
+            <div className="k">Total Contract Value</div>
+            <div className="v">{fmtUSDk(data.kpi_all.contract_amount)}</div>
           </div>
           <div className="tb-cell">
             <div className="k">Signed in</div>
@@ -126,48 +108,38 @@ function StaffShell() {
         >
           <span className="num">SHEET A-2</span>Workload &amp; Performance
         </button>
-        {!isEmployee ? (
-          <button
-            type="button"
-            className={sheet === 's3' ? 'active' : ''}
-            onClick={() => setSheet('s3')}
-          >
-            <span className="num">SHEET A-3</span>Financial &amp; A/R
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={sheet === 's3' ? 'active' : ''}
+          onClick={() => setSheet('s3')}
+        >
+          <span className="num">SHEET A-3</span>Financial &amp; A/R
+        </button>
         <button
           type="button"
           className={sheet === 's4' ? 'active' : ''}
           onClick={() => setSheet('s4')}
         >
-          <span className="num">{scheduleSheetLabel}</span>Project Schedule
+          <span className="num">SHEET A-4</span>Project Dashboard
         </button>
         <button
           type="button"
           className={sheet === 's5' ? 'active' : ''}
           onClick={() => setSheet('s5')}
         >
-          <span className="num">{projectListSheetLabel}</span>Project List
+          <span className="num">SHEET A-5</span>Project List
         </button>
       </nav>
 
       <main className={fillViewport ? 'main-fill' : undefined}>
         {sheet === 'exec' ? <Executive data={data} /> : null}
         {sheet === 'main' ? (
-          <MainReport
-            data={data}
-            lockedEmployee={lockedEmployee}
-            viewAction={viewAction}
-          />
+          <MainReport data={data} viewAction={viewAction} />
         ) : null}
-        {sheet === 's1' ? (
-          <ProjectAnalysis data={data} lockedEmployee={lockedEmployee} />
-        ) : null}
-        {sheet === 's2' ? (
-          <WorkloadPerformance data={data} lockedEmployee={lockedEmployee} />
-        ) : null}
-        {sheet === 's3' && !isEmployee ? <FinancialAR data={data} /> : null}
-        {sheet === 's4' ? <ProjectSchedule mode="staff" /> : null}
+        {sheet === 's1' ? <ProjectAnalysis data={data} /> : null}
+        {sheet === 's2' ? <WorkloadPerformance data={data} /> : null}
+        {sheet === 's3' ? <FinancialAR data={data} /> : null}
+        {sheet === 's4' ? <ProjectDashboard data={data} /> : null}
         {sheet === 's5' ? <ProjectList data={data} /> : null}
       </main>
 
@@ -183,33 +155,83 @@ function StaffShell() {
   );
 }
 
-function CustomerShell() {
+function EmployeeShell() {
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
 
   if (loading) {
     return (
-      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace' }}>Loading your projects…</div>
+      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace' }}>Loading your work…</div>
     );
   }
-  if (error || !data || !profile) {
+  if (error || !data) {
     return (
       <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace', color: '#B3261E' }}>
-        Failed to load projects: {error || 'unknown error'}
+        Failed to load data: {error || 'unknown error'}
+      </div>
+    );
+  }
+
+  const employeeName = profile?.employee_name;
+  if (!employeeName) {
+    return (
+      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace', color: '#B3261E' }}>
+        This account is not linked to an employee name. Ask an admin to set{' '}
+        <code>employee_name</code> on your profile.
       </div>
     );
   }
 
   return (
-    <>
+    <div className="app-shell emp-shell">
       <header className="titleblock">
         <div className="tb-brand">
           <div className="firm display">M · DESIGNS ARCHITECTS</div>
-          <div className="sub">Client Status Tracker</div>
+          <div className="sub">My work — {employeeName}</div>
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
-            <div className="k">Account</div>
+            <div className="k">Signed in</div>
+            <div className="v" style={{ fontSize: 12 }}>
+              {profile?.email}
+            </div>
+          </div>
+          <div className="tb-cell">
+            <button type="button" className="signout-btn" onClick={() => void signOut()}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+      <main>
+        <EmployeePortal data={data} employeeName={employeeName} />
+      </main>
+      <footer>
+        M. DESIGNS ARCHITECTS — EMPLOYEE WORKSPACE &nbsp;·&nbsp; YOUR HOURS &amp; ASSIGNED PROJECTS ONLY
+      </footer>
+    </div>
+  );
+}
+
+function CustomerShell() {
+  const { profile, signOut } = useAuth();
+
+  if (!profile) {
+    return (
+      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace' }}>Loading…</div>
+    );
+  }
+
+  return (
+    <div className="cp-shell">
+      <header className="titleblock cp-titleblock">
+        <div className="tb-brand">
+          <div className="firm display">M · DESIGNS ARCHITECTS</div>
+          <div className="sub">Client portal</div>
+        </div>
+        <div className="tb-meta">
+          <div className="tb-cell">
+            <div className="k">Signed in</div>
             <div className="v" style={{ fontSize: 12 }}>
               {profile.client_name || profile.email}
             </div>
@@ -221,11 +243,11 @@ function CustomerShell() {
           </div>
         </div>
       </header>
-      <CustomerPortal data={data} profile={profile} />
-      <footer>
-        M. DESIGNS ARCHITECTS — CLIENT PORTAL &nbsp;·&nbsp; PROJECT STATUS ONLY
+      <CustomerPortal profile={profile} />
+      <footer className="cp-footer">
+        Questions outside the portal? Email your project manager — they see every note you leave here.
       </footer>
-    </>
+    </div>
   );
 }
 
@@ -251,9 +273,13 @@ function Gate() {
   }
 
   if (profile.role === 'customer') {
+    return <CustomerShell />;
+  }
+
+  if (profile.role === 'employee') {
     return (
       <DataProvider>
-        <CustomerShell />
+        <EmployeeShell />
       </DataProvider>
     );
   }

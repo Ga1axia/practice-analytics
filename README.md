@@ -14,7 +14,7 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Role | Access |
 |------|--------|
 | **Admin** | Full Practice Analytics (Project Analysis, Workload, Financial A/R, Project Schedule) |
-| **Employee** | Own assigned projects + workload + Project Schedule (no firm A/R) |
+| **Employee** | Multi-page workspace: hours, project list (active by default), project detail — no firm sheets |
 | **Customer** | Client status tracker + Project Schedule (Client’s Comments editable only) |
 
 ### Demo accounts
@@ -22,7 +22,9 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Role | Email | Password | Bound to |
 |------|-------|----------|----------|
 | Admin | `admin@mdesigns.test` | `DemoAdmin2026!` | — |
-| Employee | `employee@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
+| Employee | `arnita@mdesigns.test` | `DemoEmployee2026!` | Arnita Serri (her managed projects) |
+| Employee | `nini@mdesigns.test` | `DemoEmployee2026!` | Ni Ni (her managed projects) |
+| Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He (his managed projects) |
 | Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
 
 ## Supabase project
@@ -67,7 +69,7 @@ npm run dev:api
 ## Manual test plan
 
 - Sign in as admin → sheets A-1–A-4 including Project Schedule (editable)
-- Sign in as employee → A-1, A-2, A-3 Project Schedule for Avery projects; no A/R
+- Sign in as Arnita / Ni Ni / Zhengrui → only their managed projects across Main, A-1, workload, Project Dashboard; no A/R
 - Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable
 - Signed-out users cannot read `pa_*` tables
 - Q&A requires auth; customers blocked from Ask This Sheet

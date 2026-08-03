@@ -2,9 +2,31 @@ import { useState, type FormEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
 
 const demos = [
-  { role: 'Admin', email: 'admin@mdesigns.test', password: 'DemoAdmin2026!' },
-  { role: 'Employee', email: 'employee@mdesigns.test', password: 'DemoEmployee2026!' },
-  { role: 'Customer', email: 'customer@mdesigns.test', password: 'DemoCustomer2026!' },
+  { role: 'Admin', email: 'admin@mdesigns.test', password: 'DemoAdmin2026!', note: 'Full firm' },
+  {
+    role: 'Employee · Arnita',
+    email: 'arnita@mdesigns.test',
+    password: 'DemoEmployee2026!',
+    note: 'Her hours + projects',
+  },
+  {
+    role: 'Employee · Ni Ni',
+    email: 'nini@mdesigns.test',
+    password: 'DemoEmployee2026!',
+    note: 'Her hours + projects',
+  },
+  {
+    role: 'Employee · Zhengrui',
+    email: 'zhengrui@mdesigns.test',
+    password: 'DemoEmployee2026!',
+    note: 'His hours + projects',
+  },
+  {
+    role: 'Customer',
+    email: 'customer@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Elena Vargas portal',
+  },
 ];
 
 export function LoginPage() {
@@ -73,7 +95,10 @@ export function LoginPage() {
               }}
             >
               <strong>{d.role}</strong>
-              <span>{d.email}</span>
+              <span>
+                {d.email}
+                {d.note ? ` · ${d.note}` : ''}
+              </span>
             </button>
           ))}
         </div>

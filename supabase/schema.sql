@@ -194,3 +194,16 @@ create index if not exists pa_schedule_rows_schedule_idx
 
 -- Project List upload (admin): pa_replace_project_list(jsonb)
 -- Admin INSERT/UPDATE/DELETE policies on pa_projects (see migration pa_projects_upload_hierarchy).
+
+-- Client portal board (see migration pa_client_board_checks_messages):
+--   pa_process_checks  — checklist done state per project/phase/side/item
+--   pa_client_messages — direct PM ↔ client messages
+--   pa_staff_or_client_project(project, client) — RLS helper
+--
+-- Meeting history (see migration pa_client_meetings):
+--   pa_client_meetings — dated meetings + notes per client (PM/admin only)
+--   pa_staff_project_access(project, client) — staff RLS helper
+--
+-- Demo employees (see migration pa_employee_demos_arnita_nini_zhengrui):
+--   arnita@ / nini@ / zhengrui@ mdesigns.test → DemoEmployee2026!
+--   RLS: employees see managed rows + parent project headers they work under

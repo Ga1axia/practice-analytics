@@ -22,6 +22,8 @@ type ProjectRow = {
   retainer_balance: number | null;
   pct_used: number | null;
   pct_billed: number | null;
+  parent_project?: string | null;
+  row_kind?: string | null;
 };
 
 const STOPWORDS = new Set([
@@ -333,17 +335,30 @@ async function buildContext(
   }
 
   if (sheet === 's4') {
-    const schedules = await fetchAll<{
-      id: string;
-      project_key: string;
-      client_name: string | null;
-      title: string | null;
-    }>(supabase, 'pa_schedules');
+    const [schedules, projects] = await Promise.all([
+      fetchAll<{
+        id: string;
+        project_key: string;
+        client_name: string | null;
+        title: string | null;
+      }>(supabase, 'pa_schedules'),
+      fetchAll<ProjectRow>(supabase, 'pa_projects'),
+    ]);
+    const filterProject = (filters.project || '').trim();
     const entities = findEntities(question, [
       ...schedules.map((s) => s.project_key),
       ...schedules.map((s) => s.client_name),
+      ...projects.map((p) => p.project),
+      ...projects.map((p) => p.client),
     ]);
     const schedule =
+      (filterProject &&
+        (schedules.find((s) => s.project_key === filterProject) ||
+          schedules.find((s) => {
+            const k = s.project_key.toLowerCase();
+            const n = filterProject.toLowerCase();
+            return k.includes(n) || n.includes(k);
+          }))) ||
       schedules.find(
         (s) =>
           entities.includes(s.project_key) ||
@@ -365,16 +380,43 @@ async function buildContext(
       scheduleRows = data || [];
     }
 
+    const focusKey = filterProject || schedule?.project_key || '';
+    const projectRows = focusKey
+      ? projects.filter(
+          (p) =>
+            p.project === focusKey ||
+            p.parent_project === focusKey ||
+            (p.project || '').toLowerCase().includes(focusKey.toLowerCase()) ||
+            (focusKey.toLowerCase().includes((p.project || '').toLowerCase()) &&
+              (p.project || '').length > 4),
+        )
+      : [];
+
     const ctx: Record<string, unknown> = {
+      sheet_mode: 'singular_project_dashboard',
+      currently_selected_filters: filters,
       available_schedules: schedules,
       selected_schedule: schedule,
       matched_entities_from_question: entities,
+      project_financial_rows: projectRows.slice(0, 80),
+      project_financial_totals: projectRows.length ? kpiFromProjects(projectRows) : null,
       schedule_rows: scheduleRows,
+      client_comment_threads: (scheduleRows as { task?: string; mdesigns_comments?: string; client_comments?: string; budget_remaining?: string }[])
+        .filter(
+          (r) =>
+            (r.mdesigns_comments && String(r.mdesigns_comments).trim()) ||
+            (r.client_comments && String(r.client_comments).trim()),
+        )
+        .slice(0, 40),
     };
     return {
       ctx,
-      sheetLabel: 'Project Schedule',
-      examples: ['What phase is active?', 'Which tasks are still open?'],
+      sheetLabel: 'Project Dashboard',
+      examples: [
+        'What phase is active?',
+        'Which tasks still need client comments?',
+        'How much has been billed on this project?',
+      ],
     };
   }
 

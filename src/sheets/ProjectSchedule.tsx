@@ -35,6 +35,8 @@ type Props = {
   preferredProjectKey?: string | null;
   highlightPhase?: string | null;
   embedded?: boolean;
+  /** When true, hide the schedule's own project picker (parent dashboard owns selection). */
+  lockProject?: boolean;
 };
 
 function StatusPill({ value }: { value: string }) {
@@ -74,6 +76,7 @@ export function ProjectSchedule({
   preferredProjectKey,
   highlightPhase,
   embedded,
+  lockProject,
 }: Props) {
   const isCustomer = mode === 'customer';
   const [schedules, setSchedules] = useState<ScheduleMeta[]>([]);
@@ -107,13 +110,23 @@ export function ProjectSchedule({
     }
     const list = (data || []) as ScheduleMeta[];
     setSchedules(list);
-    const preferred =
-      (preferredProjectKey && list.find((s) => s.project_key === preferredProjectKey)?.id) ||
-      list[0]?.id ||
-      '';
-    setScheduleId((prev) => (prev && list.some((s) => s.id === prev) ? prev : preferred));
+    const needle = (preferredProjectKey || '').toLowerCase();
+    const preferredMeta =
+      (preferredProjectKey && list.find((s) => s.project_key === preferredProjectKey)) ||
+      (needle
+        ? list.find((s) => {
+            const k = s.project_key.toLowerCase();
+            return k.includes(needle) || needle.includes(k);
+          })
+        : null) ||
+      null;
+    const preferred = preferredMeta?.id || list[0]?.id || '';
+    setScheduleId((prev) => {
+      if (lockProject && preferred) return preferred;
+      return prev && list.some((s) => s.id === prev) ? prev : preferred;
+    });
     setLoading(false);
-  }, [preferredProjectKey]);
+  }, [preferredProjectKey, lockProject]);
 
   const loadRows = useCallback(async (id: string) => {
     if (!id) {
@@ -299,8 +312,8 @@ export function ProjectSchedule({
   const body = (
     <>
       <div className="filters schedule-toolbar">
-        <span className="f-label">Project schedule</span>
-        {schedules.length > 1 ? (
+        {!lockProject ? <span className="f-label">Project schedule</span> : null}
+        {!lockProject && schedules.length > 1 ? (
           <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
             {schedules.map((s) => (
               <option key={s.id} value={s.id}>
@@ -308,12 +321,12 @@ export function ProjectSchedule({
               </option>
             ))}
           </select>
-        ) : active ? (
+        ) : !lockProject && active ? (
           <span className="schedule-project">{active.project_key}</span>
         ) : null}
         {active ? (
           <span className="schedule-meta">
-            {active.client_name || '—'}
+            {lockProject ? active.project_key : active.client_name || '—'}
             {savingId ? ' · Saving…' : saveNote ? ` · ${saveNote}` : ''}
           </span>
         ) : null}

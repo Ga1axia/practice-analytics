@@ -16,7 +16,7 @@ const SHEET_LABELS: Record<SheetId, string> = {
   s1: 'Project Analysis',
   s2: 'Workload & Performance',
   s3: 'Financial & A/R',
-  s4: 'Project Schedule',
+  s4: 'Project Dashboard',
   s5: 'Project List',
 };
 

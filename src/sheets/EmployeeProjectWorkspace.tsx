@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
+import { PlanSetsPanel } from '../components/PlanSetsPanel';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
 import { useAuth } from '../hooks/useAuth';
 import { processPhaseLabel } from '../lib/architecturalProcess';
@@ -169,8 +170,9 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
 
       <div className="emp-detail-pair">
         <section className="panel">
-          <h3>
-            Documents &amp; deliverables <span className="tag">{deliverables.length}</span>
+          <PlanSetsPanel projectKey={project.key} projectTitle={project.title} compact />
+          <h3 style={{ marginTop: 18 }}>
+            Schedule deliverables <span className="tag">{deliverables.length}</span>
           </h3>
           {!deliverables.length ? (
             <p className="pd-muted">No deliverables on the schedule yet.</p>

@@ -269,110 +269,109 @@ export function ProjectAnalysis({
         }}
       />
 
-      <div className="grid grid-2">
+      <div className="grid grid-2 pa-donut-row">
         <div className="panel">
           <h3>
-            Project Details{' '}
-            <span className="tag">{sorted.length.toLocaleString()} rows</span>
-          </h3>
-          <div className="table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  {(
-                    [
-                      ['project', 'Project'],
-                      ['client', 'Client'],
-                      ['manager', 'Employee'],
-                      ['status', 'Status'],
-                      ['type', 'Type'],
-                      ['contract', 'Contract'],
-                      ['spent', 'Spent'],
-                      ['billed', 'Billed'],
-                      ['ar', 'Receivable'],
-                      ['margin', 'Margin'],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <th
-                      key={key}
-                      className={
-                        ['contract', 'spent', 'billed', 'ar', 'margin'].includes(key) ? 'num' : ''
-                      }
-                      onClick={() => toggleSort(key)}
-                    >
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((r) => (
-                  <tr key={r.project}>
-                    <td>{r.project}</td>
-                    <td>{r.client || ''}</td>
-                    <td>{r.manager}</td>
-                    <td>
-                      <span className={`badge ${(r.status || '').toLowerCase()}`}>{r.status}</span>
-                    </td>
-                    <td>{r.type}</td>
-                    <td className="num">{fmtUSD(r.contract)}</td>
-                    <td className="num">{fmtUSD(r.spent)}</td>
-                    <td className="num">{fmtUSD(getBilled(r))}</td>
-                    <td className="num">{fmtUSD(r.ar)}</td>
-                    <td className="num">
-                      {r.margin != null && isFinite(r.margin) ? fmtPct(r.margin) : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="pager">
-            <span>
-              Page {pageSafe + 1} of {totalPages}
+            Billing Progress{' '}
+            <span className="tag">
+              {month ? `${monthLabel(month)} billed vs. total contract` : 'billed vs contract'}
             </span>
-            <div>
-              <button type="button" disabled={pageSafe === 0} onClick={() => setPage(pageSafe - 1)}>
-                ‹ Prev
-              </button>{' '}
-              <button
-                type="button"
-                disabled={pageSafe >= totalPages - 1}
-                onClick={() => setPage(pageSafe + 1)}
-              >
-                Next ›
-              </button>
-            </div>
+          </h3>
+          <div className="chart-wrap pa-donut">
+            <DoughnutChart
+              labels={[month ? `Billed (${monthLabel(month)})` : 'Billed', 'Remaining']}
+              values={[billedTotal, remaining]}
+              colors={[palette.gold, '#E4E8EE']}
+            />
           </div>
         </div>
-
-        <div>
-          <div className="panel">
-            <h3>
-              Billing Progress{' '}
-              <span className="tag">
-                {month ? `${monthLabel(month)} billed vs. total contract` : 'billed vs contract'}
-              </span>
-            </h3>
-            <div className="chart-wrap">
-              <DoughnutChart
-                labels={[month ? `Billed (${monthLabel(month)})` : 'Billed', 'Remaining']}
-                values={[billedTotal, remaining]}
-                colors={[palette.gold, '#E4E8EE']}
-              />
-            </div>
+        <div className="panel">
+          <h3>
+            Profit Margin <span className="tag">profit vs cost</span>
+          </h3>
+          <div className="chart-wrap pa-donut">
+            <DoughnutChart
+              labels={['Profit', 'Cost']}
+              values={[profitPos, costBasis]}
+              colors={[palette.green, '#E4E8EE']}
+            />
           </div>
-          <div className="panel">
-            <h3>
-              Profit Margin <span className="tag">profit vs cost</span>
-            </h3>
-            <div className="chart-wrap">
-              <DoughnutChart
-                labels={['Profit', 'Cost']}
-                values={[profitPos, costBasis]}
-                colors={[palette.green, '#E4E8EE']}
-              />
-            </div>
+        </div>
+      </div>
+
+      <div className="panel pa-details">
+        <h3>
+          Project Details <span className="tag">{sorted.length.toLocaleString()} rows</span>
+        </h3>
+        <div className="table-scroll">
+          <table className="data dense">
+            <thead>
+              <tr>
+                {(
+                  [
+                    ['project', 'Project'],
+                    ['client', 'Client'],
+                    ['manager', 'Employee'],
+                    ['status', 'Status'],
+                    ['contract', 'Contract'],
+                    ['billed', 'Billed'],
+                    ['ar', 'Receivable'],
+                    ['margin', 'Margin'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <th
+                    key={key}
+                    className={
+                      ['contract', 'billed', 'ar', 'margin'].includes(key) ? 'num' : ''
+                    }
+                    onClick={() => toggleSort(key)}
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((r) => (
+                <tr key={r.project}>
+                  <td className="pa-proj-cell" title={r.project}>
+                    {r.project}
+                  </td>
+                  <td className="pa-clip" title={r.client || ''}>
+                    {r.client || ''}
+                  </td>
+                  <td className="pa-clip" title={r.manager || ''}>
+                    {r.manager}
+                  </td>
+                  <td>
+                    <span className={`badge ${(r.status || '').toLowerCase()}`}>{r.status}</span>
+                  </td>
+                  <td className="num">{fmtUSD(r.contract)}</td>
+                  <td className="num">{fmtUSD(getBilled(r))}</td>
+                  <td className="num">{fmtUSD(r.ar)}</td>
+                  <td className="num">
+                    {r.margin != null && isFinite(r.margin) ? fmtPct(r.margin) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="pager">
+          <span>
+            Page {pageSafe + 1} of {totalPages}
+          </span>
+          <div>
+            <button type="button" disabled={pageSafe === 0} onClick={() => setPage(pageSafe - 1)}>
+              ‹ Prev
+            </button>{' '}
+            <button
+              type="button"
+              disabled={pageSafe >= totalPages - 1}
+              onClick={() => setPage(pageSafe + 1)}
+            >
+              Next ›
+            </button>
           </div>
         </div>
       </div>

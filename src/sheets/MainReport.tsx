@@ -28,30 +28,45 @@ import type { DashboardData, ProjectRow } from '../lib/types';
 
 type ReportProject = ProjectNode & { spent: number };
 
-const LAYOUT_KEY = 'pa-main-report-layout-v1';
+const LAYOUT_KEY = 'pa-main-report-layout-v2';
 const GRID_ROWS = 14;
 const GRID_MARGIN: [number, number] = [6, 6];
 
+/** Default: filters wide enough for Manager, project table tall, no dead bands. */
 const DEFAULT_LAYOUT: Layout = [
-  { i: 'kpis', x: 0, y: 0, w: 8, h: 2, minW: 4, minH: 1 },
-  { i: 'filters', x: 8, y: 0, w: 4, h: 2, minW: 2, minH: 1 },
-  { i: 'table', x: 0, y: 2, w: 8, h: 7, minW: 4, minH: 3 },
-  { i: 'gauges', x: 8, y: 2, w: 4, h: 7, minW: 2, minH: 3 },
-  { i: 'client', x: 0, y: 9, w: 3, h: 5, minW: 2, minH: 2 },
-  { i: 'budget', x: 3, y: 9, w: 3, h: 5, minW: 2, minH: 2 },
-  { i: 'team', x: 6, y: 9, w: 3, h: 5, minW: 2, minH: 2 },
-  { i: 'billable', x: 9, y: 9, w: 3, h: 5, minW: 2, minH: 2 },
+  { i: 'kpis', x: 0, y: 0, w: 7, h: 2, minW: 4, minH: 1 },
+  { i: 'filters', x: 7, y: 0, w: 5, h: 2, minW: 3, minH: 2 },
+  { i: 'table', x: 0, y: 2, w: 8, h: 8, minW: 4, minH: 4 },
+  { i: 'gauges', x: 8, y: 2, w: 4, h: 8, minW: 2, minH: 3 },
+  { i: 'client', x: 0, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'budget', x: 3, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'team', x: 6, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'billable', x: 9, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
 ];
+
+const LAYOUT_IDS = new Set(DEFAULT_LAYOUT.map((l) => l.i));
 
 function loadLayout(): Layout {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return DEFAULT_LAYOUT;
+    if (!raw) return DEFAULT_LAYOUT.map((l) => ({ ...l }));
     const parsed = JSON.parse(raw) as Layout;
-    if (!Array.isArray(parsed) || parsed.length < 4) return DEFAULT_LAYOUT;
-    return parsed;
+    if (!Array.isArray(parsed) || parsed.length < 4) return DEFAULT_LAYOUT.map((l) => ({ ...l }));
+    const byId = new Map(parsed.map((l) => [l.i, l]));
+    // Merge so new tiles / defaults aren’t lost from older saves
+    return DEFAULT_LAYOUT.map((def) => {
+      const saved = byId.get(def.i);
+      if (!saved) return { ...def };
+      return {
+        ...def,
+        ...saved,
+        i: def.i,
+        minW: def.minW,
+        minH: def.minH,
+      };
+    }).filter((l) => LAYOUT_IDS.has(l.i));
   } catch {
-    return DEFAULT_LAYOUT;
+    return DEFAULT_LAYOUT.map((l) => ({ ...l }));
   }
 }
 
@@ -477,7 +492,7 @@ export function MainReport({
     });
   }
 
-  const displayProjects = filteredProjects.slice(0, 40);
+  const displayProjects = filteredProjects;
   const forceOpen = !!projectFilter || filteredProjects.length === 1;
 
   return (
@@ -572,6 +587,21 @@ export function MainReport({
                     </select>
                   </label>
                   <label>
+                    <span>Manager</span>
+                    <select
+                      value={manager}
+                      onChange={(e) => setManager(e.target.value)}
+                      disabled={!!lockedEmployee}
+                    >
+                      <option value="">All</option>
+                      {managerOptions.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     <span>Project</span>
                     <select
                       value={projectFilter}
@@ -610,21 +640,6 @@ export function MainReport({
                       ))}
                     </select>
                   </label>
-                  <label>
-                    <span>Manager</span>
-                    <select
-                      value={manager}
-                      onChange={(e) => setManager(e.target.value)}
-                      disabled={!!lockedEmployee}
-                    >
-                      <option value="">All</option>
-                      {managerOptions.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <button type="button" className="reset-btn" onClick={resetLayout}>
                     Reset layout
                   </button>
@@ -635,7 +650,7 @@ export function MainReport({
             <div key="table">
               <Tile
                 title="Project details"
-                tag={`${displayProjects.length} · click to scope`}
+                tag={`${displayProjects.length.toLocaleString()} projects · click to scope`}
                 bodyClass="mr-table-body"
               >
                 <div className="table-scroll mr-table-scroll">

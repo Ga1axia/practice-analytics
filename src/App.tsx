@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BrandMark } from './components/BrandMark';
 import { FloatingChat } from './components/FloatingChat';
 import { LoginPage } from './components/LoginPage';
 import { AuthProvider, useAuth } from './hooks/useAuth';
@@ -49,8 +50,7 @@ function StaffShell() {
     <div className={`app-shell${fillViewport ? ' fill-viewport' : ''}`}>
       <header className="titleblock">
         <div className="tb-brand">
-          <div className="firm display">M · DESIGNS ARCHITECTS</div>
-          <div className="sub">Practice Analytics — Admin</div>
+          <BrandMark subtitle="Practice Analytics · Admin · Dev" />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -186,8 +186,7 @@ function EmployeeShell() {
     <div className="app-shell emp-shell">
       <header className="titleblock">
         <div className="tb-brand">
-          <div className="firm display">M · DESIGNS ARCHITECTS</div>
-          <div className="sub">My work — {employeeName}</div>
+          <BrandMark subtitle={`My work · ${employeeName} · Dev`} />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -226,8 +225,7 @@ function CustomerShell() {
     <div className="cp-shell">
       <header className="titleblock cp-titleblock">
         <div className="tb-brand">
-          <div className="firm display">M · DESIGNS ARCHITECTS</div>
-          <div className="sub">Client portal</div>
+          <BrandMark subtitle="Client portal · Dev" />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">

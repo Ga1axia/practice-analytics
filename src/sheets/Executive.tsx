@@ -1,14 +1,20 @@
 import { useMemo, useRef, useState } from 'react';
-import { HBarChart } from '../components/Charts';
+import { HBarChart, StackedCountHBar } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { useAuth } from '../hooks/useAuth';
 import { useDashboard } from '../hooks/useDashboard';
+import {
+  matchProcessPhaseIndex,
+  PROCESS_PHASES,
+} from '../lib/architecturalProcess';
 import { fmtUSDk, palette } from '../lib/format';
 import { parseProjectListFile } from '../lib/parseProjectList';
 import { buildClientHierarchy } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
 import { supabase } from '../lib/supabase';
 import type { DashboardData } from '../lib/types';
+
+const OTHER_PHASE_COLOR = '#9AA8B5';
 
 export function Executive({ data }: { data: DashboardData }) {
   const { profile } = useAuth();
@@ -45,15 +51,55 @@ export function Executive({ data }: { data: DashboardData }) {
     [hierarchy],
   );
 
-  const topManagers = useMemo(() => {
-    const map: Record<string, number> = {};
-    data.projects.forEach((r) => {
-      if (!r.manager || r.row_kind === 'project') return;
-      map[r.manager] = (map[r.manager] || 0) + (r.contract || 0);
+  /** Employees × process-phase assignment counts (stacked bar). */
+  const phaseAssignments = useMemo(() => {
+    const phaseKeys = [...PROCESS_PHASES.map((p) => p.shortName), 'Other'];
+    const byEmp = new Map<string, Record<string, number>>();
+
+    for (const r of data.projects) {
+      if (!r.manager || r.row_kind === 'project') continue;
+      const phase = (r.phase || '').trim();
+      if (!phase || phase === 'Other' || phase === 'Internal/PTO') continue;
+      const st = (r.status || 'ACTIVE').toUpperCase();
+      if (st !== 'ACTIVE') continue;
+
+      const idx = matchProcessPhaseIndex(phase);
+      const key = idx >= 0 ? PROCESS_PHASES[idx]!.shortName : 'Other';
+      let row = byEmp.get(r.manager);
+      if (!row) {
+        row = Object.fromEntries(phaseKeys.map((k) => [k, 0]));
+        byEmp.set(r.manager, row);
+      }
+      row[key] = (row[key] || 0) + 1;
+    }
+
+    const employees = [...byEmp.entries()]
+      .map(([name, counts]) => ({
+        name,
+        counts,
+        total: phaseKeys.reduce((a, k) => a + (counts[k] || 0), 0),
+      }))
+      .filter((e) => e.total > 0)
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+      .slice(0, 14);
+
+    const usedKeys = phaseKeys.filter((k) =>
+      employees.some((e) => (e.counts[k] || 0) > 0),
+    );
+
+    const series = usedKeys.map((key) => {
+      const proc = PROCESS_PHASES.find((p) => p.shortName === key);
+      return {
+        label: key,
+        color: proc?.color || OTHER_PHASE_COLOR,
+        values: employees.map((e) => e.counts[key] || 0),
+      };
     });
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
+
+    return {
+      labels: employees.map((e) => e.name),
+      series,
+    };
   }, [data.projects]);
 
   async function onFile(file: File | null) {
@@ -144,15 +190,19 @@ export function Executive({ data }: { data: DashboardData }) {
         </div>
         <div className="panel">
           <h3>
-            Top managers by phase contract
-            <span className="tag">From project list</span>
+            Phase assignments by employee
+            <span className="tag">Active phases · count</span>
           </h3>
           <div className="chart-wrap tall">
-            <HBarChart
-              labels={topManagers.map((x) => x[0])}
-              values={topManagers.map((x) => x[1])}
-              color={palette.teal}
-            />
+            {phaseAssignments.labels.length === 0 ? (
+              <div className="plist-empty">No active phase assignments</div>
+            ) : (
+              <StackedCountHBar
+                labels={phaseAssignments.labels}
+                series={phaseAssignments.series}
+                xTitle="# of phases assigned"
+              />
+            )}
           </div>
         </div>
       </div>

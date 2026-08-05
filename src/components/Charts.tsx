@@ -316,3 +316,84 @@ export function VBarChart({
     />
   );
 }
+
+/** Horizontal stacked bars — integer counts by category (e.g. phase assignments per employee). */
+export function StackedCountHBar({
+  labels,
+  series,
+  xTitle,
+}: {
+  labels: string[];
+  series: { label: string; values: number[]; color: string }[];
+  xTitle?: string;
+}) {
+  const maxTotal = labels.reduce((mx, _, i) => {
+    const sum = series.reduce((a, s) => a + (s.values[i] || 0), 0);
+    return Math.max(mx, sum);
+  }, 0);
+
+  return (
+    <Chart
+      type="bar"
+      data={{
+        labels,
+        datasets: series.map((s) => ({
+          label: s.label,
+          data: s.values,
+          backgroundColor: s.color,
+          stack: 'count',
+          borderWidth: 0,
+        })),
+      }}
+      options={{
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { family: 'IBM Plex Mono', size: 9.5 }, boxWidth: 10 },
+          },
+          tooltip: {
+            callbacks: {
+              label: (c) => `${c.dataset.label}: ${Number(c.raw)}`,
+              footer: (items) => {
+                const total = items.reduce((a, it) => a + Number(it.raw || 0), 0);
+                return `Total: ${total}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            min: 0,
+            suggestedMax: Math.max(1, maxTotal),
+            ticks: {
+              stepSize: 1,
+              precision: 0,
+              callback: (v) => {
+                const n = Number(v);
+                return Number.isInteger(n) ? String(n) : '';
+              },
+              font: { family: 'IBM Plex Mono', size: 10 },
+            },
+            grid: { color: '#E4E8EE' },
+            title: xTitle
+              ? {
+                  display: true,
+                  text: xTitle,
+                  font: { family: 'IBM Plex Mono', size: 9.5 },
+                  color: '#6B7A8D',
+                }
+              : undefined,
+          },
+          y: {
+            stacked: true,
+            ticks: { font: { size: 10.5 } },
+            grid: { display: false },
+          },
+        },
+      }}
+    />
+  );
+}

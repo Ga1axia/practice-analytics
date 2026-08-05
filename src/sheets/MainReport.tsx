@@ -52,9 +52,24 @@ const DEFAULT_LAYOUT: Layout = [
   { i: 'team', x: 8, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
 ];
 
+function isCompletedStatus(status: string | null | undefined): boolean {
+  const s = (status || '').toUpperCase();
+  return s === 'COMPLETED' || s === 'COMPLETE' || s === 'DONE';
+}
+
+/**
+ * Project List uploads often stamp every row ACTIVE. Treat a phase/project as
+ * complete when status says so, or when the contract is financially closed out.
+ */
+function isBudgetComplete(row: ProjectRow): boolean {
+  if (isCompletedStatus(row.status)) return true;
+  const contract = row.contract || 0;
+  if (contract <= 0) return false;
+  return rowOutstanding(row) <= 0.01 && (row.billed || 0) > 0;
+}
+
 /** Spent/contract colors for Budget analysis (incomplete vs completed). */
-function budgetFillColor(pct: number, status: string): string {
-  const completed = status.toUpperCase() === 'COMPLETED';
+function budgetFillColor(pct: number, completed: boolean): string {
   if (completed) {
     if (pct > 1) return '#C45C5C'; // red — over budget
     if (pct >= 0.9) return '#5B9BD5'; // blue — 90–100%
@@ -67,11 +82,17 @@ function budgetFillColor(pct: number, status: string): string {
   return '#A8D4B8'; // light green — below 90%
 }
 
-function reportProjectStatus(p: ReportProject): string {
-  if (p.row?.status) return p.row.status || 'ACTIVE';
-  const statuses = p.phases.map((ph) => (ph.row.status || 'ACTIVE').toUpperCase());
-  if (statuses.length && statuses.every((s) => s === 'COMPLETED')) return 'COMPLETED';
-  return p.phases[0]?.row.status || 'ACTIVE';
+/** Prefer phase statuses — project headers from uploads are often stuck on ACTIVE. */
+function reportProjectStatus(p: Pick<ReportProject, 'row' | 'phases'>): string {
+  if (p.phases.length) {
+    if (p.phases.every((ph) => isBudgetComplete(ph.row))) return 'COMPLETED';
+    if (p.phases.some((ph) => !isBudgetComplete(ph.row))) {
+      const open = p.phases.find((ph) => !isBudgetComplete(ph.row));
+      return open?.row.status || 'ACTIVE';
+    }
+  }
+  if (p.row && isBudgetComplete(p.row)) return 'COMPLETED';
+  return p.row?.status || 'ACTIVE';
 }
 
 const LAYOUT_IDS = new Set(DEFAULT_LAYOUT.map((l) => l.i));
@@ -318,7 +339,12 @@ export function MainReport({
       }
 
       const phases = p.phases.filter((ph) => {
-        if (phaseStatus && (ph.row.status || 'ACTIVE') !== phaseStatus) return false;
+        if (phaseStatus) {
+          const st = isBudgetComplete(ph.row)
+            ? 'COMPLETED'
+            : (ph.row.status || 'ACTIVE').toUpperCase();
+          if (st !== phaseStatus.toUpperCase()) return false;
+        }
         if (phase && (ph.row.phase || '') !== phase) return false;
         if (manager && ph.row.manager !== manager) return false;
         if (selectedManagers.size && !selectedManagers.has(ph.row.manager || '')) return false;
@@ -329,8 +355,11 @@ export function MainReport({
       const shownPhases = hasPhaseFilters ? phases : p.phases;
       if (hasPhaseFilters && !shownPhases.length) {
         if (!p.row) continue;
+        const hdrStatus = isBudgetComplete(p.row)
+          ? 'COMPLETED'
+          : (p.row.status || 'ACTIVE').toUpperCase();
         const hdrOk =
-          (!phaseStatus || (p.row.status || 'ACTIVE') === phaseStatus) &&
+          (!phaseStatus || hdrStatus === phaseStatus.toUpperCase()) &&
           (!manager || p.row.manager === manager) &&
           (!selectedManagers.size || selectedManagers.has(p.row.manager || ''));
         if (!hdrOk || phase) continue;
@@ -495,27 +524,53 @@ export function MainReport({
       .slice(0, 10);
   }, [scopedRows]);
 
+  /** Phase-level bars — each uses its own complete/incomplete color rules. */
   const projectBudget = useMemo(() => {
     let projects = filteredProjects;
     if (focus) {
       projects = projects.filter((p) => p.key === focus.projectKey);
     }
-    return projects
-      .map((p) => {
-        const st = reportProjectStatus(p);
-        const pct = p.contract > 0 ? p.spent / p.contract : 0;
-        return {
+    const bars: {
+      key: string;
+      name: string;
+      completed: boolean;
+      contract: number;
+      spent: number;
+      pct: number;
+    }[] = [];
+
+    for (const p of projects) {
+      const title = p.code ? `${p.title} (${p.code})` : p.title;
+      if (p.phases.length) {
+        for (const ph of p.phases) {
+          if (focus?.kind === 'phase' && focus.phaseKey !== ph.row.project) continue;
+          const contract = ph.row.contract || 0;
+          if (contract <= 0) continue;
+          const spent = spentOf(ph.row);
+          bars.push({
+            key: ph.row.project,
+            name: `${title} · ${ph.label}`,
+            completed: isBudgetComplete(ph.row),
+            contract,
+            spent,
+            pct: spent / contract,
+          });
+        }
+      } else if (p.row) {
+        const contract = p.contract || 0;
+        if (contract <= 0) continue;
+        bars.push({
           key: p.key,
-          name: p.code ? `${p.title} (${p.code})` : p.title,
-          status: st,
-          contract: p.contract,
+          name: title,
+          completed: isBudgetComplete(p.row),
+          contract,
           spent: p.spent,
-          pct,
-        };
-      })
-      .filter((p) => p.contract > 0)
-      .sort((a, b) => b.pct - a.pct)
-      .slice(0, 16);
+          pct: p.spent / contract,
+        });
+      }
+    }
+
+    return bars.sort((a, b) => b.pct - a.pct).slice(0, 16);
   }, [filteredProjects, focus]);
 
   const billableAnalysis = useMemo(() => {
@@ -995,7 +1050,7 @@ export function MainReport({
             </div>
 
             <div key="budget">
-              <Tile title="Budget analysis" tag="spent / contract">
+              <Tile title="Budget analysis" tag="by phase · spent / contract">
                 <div className="mr-budget-list">
                   {projectBudget.length === 0 ? (
                     <div className="plist-empty">No budget data</div>
@@ -1003,7 +1058,9 @@ export function MainReport({
                     projectBudget.map((p) => (
                       <div key={p.key} className="mr-budget-row">
                         <div className="mr-budget-label">
-                          <span title={p.status}>{p.name}</span>
+                          <span title={p.completed ? 'Completed' : 'In progress'}>
+                            {p.name}
+                          </span>
                           <span className="mono">
                             {(p.pct * 100).toFixed(0)}% · {fmtUSDk(p.spent)} /{' '}
                             {fmtUSDk(p.contract)}
@@ -1014,7 +1071,7 @@ export function MainReport({
                             className="mr-budget-fill"
                             style={{
                               width: `${Math.min(Math.max(p.pct, 0) * 100, 100)}%`,
-                              background: budgetFillColor(p.pct, p.status),
+                              background: budgetFillColor(p.pct, p.completed),
                             }}
                           />
                         </div>

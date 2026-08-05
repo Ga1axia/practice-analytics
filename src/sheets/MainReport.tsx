@@ -327,6 +327,50 @@ export function MainReport({
     return data.managers;
   }, [data]);
 
+  /** Distinct active projects per manager (assigned right now). */
+  const projectCountByManager = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const p of allProjects) {
+      const assignees = new Set<string>();
+      if (p.phases.length) {
+        for (const ph of p.phases) {
+          if ((ph.row.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
+          if (ph.row.manager) assignees.add(ph.row.manager);
+        }
+      } else if (
+        p.row?.manager &&
+        (p.row.status || 'ACTIVE').toUpperCase() === 'ACTIVE'
+      ) {
+        assignees.add(p.row.manager);
+      }
+      for (const name of assignees) {
+        let set = map.get(name);
+        if (!set) {
+          set = new Set();
+          map.set(name, set);
+        }
+        set.add(p.key);
+      }
+    }
+    const counts = new Map<string, number>();
+    for (const [name, set] of map) counts.set(name, set.size);
+    return counts;
+  }, [allProjects]);
+
+  const teamMemberRows = useMemo(() => {
+    return managerOptions
+      .map((name) => ({
+        name,
+        projects: projectCountByManager.get(name) || 0,
+      }))
+      .sort(
+        (a, b) =>
+          b.projects - a.projects ||
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      )
+      .slice(0, 24);
+  }, [managerOptions, projectCountByManager]);
+
   const filteredProjects = useMemo(() => {
     const out: ReportProject[] = [];
     for (const p of allProjects) {
@@ -1083,9 +1127,9 @@ export function MainReport({
             </div>
 
             <div key="team">
-              <Tile title="Team members" tag="filter">
+              <Tile title="Team members" tag="active projects">
                 <div className="mr-team">
-                  {managerOptions.slice(0, 24).map((name) => {
+                  {teamMemberRows.map(({ name, projects }) => {
                     const on = selectedManagers.has(name) || manager === name;
                     return (
                       <label key={name} className={`mr-team-item ${on ? 'on' : ''}`}>
@@ -1095,7 +1139,13 @@ export function MainReport({
                           disabled={!!lockedEmployee}
                           onChange={() => toggleTeamMember(name)}
                         />
-                        <span>{name}</span>
+                        <span className="mr-team-name">{name}</span>
+                        <span
+                          className="mr-team-count mono"
+                          title={`${projects} active project${projects === 1 ? '' : 's'}`}
+                        >
+                          {projects}
+                        </span>
                       </label>
                     );
                   })}

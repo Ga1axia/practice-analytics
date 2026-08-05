@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
+  chatViewActionHasEffect,
   looksLikeViewCommand,
   parseChatViewAction,
   type ChatViewAction,
@@ -37,7 +38,7 @@ export function FloatingChat({
   const [msgs, setMsgs] = useState<Msg[]>([
     {
       role: 'assistant',
-      text: 'Ask about projects, clients, contracts, or billing — or say **show me [client / project / manager]** to filter the Main Report.',
+      text: 'Ask about projects, clients, contracts, or billing — or filter the Main Report: **show me active projects**, **unprofitable projects**, **margin above 20%**, **contracts over $500k**, **over budget**, **active phases**.',
     },
   ]);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -110,14 +111,43 @@ export function FloatingChat({
     let applied: ChatViewAction | null = null;
     if (data && looksLikeViewCommand(text)) {
       applied = parseChatViewAction(text, data);
-      if (applied && (applied.clear || applied.project || applied.client || applied.manager || applied.phase || applied.status)) {
+      if (applied && chatViewActionHasEffect(applied)) {
         onViewAction?.(applied);
+      } else if (applied && !chatViewActionHasEffect(applied)) {
+        // Keep label-only reply (no match) without switching sheets.
+      } else {
+        applied = null;
       }
     }
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
+      const filterPayload: Record<string, string> = {
+        ...(filters || {}),
+      };
+      if (applied?.project) filterPayload.project = applied.project;
+      if (applied?.client) filterPayload.client = applied.client;
+      if (applied?.manager) filterPayload.manager = applied.manager;
+      if (applied?.phase) filterPayload.phase = applied.phase;
+      if (applied?.projectStatus || applied?.status) {
+        filterPayload.project_status = applied.projectStatus || applied.status || '';
+        filterPayload.status = applied.projectStatus || applied.status || '';
+      }
+      if (applied?.phaseStatus) filterPayload.phase_status = applied.phaseStatus;
+      if (applied?.profitSign) filterPayload.profit_sign = applied.profitSign;
+      if (applied?.marginMin != null) filterPayload.margin_min = String(applied.marginMin);
+      if (applied?.marginMax != null) filterPayload.margin_max = String(applied.marginMax);
+      if (applied?.billingMin != null) filterPayload.billing_min = String(applied.billingMin);
+      if (applied?.billingMax != null) filterPayload.billing_max = String(applied.billingMax);
+      if (applied?.burnMin != null) filterPayload.burn_min = String(applied.burnMin);
+      if (applied?.burnMax != null) filterPayload.burn_max = String(applied.burnMax);
+      if (applied?.contractMin != null) filterPayload.contract_min = String(applied.contractMin);
+      if (applied?.contractMax != null) filterPayload.contract_max = String(applied.contractMax);
+      if (applied?.overBudget) filterPayload.over_budget = '1';
+      if (applied?.underBudget) filterPayload.under_budget = '1';
+      if (applied?.clear) filterPayload.cleared = '1';
+
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: {
@@ -125,17 +155,9 @@ export function FloatingChat({
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          sheet: applied ? 'main' : sheet,
+          sheet: applied && chatViewActionHasEffect(applied) ? 'main' : sheet,
           question: text,
-          filters: {
-            ...(filters || {}),
-            ...(applied?.project ? { project: applied.project } : {}),
-            ...(applied?.client ? { client: applied.client } : {}),
-            ...(applied?.manager ? { manager: applied.manager } : {}),
-            ...(applied?.phase ? { phase: applied.phase } : {}),
-            ...(applied?.status ? { status: applied.status } : {}),
-            ...(applied?.clear ? { cleared: '1' } : {}),
-          },
+          filters: filterPayload,
         }),
       });
       const body = (await res.json()) as { answer?: string; error?: string };
@@ -220,8 +242,10 @@ export function FloatingChat({
       <div className="float-chat-chips">
         {[
           'Show me active projects',
+          'Show me unprofitable projects',
+          'Show me over budget',
+          'Show me contracts over $500k',
           'Clear filters',
-          'Top clients by billed',
         ].map((c) => (
           <button key={c} type="button" onClick={() => void ask(c)} disabled={busy}>
             {c}
@@ -233,7 +257,7 @@ export function FloatingChat({
           type="text"
           value={q}
           disabled={busy}
-          placeholder='Try “show me [client]” or ask a question…'
+          placeholder='Try “show me unprofitable” or “margin above 20%”…'
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void ask();

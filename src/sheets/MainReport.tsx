@@ -21,12 +21,20 @@ import {
   statusAbbrev,
   typeAbbrev,
 } from '../lib/phaseAbbrev';
-import type { ChatViewAction } from '../lib/chatViewAction';
+import {
+  aiFilterChips,
+  aiFiltersActive,
+  EMPTY_AI_FILTERS,
+  mergeAiFilters,
+  passesAiMetricFilters,
+  type AiMetricFilters,
+  type ChatViewAction,
+} from '../lib/chatViewAction';
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
 import { rowOutstanding, sumAmountReceivable } from '../lib/receivable';
 import type { DashboardData, ProjectRow } from '../lib/types';
 
-type ReportProject = ProjectNode & { spent: number };
+type ReportProject = ProjectNode & { spent: number; profit: number };
 
 const LAYOUT_KEY = 'pa-main-report-layout-v3';
 const GRID_ROWS = 14;
@@ -146,10 +154,12 @@ export function MainReport({
 }) {
   const [projectFilter, setProjectFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
-  const [status, setStatus] = useState('ACTIVE');
+  const [projectStatus, setProjectStatus] = useState('ACTIVE');
+  const [phaseStatus, setPhaseStatus] = useState('');
   const [phase, setPhase] = useState('');
   const [manager, setManager] = useState(lockedEmployee || '');
   const [selectedManagers, setSelectedManagers] = useState<Set<string>>(new Set());
+  const [aiFilters, setAiFilters] = useState<AiMetricFilters>(EMPTY_AI_FILTERS);
   const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
   const [focus, setFocus] = useState<Focus>(null);
   const [layout, setLayout] = useState<Layout>(() => loadLayout());
@@ -240,8 +250,10 @@ export function MainReport({
     if (a.clear) {
       setProjectFilter('');
       setClientFilter('');
-      setStatus('');
+      setProjectStatus('');
+      setPhaseStatus('');
       setPhase('');
+      setAiFilters(EMPTY_AI_FILTERS);
       if (!lockedEmployee) {
         setManager('');
         setSelectedManagers(new Set());
@@ -254,11 +266,28 @@ export function MainReport({
       setClientFilter(a.client);
       if (a.project == null) setProjectFilter('');
     }
-    if (a.status != null) setStatus(a.status);
+    if (a.projectStatus != null) setProjectStatus(a.projectStatus);
+    else if (a.status != null) setProjectStatus(a.status);
+    if (a.phaseStatus != null) setPhaseStatus(a.phaseStatus);
     if (a.phase != null) setPhase(a.phase);
     if (a.manager != null && !lockedEmployee) {
       setManager(a.manager);
       setSelectedManagers(new Set());
+    }
+    if (
+      a.profitSign != null ||
+      a.marginMin !== undefined ||
+      a.marginMax !== undefined ||
+      a.billingMin !== undefined ||
+      a.billingMax !== undefined ||
+      a.burnMin !== undefined ||
+      a.burnMax !== undefined ||
+      a.contractMin !== undefined ||
+      a.contractMax !== undefined ||
+      a.overBudget != null ||
+      a.underBudget != null
+    ) {
+      setAiFilters((prev) => mergeAiFilters(prev, a));
     }
   }, [viewAction, lockedEmployee]);
 
@@ -283,20 +312,25 @@ export function MainReport({
       if (projectFilter && p.key !== projectFilter) continue;
       if (clientFilter && clientByProject.get(p.key) !== clientFilter) continue;
 
+      if (projectStatus) {
+        const pst = reportProjectStatus({ ...p, spent: 0, profit: 0 });
+        if ((pst || 'ACTIVE').toUpperCase() !== projectStatus.toUpperCase()) continue;
+      }
+
       const phases = p.phases.filter((ph) => {
-        if (status && (ph.row.status || 'ACTIVE') !== status) return false;
+        if (phaseStatus && (ph.row.status || 'ACTIVE') !== phaseStatus) return false;
         if (phase && (ph.row.phase || '') !== phase) return false;
         if (manager && ph.row.manager !== manager) return false;
         if (selectedManagers.size && !selectedManagers.has(ph.row.manager || '')) return false;
         return true;
       });
 
-      const hasPhaseFilters = !!(manager || selectedManagers.size || status || phase);
+      const hasPhaseFilters = !!(manager || selectedManagers.size || phaseStatus || phase);
       const shownPhases = hasPhaseFilters ? phases : p.phases;
       if (hasPhaseFilters && !shownPhases.length) {
         if (!p.row) continue;
         const hdrOk =
-          (!status || (p.row.status || 'ACTIVE') === status) &&
+          (!phaseStatus || (p.row.status || 'ACTIVE') === phaseStatus) &&
           (!manager || p.row.manager === manager) &&
           (!selectedManagers.size || selectedManagers.has(p.row.manager || ''));
         if (!hdrOk || phase) continue;
@@ -320,8 +354,11 @@ export function MainReport({
       const spent = shownPhases.length
         ? shownPhases.reduce((a, x) => a + spentOf(x.row), 0)
         : spentOf(p.row || ({ spent: 0 } as ProjectRow));
+      const profit = shownPhases.length
+        ? shownPhases.reduce((a, x) => a + (x.row.profit || 0), 0)
+        : p.row?.profit || 0;
 
-      out.push({
+      const candidate: ReportProject = {
         ...p,
         phases: shownPhases,
         contract,
@@ -330,11 +367,39 @@ export function MainReport({
         billedHours,
         spentHours,
         spent,
-      });
+        profit,
+      };
+
+      if (aiFiltersActive(aiFilters)) {
+        const billingPct = contract > 0 ? billed / contract : null;
+        const burnPct = contract > 0 ? spent / contract : null;
+        const margin = billed > 0 ? profit / billed : null;
+        if (
+          !passesAiMetricFilters(
+            { profit, margin, billingPct, burnPct, contract },
+            aiFilters,
+          )
+        ) {
+          continue;
+        }
+      }
+
+      out.push(candidate);
     }
     out.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
     return out;
-  }, [allProjects, projectFilter, clientFilter, clientByProject, status, phase, manager, selectedManagers]);
+  }, [
+    allProjects,
+    projectFilter,
+    clientFilter,
+    clientByProject,
+    projectStatus,
+    phaseStatus,
+    phase,
+    manager,
+    selectedManagers,
+    aiFilters,
+  ]);
 
   // Dropdown project filter → expand phases + scope KPIs to that project.
   useEffect(() => {
@@ -644,14 +709,35 @@ export function MainReport({
                     </select>
                   </label>
                   <label>
-                    <span>Status</span>
-                    <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                    <span>Project status</span>
+                    <select
+                      value={projectStatus}
+                      onChange={(e) => setProjectStatus(e.target.value)}
+                    >
                       <option value="">All</option>
-                      {(data.statuses.length ? data.statuses : ['ACTIVE']).map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
+                      {(data.statuses.length ? data.statuses : ['ACTIVE', 'COMPLETED']).map(
+                        (s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Phase status</span>
+                    <select
+                      value={phaseStatus}
+                      onChange={(e) => setPhaseStatus(e.target.value)}
+                    >
+                      <option value="">All</option>
+                      {(data.statuses.length ? data.statuses : ['ACTIVE', 'COMPLETED']).map(
+                        (s) => (
+                          <option key={`ph-${s}`} value={s}>
+                            {s}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </label>
                   <label>
@@ -668,6 +754,36 @@ export function MainReport({
                   <button type="button" className="reset-btn" onClick={resetLayout}>
                     Reset layout
                   </button>
+                  {aiFiltersActive(aiFilters) ? (
+                    <div className="mr-ai-filters">
+                      <span className="mr-ai-filters-label mono">AI filters</span>
+                      {aiFilterChips(aiFilters).map((chip) => (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          className="mr-ai-chip"
+                          title={`Remove ${chip.label}`}
+                          onClick={() =>
+                            setAiFilters((prev) => ({ ...prev, ...chip.clear }))
+                          }
+                        >
+                          {chip.label} ×
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="mr-ai-clear"
+                        onClick={() => setAiFilters(EMPTY_AI_FILTERS)}
+                      >
+                        Clear AI filters
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mr-ai-hint">
+                      Ask AI can also filter by profit, margin, billing progress, burn, contract
+                      size, over/under budget.
+                    </p>
+                  )}
                 </div>
               </Tile>
             </div>

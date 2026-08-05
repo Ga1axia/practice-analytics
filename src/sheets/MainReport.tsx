@@ -57,17 +57,6 @@ function isCompletedStatus(status: string | null | undefined): boolean {
   return s === 'COMPLETED' || s === 'COMPLETE' || s === 'DONE';
 }
 
-/**
- * Project List uploads often stamp every row ACTIVE. Treat a phase/project as
- * complete when status says so, or when the contract is financially closed out.
- */
-function isBudgetComplete(row: ProjectRow): boolean {
-  if (isCompletedStatus(row.status)) return true;
-  const contract = row.contract || 0;
-  if (contract <= 0) return false;
-  return rowOutstanding(row) <= 0.01 && (row.billed || 0) > 0;
-}
-
 /** Spent/contract colors for Budget analysis (incomplete vs completed). */
 function budgetFillColor(pct: number, completed: boolean): string {
   if (completed) {
@@ -82,16 +71,18 @@ function budgetFillColor(pct: number, completed: boolean): string {
   return '#A8D4B8'; // light green — below 90%
 }
 
-/** Prefer phase statuses — project headers from uploads are often stuck on ACTIVE. */
+/**
+ * Project status — COMPLETED only when explicitly marked (header or every phase).
+ * Never inferred from billing / outstanding.
+ */
 function reportProjectStatus(p: Pick<ReportProject, 'row' | 'phases'>): string {
+  if (isCompletedStatus(p.row?.status)) return 'COMPLETED';
   if (p.phases.length) {
-    if (p.phases.every((ph) => isBudgetComplete(ph.row))) return 'COMPLETED';
-    if (p.phases.some((ph) => !isBudgetComplete(ph.row))) {
-      const open = p.phases.find((ph) => !isBudgetComplete(ph.row));
-      return open?.row.status || 'ACTIVE';
-    }
+    const statuses = p.phases.map((ph) => (ph.row.status || 'ACTIVE').toUpperCase());
+    if (statuses.every((s) => isCompletedStatus(s))) return 'COMPLETED';
+    if (statuses.some((s) => s === 'ACTIVE')) return 'ACTIVE';
+    return statuses.find((s) => !isCompletedStatus(s)) || p.row?.status || 'ACTIVE';
   }
-  if (p.row && isBudgetComplete(p.row)) return 'COMPLETED';
   return p.row?.status || 'ACTIVE';
 }
 
@@ -383,12 +374,7 @@ export function MainReport({
       }
 
       const phases = p.phases.filter((ph) => {
-        if (phaseStatus) {
-          const st = isBudgetComplete(ph.row)
-            ? 'COMPLETED'
-            : (ph.row.status || 'ACTIVE').toUpperCase();
-          if (st !== phaseStatus.toUpperCase()) return false;
-        }
+        if (phaseStatus && (ph.row.status || 'ACTIVE') !== phaseStatus) return false;
         if (phase && (ph.row.phase || '') !== phase) return false;
         if (manager && ph.row.manager !== manager) return false;
         if (selectedManagers.size && !selectedManagers.has(ph.row.manager || '')) return false;
@@ -399,11 +385,8 @@ export function MainReport({
       const shownPhases = hasPhaseFilters ? phases : p.phases;
       if (hasPhaseFilters && !shownPhases.length) {
         if (!p.row) continue;
-        const hdrStatus = isBudgetComplete(p.row)
-          ? 'COMPLETED'
-          : (p.row.status || 'ACTIVE').toUpperCase();
         const hdrOk =
-          (!phaseStatus || hdrStatus === phaseStatus.toUpperCase()) &&
+          (!phaseStatus || (p.row.status || 'ACTIVE') === phaseStatus) &&
           (!manager || p.row.manager === manager) &&
           (!selectedManagers.size || selectedManagers.has(p.row.manager || ''));
         if (!hdrOk || phase) continue;
@@ -594,7 +577,7 @@ export function MainReport({
           bars.push({
             key: ph.row.project,
             name: `${title} · ${ph.label}`,
-            completed: isBudgetComplete(ph.row),
+            completed: isCompletedStatus(ph.row.status),
             contract,
             spent,
             pct: spent / contract,
@@ -606,7 +589,7 @@ export function MainReport({
         bars.push({
           key: p.key,
           name: title,
-          completed: isBudgetComplete(p.row),
+          completed: isCompletedStatus(p.row.status),
           contract,
           spent: p.spent,
           pct: p.spent / contract,

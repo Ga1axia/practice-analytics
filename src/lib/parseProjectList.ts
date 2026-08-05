@@ -125,18 +125,13 @@ export function parseProjectListWorkbook(data: ArrayBuffer): ParsedProjectList {
     }
 
     const pctBilled = contract > 0 ? billed / contract : null;
-    // Project List has no status column — infer closed-out work as COMPLETED.
-    const status =
-      !isProject && contract > 0 && outstanding <= 0.01 && billed > 0
-        ? 'COMPLETED'
-        : 'ACTIVE';
 
     rows.push({
       project,
       client,
       city: null,
       manager: manager || null,
-      status,
+      status: 'ACTIVE',
       type: null,
       phase: phaseLabel,
       contract,

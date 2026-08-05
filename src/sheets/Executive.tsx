@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { HBarChart, StackedCountHBar } from '../components/Charts';
+import { HBarChart, StackedCountHBar, StackedValueHBar } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { useAuth } from '../hooks/useAuth';
 import { useDashboard } from '../hooks/useDashboard';
@@ -12,9 +12,93 @@ import { parseProjectListFile } from '../lib/parseProjectList';
 import { buildClientHierarchy } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
 import { supabase } from '../lib/supabase';
-import type { DashboardData } from '../lib/types';
+import type { DashboardData, ProjectRow } from '../lib/types';
+import {
+  classifyWorkType,
+  WORK_TYPE_COLORS,
+  WORK_TYPES,
+  type WorkType,
+} from '../lib/workType';
 
 const OTHER_PHASE_COLOR = '#9AA8B5';
+const PHASE_KEYS = [...PROCESS_PHASES.map((p) => p.shortName), 'Other'];
+
+type LoadSort = 'load' | 'city';
+
+type EmpPhaseLoad = {
+  name: string;
+  city: string;
+  phaseCounts: Record<string, number>;
+  phaseContracts: Record<string, number>;
+  typeCounts: Record<WorkType, number>;
+  typeContracts: Record<WorkType, number>;
+  phaseTotal: number;
+  contractTotal: number;
+  projectTotal: number;
+};
+
+function phaseBucket(phase: string | null | undefined): string {
+  const idx = matchProcessPhaseIndex(phase);
+  return idx >= 0 ? PROCESS_PHASES[idx]!.shortName : 'Other';
+}
+
+function emptyPhaseMap(): Record<string, number> {
+  return Object.fromEntries(PHASE_KEYS.map((k) => [k, 0]));
+}
+
+function emptyTypeMap(): Record<WorkType, number> {
+  return Object.fromEntries(WORK_TYPES.map((k) => [k, 0])) as Record<WorkType, number>;
+}
+
+function projectKeyOf(r: ProjectRow): string {
+  return r.parent_project || r.project;
+}
+
+function cityOf(r: ProjectRow): string {
+  const c = (r.city || '').trim();
+  return c || 'Unspecified';
+}
+
+/** Mode city across an employee's active project cities. */
+function primaryCity(cityHits: Map<string, number>): string {
+  let best = 'Unspecified';
+  let n = -1;
+  for (const [city, count] of cityHits) {
+    if (count > n || (count === n && city.localeCompare(best) < 0)) {
+      best = city;
+      n = count;
+    }
+  }
+  return best;
+}
+
+function sortEmployees(rows: EmpPhaseLoad[], sort: LoadSort, by: 'phase' | 'contract' | 'type') {
+  return [...rows].sort((a, b) => {
+    if (sort === 'city') {
+      const c = a.city.localeCompare(b.city, undefined, { sensitivity: 'base' });
+      if (c !== 0) return c;
+    }
+    const av =
+      by === 'phase' ? a.phaseTotal : by === 'contract' ? a.contractTotal : a.projectTotal;
+    const bv =
+      by === 'phase' ? b.phaseTotal : by === 'contract' ? b.contractTotal : b.projectTotal;
+    return bv - av || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  });
+}
+
+function seriesFromMaps(
+  employees: EmpPhaseLoad[],
+  keys: string[],
+  pick: (e: EmpPhaseLoad, key: string) => number,
+  colorOf: (key: string) => string,
+) {
+  const used = keys.filter((k) => employees.some((e) => pick(e, k) > 0));
+  return used.map((key) => ({
+    label: key,
+    color: colorOf(key),
+    values: employees.map((e) => pick(e, key)),
+  }));
+}
 
 export function Executive({ data }: { data: DashboardData }) {
   const { profile } = useAuth();
@@ -25,6 +109,8 @@ export function Executive({ data }: { data: DashboardData }) {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [loadSort, setLoadSort] = useState<LoadSort>('load');
+  const [typeMetric, setTypeMetric] = useState<'count' | 'contract'>('count');
 
   const hierarchy = useMemo(() => buildClientHierarchy(data.projects), [data.projects]);
 
@@ -51,55 +137,156 @@ export function Executive({ data }: { data: DashboardData }) {
     [hierarchy],
   );
 
-  /** Employees × process-phase assignment counts (stacked bar). */
-  const phaseAssignments = useMemo(() => {
-    const phaseKeys = [...PROCESS_PHASES.map((p) => p.shortName), 'Other'];
-    const byEmp = new Map<string, Record<string, number>>();
+  /** Active workload per employee — phases, contract $, work type, city. */
+  const employeeLoad = useMemo(() => {
+    type Acc = {
+      phaseCounts: Record<string, number>;
+      phaseContracts: Record<string, number>;
+      typeCounts: Record<WorkType, number>;
+      typeContracts: Record<WorkType, number>;
+      cityHits: Map<string, number>;
+      projects: Set<string>;
+    };
+    const byEmp = new Map<string, Acc>();
+
+    const ensure = (name: string): Acc => {
+      let row = byEmp.get(name);
+      if (!row) {
+        row = {
+          phaseCounts: emptyPhaseMap(),
+          phaseContracts: emptyPhaseMap(),
+          typeCounts: emptyTypeMap(),
+          typeContracts: emptyTypeMap(),
+          cityHits: new Map(),
+          projects: new Set(),
+        };
+        byEmp.set(name, row);
+      }
+      return row;
+    };
+
+    // City / type from project headers when available
+    const projectMeta = new Map<string, { city: string; type: WorkType; title: string }>();
+    for (const r of data.projects) {
+      if (r.row_kind !== 'project') continue;
+      projectMeta.set(r.project, {
+        city: cityOf(r),
+        type: classifyWorkType(r.project, r.type),
+        title: r.project,
+      });
+    }
 
     for (const r of data.projects) {
       if (!r.manager || r.row_kind === 'project') continue;
       const phase = (r.phase || '').trim();
       if (!phase || phase === 'Other' || phase === 'Internal/PTO') continue;
-      const st = (r.status || 'ACTIVE').toUpperCase();
-      if (st !== 'ACTIVE') continue;
+      if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
 
-      const idx = matchProcessPhaseIndex(phase);
-      const key = idx >= 0 ? PROCESS_PHASES[idx]!.shortName : 'Other';
-      let row = byEmp.get(r.manager);
-      if (!row) {
-        row = Object.fromEntries(phaseKeys.map((k) => [k, 0]));
-        byEmp.set(r.manager, row);
+      const acc = ensure(r.manager);
+      const bucket = phaseBucket(phase);
+      acc.phaseCounts[bucket] = (acc.phaseCounts[bucket] || 0) + 1;
+      acc.phaseContracts[bucket] = (acc.phaseContracts[bucket] || 0) + (r.contract || 0);
+
+      const pk = projectKeyOf(r);
+      const meta = projectMeta.get(pk);
+      const city = meta?.city || cityOf(r);
+      const workType = meta?.type || classifyWorkType(pk || r.project, r.type);
+      acc.cityHits.set(city, (acc.cityHits.get(city) || 0) + 1);
+
+      if (!acc.projects.has(pk)) {
+        acc.projects.add(pk);
+        acc.typeCounts[workType] = (acc.typeCounts[workType] || 0) + 1;
       }
-      row[key] = (row[key] || 0) + 1;
+      // Attribute phase contract to work type as well
+      acc.typeContracts[workType] = (acc.typeContracts[workType] || 0) + (r.contract || 0);
     }
 
-    const employees = [...byEmp.entries()]
-      .map(([name, counts]) => ({
-        name,
-        counts,
-        total: phaseKeys.reduce((a, k) => a + (counts[k] || 0), 0),
-      }))
-      .filter((e) => e.total > 0)
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
-      .slice(0, 14);
+    return [...byEmp.entries()]
+      .map(([name, acc]) => {
+        const phaseTotal = PHASE_KEYS.reduce((a, k) => a + (acc.phaseCounts[k] || 0), 0);
+        const contractTotal = PHASE_KEYS.reduce((a, k) => a + (acc.phaseContracts[k] || 0), 0);
+        return {
+          name,
+          city: primaryCity(acc.cityHits),
+          phaseCounts: acc.phaseCounts,
+          phaseContracts: acc.phaseContracts,
+          typeCounts: acc.typeCounts,
+          typeContracts: acc.typeContracts,
+          phaseTotal,
+          contractTotal,
+          projectTotal: acc.projects.size,
+        } satisfies EmpPhaseLoad;
+      })
+      .filter((e) => e.phaseTotal > 0);
+  }, [data.projects]);
 
-    const usedKeys = phaseKeys.filter((k) =>
-      employees.some((e) => (e.counts[k] || 0) > 0),
-    );
-
-    const series = usedKeys.map((key) => {
-      const proc = PROCESS_PHASES.find((p) => p.shortName === key);
-      return {
-        label: key,
-        color: proc?.color || OTHER_PHASE_COLOR,
-        values: employees.map((e) => e.counts[key] || 0),
-      };
-    });
-
+  const phaseCountChart = useMemo(() => {
+    const employees = sortEmployees(employeeLoad, loadSort, 'phase').slice(0, 16);
     return {
-      labels: employees.map((e) => e.name),
-      series,
+      labels: employees.map((e) =>
+        loadSort === 'city' ? `${e.city} · ${e.name}` : e.name,
+      ),
+      series: seriesFromMaps(
+        employees,
+        PHASE_KEYS,
+        (e, k) => e.phaseCounts[k] || 0,
+        (k) => PROCESS_PHASES.find((p) => p.shortName === k)?.color || OTHER_PHASE_COLOR,
+      ),
     };
+  }, [employeeLoad, loadSort]);
+
+  const phaseContractChart = useMemo(() => {
+    const employees = sortEmployees(employeeLoad, loadSort, 'contract').slice(0, 16);
+    return {
+      labels: employees.map((e) =>
+        loadSort === 'city' ? `${e.city} · ${e.name}` : e.name,
+      ),
+      series: seriesFromMaps(
+        employees,
+        PHASE_KEYS,
+        (e, k) => e.phaseContracts[k] || 0,
+        (k) => PROCESS_PHASES.find((p) => p.shortName === k)?.color || OTHER_PHASE_COLOR,
+      ),
+    };
+  }, [employeeLoad, loadSort]);
+
+  const typeChart = useMemo(() => {
+    const employees = sortEmployees(employeeLoad, loadSort, 'type').slice(0, 16);
+    const pick =
+      typeMetric === 'count'
+        ? (e: EmpPhaseLoad, k: string) => e.typeCounts[k as WorkType] || 0
+        : (e: EmpPhaseLoad, k: string) => e.typeContracts[k as WorkType] || 0;
+    return {
+      labels: employees.map((e) =>
+        loadSort === 'city' ? `${e.city} · ${e.name}` : e.name,
+      ),
+      series: seriesFromMaps(employees, WORK_TYPES, pick, (k) => WORK_TYPE_COLORS[k as WorkType]),
+      metric: typeMetric,
+    };
+  }, [employeeLoad, loadSort, typeMetric]);
+
+  /** Active contract by city — alphabetical. */
+  const cityLoad = useMemo(() => {
+    const map = new Map<string, number>();
+
+    const projectCity = new Map<string, string>();
+    for (const r of data.projects) {
+      if (r.row_kind === 'project') projectCity.set(r.project, cityOf(r));
+    }
+
+    for (const r of data.projects) {
+      if (r.row_kind === 'project') continue;
+      if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
+      const phase = (r.phase || '').trim();
+      if (!phase || phase === 'Other' || phase === 'Internal/PTO') continue;
+      const city = projectCity.get(projectKeyOf(r)) || cityOf(r);
+      map.set(city, (map.get(city) || 0) + (r.contract || 0));
+    }
+
+    return [...map.entries()]
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }))
+      .slice(0, 16);
   }, [data.projects]);
 
   async function onFile(file: File | null) {
@@ -190,17 +377,112 @@ export function Executive({ data }: { data: DashboardData }) {
         </div>
         <div className="panel">
           <h3>
-            Phase assignments by employee
-            <span className="tag">Active phases · count</span>
+            Active contract by city
+            <span className="tag">Sorted A–Z</span>
           </h3>
           <div className="chart-wrap tall">
-            {phaseAssignments.labels.length === 0 ? (
-              <div className="plist-empty">No active phase assignments</div>
+            {cityLoad.length === 0 ? (
+              <div className="plist-empty">No city data on active phases</div>
             ) : (
+              <HBarChart
+                labels={cityLoad.map((x) => x[0])}
+                values={cityLoad.map((x) => x[1])}
+                color={palette.teal}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel exec-load">
+        <div className="exec-load-head">
+          <h3>
+            Team load
+            <span className="tag">Active phases · how loaded everyone is</span>
+          </h3>
+          <div className="exec-toggle" role="group" aria-label="Sort team load">
+            <button
+              type="button"
+              className={loadSort === 'load' ? 'on' : ''}
+              onClick={() => setLoadSort('load')}
+            >
+              Busiest
+            </button>
+            <button
+              type="button"
+              className={loadSort === 'city' ? 'on' : ''}
+              onClick={() => setLoadSort('city')}
+            >
+              By city
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-2 exec-load-grid">
+          <div>
+            <h4 className="exec-load-sub">By phase · count</h4>
+            <div className="chart-wrap tall">
+              {phaseCountChart.labels.length === 0 ? (
+                <div className="plist-empty">No active phase assignments</div>
+              ) : (
+                <StackedCountHBar
+                  labels={phaseCountChart.labels}
+                  series={phaseCountChart.series}
+                  xTitle="# of phases assigned"
+                />
+              )}
+            </div>
+          </div>
+          <div>
+            <h4 className="exec-load-sub">By phase · contract value</h4>
+            <div className="chart-wrap tall">
+              {phaseContractChart.labels.length === 0 ? (
+                <div className="plist-empty">No active phase assignments</div>
+              ) : (
+                <StackedValueHBar
+                  labels={phaseContractChart.labels}
+                  series={phaseContractChart.series}
+                  xTitle="Contract $"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="exec-load-type">
+          <div className="exec-load-type-head">
+            <h4 className="exec-load-sub">Per person · project type</h4>
+            <div className="exec-toggle" role="group" aria-label="Project type metric">
+              <button
+                type="button"
+                className={typeMetric === 'count' ? 'on' : ''}
+                onClick={() => setTypeMetric('count')}
+              >
+                Projects
+              </button>
+              <button
+                type="button"
+                className={typeMetric === 'contract' ? 'on' : ''}
+                onClick={() => setTypeMetric('contract')}
+              >
+                Contract $
+              </button>
+            </div>
+          </div>
+          <div className="chart-wrap tall">
+            {typeChart.labels.length === 0 ? (
+              <div className="plist-empty">No active project assignments</div>
+            ) : typeMetric === 'count' ? (
               <StackedCountHBar
-                labels={phaseAssignments.labels}
-                series={phaseAssignments.series}
-                xTitle="# of phases assigned"
+                labels={typeChart.labels}
+                series={typeChart.series}
+                xTitle="# of projects"
+              />
+            ) : (
+              <StackedValueHBar
+                labels={typeChart.labels}
+                series={typeChart.series}
+                xTitle="Contract $"
               />
             )}
           </div>

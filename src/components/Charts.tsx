@@ -408,3 +408,73 @@ export function StackedCountHBar({
     />
   );
 }
+
+/** Horizontal stacked bars — dollar values by category (e.g. contract load per employee). */
+export function StackedValueHBar({
+  labels,
+  series,
+  xTitle,
+}: {
+  labels: string[];
+  series: { label: string; values: number[]; color: string }[];
+  xTitle?: string;
+}) {
+  return (
+    <Chart
+      type="bar"
+      data={{
+        labels,
+        datasets: series.map((s) => ({
+          label: s.label,
+          data: s.values,
+          backgroundColor: s.color,
+          stack: 'value',
+          borderWidth: 0,
+        })),
+      }}
+      options={{
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { family: 'IBM Plex Mono', size: 9.5 }, boxWidth: 10 },
+          },
+          tooltip: {
+            callbacks: {
+              label: (c) => `${c.dataset.label}: ${fmtUSD(Number(c.raw))}`,
+              footer: (items) => {
+                const total = items.reduce((a, it) => a + Number(it.raw || 0), 0);
+                return `Total: ${fmtUSD(total)}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            min: 0,
+            ticks: {
+              callback: (v) => fmtUSDk(Number(v)),
+              font: { family: 'IBM Plex Mono', size: 10 },
+            },
+            grid: { color: '#E4E8EE' },
+            title: xTitle
+              ? {
+                  display: true,
+                  text: xTitle,
+                  font: { family: 'IBM Plex Mono', size: 9.5 },
+                  color: '#6B7A8D',
+                }
+              : undefined,
+          },
+          y: {
+            stacked: true,
+            ticks: { font: { size: 10.5 } },
+            grid: { display: false },
+          },
+        },
+      }}
+    />
+  );
+}

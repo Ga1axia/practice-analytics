@@ -1313,6 +1313,30 @@ footer{
 }
 .plist-upload-btn:hover{ background:var(--navy-2); }
 .plist-upload-btn:disabled{ opacity:0.55; cursor:default; }
+
+.exec-load-head,
+.exec-load-type-head{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  margin-bottom:8px;
+}
+.exec-load-head h3{ margin:0; }
+.exec-load-sub{
+  margin:0 0 6px; font-family:'IBM Plex Mono',monospace; font-size:10.5px;
+  letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-soft); font-weight:500;
+}
+.exec-load-grid{ margin-top:4px; }
+.exec-load-type{ margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
+.exec-toggle{
+  display:inline-flex; border:1px solid var(--border); background:#fff; flex-shrink:0;
+}
+.exec-toggle button{
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.04em;
+  padding:5px 10px; border:none; background:transparent; color:var(--ink-soft); cursor:pointer;
+}
+.exec-toggle button + button{ border-left:1px solid var(--border); }
+.exec-toggle button.on{
+  background:var(--navy); color:#fff;
+}
 .plist-upload-ok{ margin:10px 0 0; font-size:13px; color:var(--teal); }
 .plist-upload-err{ margin:10px 0 0; font-size:13px; color:var(--rust); }
 

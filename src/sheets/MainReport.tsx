@@ -369,7 +369,7 @@ export function MainReport({
       if (clientFilter && clientByProject.get(p.key) !== clientFilter) continue;
 
       if (projectStatus) {
-        const pst = reportProjectStatus({ ...p, spent: 0, profit: 0 });
+        const pst = reportProjectStatus(p);
         if ((pst || 'ACTIVE').toUpperCase() !== projectStatus.toUpperCase()) continue;
       }
 

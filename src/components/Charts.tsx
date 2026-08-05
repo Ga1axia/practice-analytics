@@ -280,9 +280,11 @@ export function GaugeRing({
 export function VBarChart({
   labels,
   datasets,
+  showLegend = true,
 }: {
   labels: string[];
   datasets: { label: string; values: number[]; color: string }[];
+  showLegend?: boolean;
 }) {
   return (
     <Chart
@@ -299,11 +301,20 @@ export function VBarChart({
       options={{
         maintainAspectRatio: false,
         plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { font: { family: 'IBM Plex Mono', size: 10 }, boxWidth: 10 },
+          legend: showLegend
+            ? {
+                position: 'bottom',
+                labels: { font: { family: 'IBM Plex Mono', size: 10 }, boxWidth: 10 },
+              }
+            : { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) =>
+                showLegend
+                  ? c.dataset.label + ': ' + fmtUSD(Number(c.raw))
+                  : fmtUSD(Number(c.raw)),
+            },
           },
-          tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmtUSD(Number(c.raw)) } },
         },
         scales: {
           x: { ticks: { font: { family: 'IBM Plex Mono', size: 10 } } },

@@ -36,20 +36,20 @@ import type { DashboardData, ProjectRow } from '../lib/types';
 
 type ReportProject = ProjectNode & { spent: number; profit: number };
 
-const LAYOUT_KEY = 'pa-main-report-layout-v3';
+const LAYOUT_KEY = 'pa-main-report-layout-v4';
 const GRID_ROWS = 14;
 const GRID_MARGIN: [number, number] = [6, 6];
 
-/** Default: Active projects, taller table, compact right-side charts. */
+/** Default Main Report grid — matches the standard admin layout. */
 const DEFAULT_LAYOUT: Layout = [
   { i: 'kpis', x: 0, y: 0, w: 7, h: 2, minW: 4, minH: 1 },
   { i: 'filters', x: 7, y: 0, w: 5, h: 2, minW: 3, minH: 2 },
-  { i: 'table', x: 0, y: 2, w: 8, h: 9, minW: 4, minH: 4 },
-  { i: 'gauges', x: 8, y: 2, w: 4, h: 5, minW: 2, minH: 3 },
-  { i: 'billable', x: 8, y: 7, w: 4, h: 4, minW: 2, minH: 2 },
-  { i: 'client', x: 0, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
-  { i: 'budget', x: 4, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
-  { i: 'team', x: 8, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
+  { i: 'table', x: 0, y: 2, w: 8, h: 8, minW: 4, minH: 4 },
+  { i: 'gauges', x: 8, y: 2, w: 4, h: 8, minW: 2, minH: 3 },
+  { i: 'client', x: 0, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'budget', x: 3, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'team', x: 6, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'billable', x: 9, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
 ];
 
 function isCompletedStatus(status: string | null | undefined): boolean {
@@ -1108,6 +1108,7 @@ export function MainReport({
                 <div className="chart-wrap fill">
                   <VBarChart
                     labels={billableAnalysis.labels}
+                    showLegend={false}
                     datasets={[
                       {
                         label: 'Amount',

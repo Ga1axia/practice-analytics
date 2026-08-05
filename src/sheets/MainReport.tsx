@@ -28,21 +28,43 @@ import type { DashboardData, ProjectRow } from '../lib/types';
 
 type ReportProject = ProjectNode & { spent: number };
 
-const LAYOUT_KEY = 'pa-main-report-layout-v2';
+const LAYOUT_KEY = 'pa-main-report-layout-v3';
 const GRID_ROWS = 14;
 const GRID_MARGIN: [number, number] = [6, 6];
 
-/** Default: filters wide enough for Manager, project table tall, no dead bands. */
+/** Default: Active projects, taller table, compact right-side charts. */
 const DEFAULT_LAYOUT: Layout = [
   { i: 'kpis', x: 0, y: 0, w: 7, h: 2, minW: 4, minH: 1 },
   { i: 'filters', x: 7, y: 0, w: 5, h: 2, minW: 3, minH: 2 },
-  { i: 'table', x: 0, y: 2, w: 8, h: 8, minW: 4, minH: 4 },
-  { i: 'gauges', x: 8, y: 2, w: 4, h: 8, minW: 2, minH: 3 },
-  { i: 'client', x: 0, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
-  { i: 'budget', x: 3, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
-  { i: 'team', x: 6, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
-  { i: 'billable', x: 9, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
+  { i: 'table', x: 0, y: 2, w: 8, h: 9, minW: 4, minH: 4 },
+  { i: 'gauges', x: 8, y: 2, w: 4, h: 5, minW: 2, minH: 3 },
+  { i: 'billable', x: 8, y: 7, w: 4, h: 4, minW: 2, minH: 2 },
+  { i: 'client', x: 0, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
+  { i: 'budget', x: 4, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
+  { i: 'team', x: 8, y: 11, w: 4, h: 3, minW: 2, minH: 2 },
 ];
+
+/** Spent/contract colors for Budget analysis (incomplete vs completed). */
+function budgetFillColor(pct: number, status: string): string {
+  const completed = status.toUpperCase() === 'COMPLETED';
+  if (completed) {
+    if (pct > 1) return '#C45C5C'; // red — over budget
+    if (pct >= 0.9) return '#5B9BD5'; // blue — 90–100%
+    return '#3D9B5F'; // green — under 90%
+  }
+  // Incomplete
+  if (pct > 1) return '#E8A8A4'; // light red — above
+  if (Math.abs(pct - 1) < 0.005) return '#9EC9E8'; // light blue — exact
+  if (pct >= 0.9) return '#E8D48A'; // yellow — 90% up to exact
+  return '#A8D4B8'; // light green — below 90%
+}
+
+function reportProjectStatus(p: ReportProject): string {
+  if (p.row?.status) return p.row.status || 'ACTIVE';
+  const statuses = p.phases.map((ph) => (ph.row.status || 'ACTIVE').toUpperCase());
+  if (statuses.length && statuses.every((s) => s === 'COMPLETED')) return 'COMPLETED';
+  return p.phases[0]?.row.status || 'ACTIVE';
+}
 
 const LAYOUT_IDS = new Set(DEFAULT_LAYOUT.map((l) => l.i));
 
@@ -124,7 +146,7 @@ export function MainReport({
 }) {
   const [projectFilter, setProjectFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState('ACTIVE');
   const [phase, setPhase] = useState('');
   const [manager, setManager] = useState(lockedEmployee || '');
   const [selectedManagers, setSelectedManagers] = useState<Set<string>>(new Set());
@@ -408,25 +430,28 @@ export function MainReport({
       .slice(0, 10);
   }, [scopedRows]);
 
-  const phaseBudget = useMemo(() => {
-    const map: Record<string, { contract: number; spent: number; billed: number }> = {};
-    scopedRows.forEach((r) => {
-      const p = r.phase || 'Other';
-      if (p === 'Other') return;
-      if (!map[p]) map[p] = { contract: 0, spent: 0, billed: 0 };
-      map[p].contract += r.contract || 0;
-      map[p].spent += spentOf(r);
-      map[p].billed += r.billed || 0;
-    });
-    return Object.entries(map)
-      .map(([name, v]) => ({
-        name,
-        ...v,
-        pct: v.contract > 0 ? v.spent / v.contract : 0,
-      }))
-      .sort((a, b) => b.contract - a.contract)
-      .slice(0, 6);
-  }, [scopedRows]);
+  const projectBudget = useMemo(() => {
+    let projects = filteredProjects;
+    if (focus) {
+      projects = projects.filter((p) => p.key === focus.projectKey);
+    }
+    return projects
+      .map((p) => {
+        const st = reportProjectStatus(p);
+        const pct = p.contract > 0 ? p.spent / p.contract : 0;
+        return {
+          key: p.key,
+          name: p.code ? `${p.title} (${p.code})` : p.title,
+          status: st,
+          contract: p.contract,
+          spent: p.spent,
+          pct,
+        };
+      })
+      .filter((p) => p.contract > 0)
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 16);
+  }, [filteredProjects, focus]);
 
   const billableAnalysis = useMemo(() => {
     const billed = kpis.billed;
@@ -854,30 +879,26 @@ export function MainReport({
             </div>
 
             <div key="budget">
-              <Tile title="Budget analysis" tag="by phase">
+              <Tile title="Budget analysis" tag="spent / contract">
                 <div className="mr-budget-list">
-                  {phaseBudget.length === 0 ? (
-                    <div className="plist-empty">No phase data</div>
+                  {projectBudget.length === 0 ? (
+                    <div className="plist-empty">No budget data</div>
                   ) : (
-                    phaseBudget.map((p) => (
-                      <div key={p.name} className="mr-budget-row">
+                    projectBudget.map((p) => (
+                      <div key={p.key} className="mr-budget-row">
                         <div className="mr-budget-label">
-                          <span>{p.name}</span>
+                          <span title={p.status}>{p.name}</span>
                           <span className="mono">
-                            {fmtUSDk(p.spent)} / {fmtUSDk(p.contract)}
+                            {(p.pct * 100).toFixed(0)}% · {fmtUSDk(p.spent)} /{' '}
+                            {fmtUSDk(p.contract)}
                           </span>
                         </div>
                         <div className="mr-budget-track">
                           <div
                             className="mr-budget-fill"
                             style={{
-                              width: `${Math.min(p.pct * 100, 100)}%`,
-                              background:
-                                p.pct > 1
-                                  ? palette.rust
-                                  : p.pct > 0.85
-                                    ? palette.gold
-                                    : palette.green,
+                              width: `${Math.min(Math.max(p.pct, 0) * 100, 100)}%`,
+                              background: budgetFillColor(p.pct, p.status),
                             }}
                           />
                         </div>

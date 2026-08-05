@@ -1515,26 +1515,26 @@ footer{
 
 .mr-gauges.fill{
   display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
-  gap:6px; flex:1; min-height:0; height:100%;
+  gap:4px; flex:1; min-height:0; height:100%;
 }
 .mr-gauge{
-  margin:0; padding:4px 6px; border:1px solid var(--border);
+  margin:0; padding:2px 4px; border:1px solid var(--border);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   min-height:0; overflow:hidden; background:#fff;
 }
 .mr-gauge-label{
-  font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft);
+  font-size:8px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft);
   align-self:stretch;
 }
-.mr-gauges.fill .gauge-ring{ width:88px; height:88px; margin:2px auto; }
-.mr-gauges.fill .gauge-ring canvas{ max-height:88px !important; }
-.mr-gauges.fill .gauge-ring-center{ font-size:15px; }
+.mr-gauges.fill .gauge-ring{ width:56px; height:56px; margin:1px auto; }
+.mr-gauges.fill .gauge-ring canvas{ max-height:56px !important; }
+.mr-gauges.fill .gauge-ring-center{ font-size:11px; }
 .mr-gauge-stats{
-  margin:2px 0 0; padding:0; width:100%;
-  display:flex; flex-direction:column; gap:1px;
+  margin:1px 0 0; padding:0; width:100%;
+  display:flex; flex-direction:column; gap:0;
 }
 .mr-gauge-stats div{
-  display:flex; justify-content:space-between; gap:6px; font-size:10px;
+  display:flex; justify-content:space-between; gap:4px; font-size:9px;
 }
 .mr-gauge-stats dt{ color:var(--ink-soft); }
 .mr-gauge-stats dd{

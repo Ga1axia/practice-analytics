@@ -9,8 +9,9 @@ import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
 import { EmployeeCalendar } from './EmployeeCalendar';
 import { EmployeeProjectWorkspace } from './EmployeeProjectWorkspace';
+import { EmployeeTasks } from './EmployeeTasks';
 
-type PageId = 'hours' | 'projects' | 'calendar' | 'project';
+type PageId = 'hours' | 'projects' | 'tasks' | 'calendar' | 'project';
 type StatusFilter = 'active' | 'all';
 
 function projectStatus(p: ProjectNode): string {
@@ -136,10 +137,17 @@ export function EmployeePortal({
         </button>
         <button
           type="button"
+          className={page === 'tasks' ? 'active' : ''}
+          onClick={() => setPage('tasks')}
+        >
+          <span className="num">03</span>My tasks
+        </button>
+        <button
+          type="button"
           className={page === 'calendar' ? 'active' : ''}
           onClick={() => setPage('calendar')}
         >
-          <span className="num">03</span>My calendar
+          <span className="num">04</span>My calendar
         </button>
         <button
           type="button"
@@ -151,7 +159,7 @@ export function EmployeePortal({
           }}
           disabled={!allProjects.length}
         >
-          <span className="num">04</span>Project detail
+          <span className="num">05</span>Project detail
         </button>
       </nav>
 
@@ -385,6 +393,14 @@ export function EmployeePortal({
             </div>
           )}
         </>
+      ) : null}
+
+      {page === 'tasks' ? (
+        <EmployeeTasks
+          projects={activeProjects.length ? activeProjects : allProjects}
+          employeeName={employeeName}
+          onOpenProject={selectProject}
+        />
       ) : null}
 
       {page === 'calendar' ? (

@@ -2037,6 +2037,68 @@ footer{
   .emp-gallery{ grid-template-columns:1fr; }
   .emp-gallery-stats{ grid-template-columns:1fr 1fr; }
 }
+
+/* ---------- Employee task schedule ---------- */
+.emp-tasks-note{ margin:0 0 10px; font-size:12px; color:var(--ink-soft); }
+.emp-tasks-panel{ padding:0; overflow:hidden; }
+.emp-tasks-scroll{ overflow:auto; max-height:min(70vh, 720px); }
+.emp-tasks-table{
+  width:100%; border-collapse:collapse; font-size:12.5px; min-width:960px;
+}
+.emp-tasks-table thead th{
+  position:sticky; top:0; z-index:2; background:#F3F4F6;
+  border-bottom:1px solid var(--border); padding:0; text-align:left;
+  font-weight:600; color:var(--ink-soft); white-space:nowrap;
+}
+.emp-tasks-sort{
+  display:inline-flex; align-items:center; gap:4px; width:100%;
+  padding:8px 10px; border:none; background:transparent; cursor:pointer;
+  font:inherit; font-weight:600; color:inherit; text-align:left;
+}
+.emp-tasks-sort:hover, .emp-tasks-sort.on{ color:var(--navy); background:#E8EAED; }
+.emp-tasks-dir{ font-size:10px; color:var(--ink-soft); }
+.emp-tasks-dir.soft{ opacity:0.35; }
+.emp-tasks-table td{
+  padding:7px 10px; border-bottom:1px solid #EEF1F4; vertical-align:middle;
+  background:#fff;
+}
+.emp-tasks-table tbody tr:nth-child(even) td{ background:#FAFBFC; }
+.emp-tasks-table tbody tr.done td{ opacity:0.72; }
+.emp-tasks-table .col-check{ width:36px; text-align:center; }
+.emp-tasks-table .col-check input{ width:15px; height:15px; accent-color:var(--navy); cursor:pointer; }
+.emp-tasks-table .col-task{ min-width:220px; max-width:360px; }
+.emp-task-project-pill{
+  display:inline-block; max-width:160px; padding:3px 9px; border:none; border-radius:999px;
+  font-size:11.5px; font-weight:600; color:var(--navy); cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle;
+}
+.emp-task-project-pill:hover{ filter:brightness(0.97); box-shadow:inset 0 0 0 1px rgba(16,27,45,0.12); }
+.emp-task-phase-pill{
+  display:inline-block; max-width:150px; padding:3px 9px; border-radius:999px;
+  font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.emp-task-priority{
+  appearance:none; border:none; border-radius:999px; padding:3px 22px 3px 9px;
+  font-size:11.5px; font-weight:600; cursor:pointer;
+  background-image:linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:calc(100% - 10px) 55%, calc(100% - 6px) 55%;
+  background-size:4px 4px, 4px 4px; background-repeat:no-repeat;
+}
+.emp-task-priority.important{ background-color:#F8E0D4; color:#B04A2A; }
+.emp-task-priority.medium{ background-color:#F3E6C8; color:#8A6A22; }
+.emp-task-priority.low{ background-color:#DCEEE1; color:#2F6B4F; }
+.emp-task-text{ display:block; line-height:1.35; color:var(--ink); }
+.emp-task-kind{
+  display:inline-block; margin-top:2px; font-size:9.5px; letter-spacing:0.06em;
+  text-transform:uppercase; color:var(--ink-soft);
+}
+.emp-task-status{
+  display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:600;
+}
+.emp-task-status.complete{ background:#DCEEE1; color:#2F6B4F; }
+.emp-task-status.incomplete{ background:#E8EAED; color:#2A3140; }
+
 .emp-project-picker{
   align-items:flex-end; gap:16px;
 }

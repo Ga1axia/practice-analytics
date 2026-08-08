@@ -1,4 +1,5 @@
 import { planSetsForProject } from '../lib/planSets';
+import { useDemoMode } from '../hooks/useDemoMode';
 
 export function PlanSetsPanel({
   projectKey,
@@ -9,6 +10,7 @@ export function PlanSetsPanel({
   projectTitle: string;
   compact?: boolean;
 }) {
+  const isDemo = useDemoMode();
   const sets = planSetsForProject(projectKey, projectTitle);
 
   return (
@@ -18,7 +20,9 @@ export function PlanSetsPanel({
           Plan sets <span className="tag">Box</span>
         </h3>
         <p className="pd-muted">
-          Open drawing packages in Box. Staff-only — clients do not see these links in their portal.
+          {isDemo
+            ? 'Open drawing packages in Box. Staff-only — clients do not see these links in their portal.'
+            : 'Open drawing packages in Box.'}
         </p>
       </div>
       <ul className="plan-sets-list">

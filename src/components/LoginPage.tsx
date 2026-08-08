@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { BrandMark } from './BrandMark';
 import { useAuth } from '../hooks/useAuth';
+import { useDemoMode } from '../hooks/useDemoMode';
 
 const demos = [
   {
@@ -41,9 +42,10 @@ const demos = [
 ];
 
 export function LoginPage() {
+  const isDemo = useDemoMode();
   const { signIn, error } = useAuth();
-  const [email, setEmail] = useState('admin@mdesigns.test');
-  const [password, setPassword] = useState('DemoAdmin2026!');
+  const [email, setEmail] = useState(isDemo ? 'admin@mdesigns.test' : '');
+  const [password, setPassword] = useState(isDemo ? 'DemoAdmin2026!' : '');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -78,13 +80,17 @@ export function LoginPage() {
     <div className="login-page">
       <div className="login-shell">
         <aside className="login-hero">
-          <BrandMark tone="dark" subtitle="Practice Analytics · Dev portal" />
+          <BrandMark
+            tone="dark"
+            subtitle={isDemo ? 'Practice Analytics · Demo' : 'Practice Analytics'}
+          />
           <div className="login-hero-copy">
             <p className="login-kicker">M·Designs user portal</p>
             <h1 className="display">Your work, projects, and client updates — in one place.</h1>
             <p className="login-lede">
-              Sign in for staff analytics, your assigned project workspace, or the client portal.
-              This is a development build of the M·Designs dashboard.
+              {isDemo
+                ? 'Demo environment for staff analytics, employee workspaces, and the client portal. Sign in with a demo account below.'
+                : 'Sign in with your M·Designs account for staff analytics, your project workspace, or the client portal.'}
             </p>
           </div>
           <ul className="login-hero-points">
@@ -109,7 +115,9 @@ export function LoginPage() {
             <p className="login-kicker">Sign in</p>
             <h2 className="display">Access your portal</h2>
             <p className="login-lede soft">
-              Use your M·Designs account, or pick a demo role below for a quick tour.
+              {isDemo
+                ? 'Use a demo role below for a quick tour, or enter credentials manually.'
+                : 'Use the email and password for your M·Designs account.'}
             </p>
           </header>
 
@@ -136,32 +144,34 @@ export function LoginPage() {
             </label>
             {(localError || error) && <p className="login-error">{localError || error}</p>}
             <button type="submit" className="login-submit" disabled={busy}>
-              {busy ? 'Signing in…' : 'Enter portal'}
+              {busy ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
 
-          <div className="login-demos">
-            <div className="login-demos-head">
-              <p className="login-demos-label">Demo access</p>
-              <span className="mono">Dev only · fills email &amp; signs in</span>
+          {isDemo ? (
+            <div className="login-demos">
+              <div className="login-demos-head">
+                <p className="login-demos-label">Demo access</p>
+                <span className="mono">Fills email &amp; signs in</span>
+              </div>
+              <div className="login-demo-grid">
+                {demos.map((d) => (
+                  <button
+                    key={d.email}
+                    type="button"
+                    className="login-demo-card"
+                    disabled={busy}
+                    onClick={() => void enterAs(d)}
+                  >
+                    <span className="login-demo-gate">{d.gate}</span>
+                    <strong>{d.role}</strong>
+                    <span className="login-demo-note">{d.note}</span>
+                    <span className="login-demo-email mono">{d.email}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="login-demo-grid">
-              {demos.map((d) => (
-                <button
-                  key={d.email}
-                  type="button"
-                  className="login-demo-card"
-                  disabled={busy}
-                  onClick={() => void enterAs(d)}
-                >
-                  <span className="login-demo-gate">{d.gate}</span>
-                  <strong>{d.role}</strong>
-                  <span className="login-demo-note">{d.note}</span>
-                  <span className="login-demo-email mono">{d.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          ) : null}
         </div>
       </div>
     </div>

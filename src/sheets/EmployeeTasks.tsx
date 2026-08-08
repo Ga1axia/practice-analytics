@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from '../lib/architecturalProcess';
 import {
   loadEmployeeTasks,
@@ -50,6 +51,7 @@ export function EmployeeTasks({
   employeeName: string;
   onOpenProject?: (projectKey: string) => void;
 }) {
+  const isDemo = useDemoMode();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usedDemo, setUsedDemo] = useState(false);
@@ -66,7 +68,7 @@ export function EmployeeTasks({
     setError(null);
     void (async () => {
       try {
-        const res = await loadEmployeeTasks(projects, employeeName);
+        const res = await loadEmployeeTasks(projects, employeeName, { allowDemoSeed: isDemo });
         if (cancelled) return;
         setTasks(res.tasks);
         setUsedDemo(res.usedDemo);
@@ -79,7 +81,7 @@ export function EmployeeTasks({
     return () => {
       cancelled = true;
     };
-  }, [projects, employeeName]);
+  }, [projects, employeeName, isDemo]);
 
   function toggleSort(key: TaskSortKey) {
     if (sortKey === key) {

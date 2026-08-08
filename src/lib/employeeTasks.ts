@@ -151,7 +151,9 @@ function statusLabel(row: ScheduleRow): string {
 export async function loadEmployeeTasks(
   projects: (ProjectNode & { clientName: string })[],
   employeeName: string,
+  options?: { allowDemoSeed?: boolean },
 ): Promise<{ tasks: EmployeeTask[]; usedDemo: boolean }> {
+  const allowDemoSeed = options?.allowDemoSeed === true;
   const priorities = loadPriorityMap();
   const tasks: EmployeeTask[] = [];
   let usedDemo = false;
@@ -160,10 +162,12 @@ export async function loadEmployeeTasks(
   await Promise.all(
     slice.map(async (p) => {
       const { rows: dbRows } = await loadProjectSchedule(p.key);
-      const demo = buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName));
-      const rows = dbRows.length ? dbRows : demo.rows;
+      const demo = allowDemoSeed
+        ? buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName))
+        : null;
+      const rows = dbRows.length ? dbRows : demo?.rows || [];
       const writable = dbRows.length > 0;
-      if (!dbRows.length) usedDemo = true;
+      if (allowDemoSeed && !dbRows.length) usedDemo = true;
 
       const sections = groupScheduleSections(rows);
       for (const section of sections) {

@@ -5,6 +5,7 @@ import {
   parseChatViewAction,
   type ChatViewAction,
 } from '../lib/chatViewAction';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { escapeHtml } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import type { DashboardData, SheetId } from '../lib/types';
@@ -32,6 +33,7 @@ export function FloatingChat({
   filters?: Record<string, string>;
   onViewAction?: (action: ChatViewAction) => void;
 }) {
+  const isDemo = useDemoMode();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
@@ -164,7 +166,9 @@ export function FloatingChat({
       let answer =
         body.answer ||
         body.error ||
-        'Live Q&A needs ANTHROPIC_API_KEY (vercel env) and a signed-in session.';
+        (isDemo
+          ? 'Live Q&A needs ANTHROPIC_API_KEY (vercel env) and a signed-in session.'
+          : 'The assistant is temporarily unavailable. Please try again later.');
 
       if (applied?.label) {
         // Prefer a short filter confirmation; append AI summary when useful
@@ -184,7 +188,7 @@ export function FloatingChat({
           ...m,
           {
             role: 'assistant',
-            text: `Could not reach /api/ask (${msg}). Run with vercel dev or a deployed API.`,
+            text: `Could not reach the assistant (${msg}). Please try again later.`,
           },
         ]);
       }

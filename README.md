@@ -17,7 +17,14 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | **Employee** | Multi-page workspace: hours, project list (active by default), project detail — no firm sheets |
 | **Customer** | Client status tracker + Project Schedule (Client’s Comments editable only) |
 
-### Demo accounts
+### Production vs demo
+
+| Path | Purpose |
+|------|---------|
+| `/` | Production portal — real sign-in only, no demo chrome or seeded schedule fallbacks |
+| `/demo` | Demo tour — demo account cards, Demo labels, schedule seed data when DB rows are missing |
+
+### Demo accounts (use on `/demo` only)
 
 | Role | Email | Password | Bound to |
 |------|-------|----------|----------|
@@ -44,7 +51,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL (usually http://localhost:5173) and sign in.
+Open the Vite URL (usually http://localhost:5173) for production sign-in, or http://localhost:5173/demo for the demo tour.
 
 ### Q&A API locally
 
@@ -68,8 +75,12 @@ npm run dev:api
 
 ## Manual test plan
 
-- Sign in as admin → sheets A-1–A-4 including Project Schedule (editable)
-- Sign in as Arnita / Ni Ni / Zhengrui → only their managed projects across Main, A-1, workload, Project Dashboard; no A/R
+- `/` login has no demo account cards and empty credential fields
+- `/demo` shows demo account cards and Demo branding
+- Sign in as admin → sheets A-1–A-5 including Project Schedule (editable)
+- Sign in as Arnita / Ni Ni / Zhengrui → employee workspace (hours, projects, tasks, calendar, project detail); no firm sheets / A/R
 - Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable
+- On `/` with empty schedules, employee calendar/tasks show empty states (no demo seed)
+- On `/demo` with empty schedules, employee views may show demo seed tags
 - Signed-out users cannot read `pa_*` tables
 - Q&A requires auth; customers blocked from Ask This Sheet

@@ -1,17 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { BqeConnectPanel } from '../components/BqeConnectPanel';
 import { HBarChart, StackedCountHBar, StackedValueHBar } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { useAuth } from '../hooks/useAuth';
-import { useDashboard } from '../hooks/useDashboard';
 import {
   matchProcessPhaseIndex,
   PROCESS_PHASES,
 } from '../lib/architecturalProcess';
 import { fmtUSDk, palette } from '../lib/format';
-import { parseProjectListFile } from '../lib/parseProjectList';
 import { buildClientHierarchy } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
-import { supabase } from '../lib/supabase';
 import type { DashboardData, ProjectRow } from '../lib/types';
 import {
   classifyWorkType,
@@ -102,13 +100,7 @@ function seriesFromMaps(
 
 export function Executive({ data }: { data: DashboardData }) {
   const { profile } = useAuth();
-  const { reload } = useDashboard();
   const isAdmin = profile?.role === 'admin';
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
-  const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [loadSort, setLoadSort] = useState<LoadSort>('load');
   const [typeMetric, setTypeMetric] = useState<'count' | 'contract'>('count');
 
@@ -289,66 +281,9 @@ export function Executive({ data }: { data: DashboardData }) {
       .slice(0, 16);
   }, [data.projects]);
 
-  async function onFile(file: File | null) {
-    if (!file || !isAdmin) return;
-    setUploading(true);
-    setUploadMsg(null);
-    setUploadErr(null);
-    try {
-      const parsed = await parseProjectListFile(file);
-      const { data: result, error } = await supabase.rpc('pa_replace_project_list', {
-        rows: parsed.rows,
-      });
-      if (error) throw error;
-      const inserted =
-        result && typeof result === 'object' && 'inserted' in result
-          ? Number((result as { inserted: number }).inserted)
-          : parsed.rows.length;
-      setUploadMsg(
-        `Uploaded ${file.name}: ${parsed.clients} clients · ${parsed.projects} projects · ${parsed.phases} phases (${inserted} rows written).`,
-      );
-      await reload();
-    } catch (e) {
-      setUploadErr(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  }
-
   return (
     <section className="sheet active">
-      {isAdmin ? (
-        <div className="panel plist-upload">
-          <h3>
-            Upload Project List
-            <span className="tag">Source of truth · Ajera / BQE · .xlsx</span>
-          </h3>
-          <p className="plist-upload-help">
-            Upload a file in the same format as <span className="mono">Project List.xlsx</span>.
-            This replaces the project list and drives Project Analysis and Project List views.
-          </p>
-          <div className="plist-upload-row">
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-              disabled={uploading}
-              onChange={(e) => void onFile(e.target.files?.[0] || null)}
-            />
-            <button
-              type="button"
-              className="plist-upload-btn"
-              disabled={uploading}
-              onClick={() => fileRef.current?.click()}
-            >
-              {uploading ? 'Uploading…' : 'Choose file'}
-            </button>
-          </div>
-          {uploadMsg ? <p className="plist-upload-ok">{uploadMsg}</p> : null}
-          {uploadErr ? <p className="plist-upload-err">{uploadErr}</p> : null}
-        </div>
-      ) : null}
+      {isAdmin ? <BqeConnectPanel /> : null}
 
       <KpiRow
         items={[

@@ -7,7 +7,7 @@ type Props = {
 
 export function BrandMark({
   tone = 'dark',
-  subtitle = 'Practice Analytics · Dev',
+  subtitle = 'Practice Analytics',
   compact = false,
 }: Props) {
   return (

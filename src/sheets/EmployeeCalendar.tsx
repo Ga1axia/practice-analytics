@@ -4,6 +4,7 @@ import {
   type AgendaItem,
   type AgendaKind,
 } from '../lib/employeeAgenda';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { monthMatrix, startOfDay } from '../lib/scheduleDates';
 import type { ProjectNode } from '../lib/projectListHierarchy';
 
@@ -35,6 +36,7 @@ function kindLabel(k: AgendaKind) {
 }
 
 export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Props) {
+  const isDemo = useDemoMode();
   const [items, setItems] = useState<AgendaItem[]>([]);
   const [usedDemo, setUsedDemo] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,9 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { items: loaded, usedDemo: demo } = await loadEmployeeAgenda(projects, employeeName);
+      const { items: loaded, usedDemo: demo } = await loadEmployeeAgenda(projects, employeeName, {
+        allowDemoSeed: isDemo,
+      });
       if (cancelled) return;
       setItems(loaded);
       setUsedDemo(demo);
@@ -58,7 +62,7 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
     return () => {
       cancelled = true;
     };
-  }, [projects, employeeName]);
+  }, [projects, employeeName, isDemo]);
 
   const today = startOfDay(new Date());
   const filtered = useMemo(

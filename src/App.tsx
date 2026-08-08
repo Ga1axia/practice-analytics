@@ -4,6 +4,7 @@ import { FloatingChat } from './components/FloatingChat';
 import { LoginPage } from './components/LoginPage';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { DataProvider, useDashboard } from './hooks/useDashboard';
+import { useDemoMode } from './hooks/useDemoMode';
 import type { ChatViewAction } from './lib/chatViewAction';
 import { fmtUSDk } from './lib/format';
 import { CustomerPortal } from './sheets/CustomerPortal';
@@ -19,6 +20,7 @@ import type { SheetId } from './lib/types';
 import './styles/global.css';
 
 function StaffShell() {
+  const isDemo = useDemoMode();
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
   const [sheet, setSheet] = useState<SheetId>('exec');
@@ -50,7 +52,9 @@ function StaffShell() {
     <div className={`app-shell${fillViewport ? ' fill-viewport' : ''}`}>
       <header className="titleblock">
         <div className="tb-brand">
-          <BrandMark subtitle="Practice Analytics · Admin · Dev" />
+          <BrandMark
+            subtitle={isDemo ? 'Practice Analytics · Admin · Demo' : 'Practice Analytics'}
+          />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -145,8 +149,9 @@ function StaffShell() {
 
       {!fillViewport ? (
         <footer>
-          M. DESIGNS ARCHITECTS — PRACTICE ANALYTICS &nbsp;·&nbsp; BUILT FROM AJERA/BQE CORE EXPORTS
-          &nbsp;·&nbsp; ALL FIGURES REFLECT SOURCE DATA AS EXTRACTED
+          {isDemo
+            ? 'M. DESIGNS ARCHITECTS — PRACTICE ANALYTICS · BUILT FROM AJERA/BQE CORE EXPORTS · ALL FIGURES REFLECT SOURCE DATA AS EXTRACTED'
+            : 'M. Designs Architects — Practice Analytics'}
         </footer>
       ) : null}
 
@@ -156,6 +161,7 @@ function StaffShell() {
 }
 
 function EmployeeShell() {
+  const isDemo = useDemoMode();
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
 
@@ -176,8 +182,14 @@ function EmployeeShell() {
   if (!employeeName) {
     return (
       <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace', color: '#B3261E' }}>
-        This account is not linked to an employee name. Ask an admin to set{' '}
-        <code>employee_name</code> on your profile.
+        {isDemo ? (
+          <>
+            This account is not linked to an employee name. Ask an admin to set{' '}
+            <code>employee_name</code> on your profile.
+          </>
+        ) : (
+          'This account is not linked to an employee profile. Contact your administrator.'
+        )}
       </div>
     );
   }
@@ -186,7 +198,11 @@ function EmployeeShell() {
     <div className="app-shell emp-shell">
       <header className="titleblock">
         <div className="tb-brand">
-          <BrandMark subtitle={`My work · ${employeeName} · Dev`} />
+          <BrandMark
+            subtitle={
+              isDemo ? `My work · ${employeeName} · Demo` : `My work · ${employeeName}`
+            }
+          />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -206,13 +222,16 @@ function EmployeeShell() {
         <EmployeePortal data={data} employeeName={employeeName} />
       </main>
       <footer>
-        M. DESIGNS ARCHITECTS — EMPLOYEE WORKSPACE &nbsp;·&nbsp; YOUR HOURS &amp; ASSIGNED PROJECTS ONLY
+        {isDemo
+          ? 'M. DESIGNS ARCHITECTS — EMPLOYEE WORKSPACE · YOUR HOURS & ASSIGNED PROJECTS ONLY'
+          : 'M. Designs Architects — Employee workspace'}
       </footer>
     </div>
   );
 }
 
 function CustomerShell() {
+  const isDemo = useDemoMode();
   const { profile, signOut } = useAuth();
 
   if (!profile) {
@@ -225,7 +244,7 @@ function CustomerShell() {
     <div className="cp-shell">
       <header className="titleblock cp-titleblock">
         <div className="tb-brand">
-          <BrandMark subtitle="Client portal · Dev" />
+          <BrandMark subtitle={isDemo ? 'Client portal · Demo' : 'Client portal'} />
         </div>
         <div className="tb-meta">
           <div className="tb-cell">
@@ -243,7 +262,9 @@ function CustomerShell() {
       </header>
       <CustomerPortal profile={profile} />
       <footer className="cp-footer">
-        Questions outside the portal? Email your project manager — they see every note you leave here.
+        {isDemo
+          ? 'Questions outside the portal? Email your project manager — they see every note you leave here.'
+          : 'Questions? Contact your project manager.'}
       </footer>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { escapeHtml } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import type { SheetId } from '../lib/types';
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function QAPanel({ sheet, chips, examples, filters }: Props) {
+  const isDemo = useDemoMode();
   const [q, setQ] = useState('');
   const [html, setHtml] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,9 @@ export function QAPanel({ sheet, chips, examples, filters }: Props) {
       const answerRaw =
         body.answer ||
         body.error ||
-        `Live Q&A isn't configured yet. Set ANTHROPIC_API_KEY on the server. Try: ${examples.join(' · ')}`;
+        (isDemo
+          ? `Live Q&A isn't configured yet. Set ANTHROPIC_API_KEY on the server. Try: ${examples.join(' · ')}`
+          : 'Q&A is temporarily unavailable. Please try again later.');
       const answerHtml = escapeHtml(answerRaw)
         .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
         .replace(/\n/g, '<br>');
@@ -47,8 +51,11 @@ export function QAPanel({ sheet, chips, examples, filters }: Props) {
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'connection error';
+      const fallback = isDemo
+        ? `Live Q&A isn't reachable right now (${escapeHtml(msg)}). Configure <code>ANTHROPIC_API_KEY</code> and run via <code>vercel dev</code> or a Vercel deploy. Examples:<br>${examples.map((x) => '&bull; ' + escapeHtml(x)).join('<br>')}`
+        : 'Q&A is temporarily unavailable. Please try again later.';
       setHtml(
-        `<div class="qa-bubble"><div class="qa-q">Q: ${escapeHtml(text)}</div><div class="qa-a">Live Q&amp;A isn't reachable right now (${escapeHtml(msg)}). Configure <code>ANTHROPIC_API_KEY</code> and run via <code>vercel dev</code> or a Vercel deploy. Examples:<br>${examples.map((x) => '&bull; ' + escapeHtml(x)).join('<br>')}</div></div>`,
+        `<div class="qa-bubble"><div class="qa-q">Q: ${escapeHtml(text)}</div><div class="qa-a">${fallback}</div></div>`,
       );
     } finally {
       setBusy(false);
@@ -58,7 +65,7 @@ export function QAPanel({ sheet, chips, examples, filters }: Props) {
   return (
     <div className="panel qa-panel">
       <h3>
-        Ask This Sheet <span className="tag">Claude + Supabase context</span>
+        Ask This Sheet{isDemo ? <span className="tag">Claude + Supabase context</span> : null}
       </h3>
       <div className="qa-input-row">
         <input

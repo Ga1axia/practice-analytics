@@ -199,7 +199,7 @@ export function ClientMeetingsPanel({
               ? 'Loading…'
               : `${meetings.length} meeting${meetings.length === 1 ? '' : 's'} for this client${
                   projectCount ? ` · ${projectCount} on this project` : ''
-                }. Visible to PMs and admins only.`}
+                }.`}
           </p>
         </div>
         <button type="button" className="pd-client-preview-btn" onClick={startNew}>

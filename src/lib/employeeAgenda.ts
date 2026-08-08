@@ -34,11 +34,13 @@ function managerFor(p: ProjectNode & { clientName: string }, fallback: string) {
   );
 }
 
-/** Build upcoming agenda across an employee's projects (DB + demo fallback). */
+/** Build upcoming agenda across an employee's projects (optional demo fallback). */
 export async function loadEmployeeAgenda(
   projects: (ProjectNode & { clientName: string })[],
   employeeName: string,
+  options?: { allowDemoSeed?: boolean },
 ): Promise<{ items: AgendaItem[]; usedDemo: boolean }> {
+  const allowDemoSeed = options?.allowDemoSeed === true;
   const items: AgendaItem[] = [];
   let usedDemo = false;
   const clients = [...new Set(projects.map((p) => p.clientName))];
@@ -63,9 +65,11 @@ export async function loadEmployeeAgenda(
   await Promise.all(
     slice.map(async (p) => {
       const { rows: dbRows } = await loadProjectSchedule(p.key);
-      const demo = buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName));
-      const rows = dbRows.length ? dbRows : demo.rows;
-      if (!dbRows.length) usedDemo = true;
+      const demo = allowDemoSeed
+        ? buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName))
+        : null;
+      const rows = dbRows.length ? dbRows : demo?.rows || [];
+      if (allowDemoSeed && !dbRows.length) usedDemo = true;
 
       const sections = groupScheduleSections(rows);
       const map = new Map<string, string>();
@@ -94,7 +98,7 @@ export async function loadEmployeeAgenda(
       meetings = meetings.filter(
         (m) => !m.project_key || m.project_key === p.key || m.project_key.includes(p.key),
       );
-      if (!meetings.length) {
+      if (!meetings.length && demo) {
         meetings = demo.meetings;
         usedDemo = true;
       }

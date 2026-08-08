@@ -11,7 +11,7 @@ const EXAMPLE_BOX =
 
 /**
  * Plan-set Box folders for staff (admin + employee).
- * Placeholder mapping until per-project Box folders are wired to data.
+ * Uses a shared Box folder until per-project folders are wired to data.
  */
 export function planSetsForProject(projectKey: string, projectTitle: string): PlanSetLink[] {
   void projectKey;
@@ -19,16 +19,16 @@ export function planSetsForProject(projectKey: string, projectTitle: string): Pl
     {
       id: 'current-set',
       label: 'Current plan set',
-      description: `${projectTitle} — latest drawings on Box (example link for review).`,
+      description: `${projectTitle} — latest drawings on Box.`,
       url: EXAMPLE_BOX,
-      updatedLabel: 'Shared folder · demo',
+      updatedLabel: 'Shared folder',
     },
     {
       id: 'archive-set',
       label: 'Prior / archive set',
-      description: 'Earlier issued sheets for reference (same example folder for now).',
+      description: 'Earlier issued sheets for reference.',
       url: EXAMPLE_BOX,
-      updatedLabel: 'Shared folder · demo',
+      updatedLabel: 'Shared folder',
     },
   ];
 }

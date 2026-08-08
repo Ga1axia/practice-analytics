@@ -5,9 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // Pair with `npm run dev:api` (vercel dev on :3000) for local Q&A
+    // Pair with `npm run dev:api` (scripts/local-api.ts on :8787)
     proxy: {
-      '/api': 'http://127.0.0.1:3000',
+      '/api': 'http://127.0.0.1:8787',
     },
   },
 })

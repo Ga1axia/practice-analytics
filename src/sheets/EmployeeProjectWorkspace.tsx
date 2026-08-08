@@ -4,6 +4,7 @@ import { ClientMessageThread } from '../components/ClientMessageThread';
 import { PlanSetsPanel } from '../components/PlanSetsPanel';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
 import { useAuth } from '../hooks/useAuth';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { processPhaseLabel } from '../lib/architecturalProcess';
 import { buildDemoProjectDetail } from '../lib/demoProjectDetail';
 import { fmtUSD } from '../lib/format';
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
+  const isDemo = useDemoMode();
   const { profile } = useAuth();
   const [dbRows, setDbRows] = useState<ScheduleRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,8 +39,9 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
   const outstanding = project.outstanding ?? detailRows.reduce((a, r) => a + rowOutstanding(r), 0);
 
   const demo = useMemo(
-    () => buildDemoProjectDetail(project.key, project.clientName, manager),
-    [project.key, project.clientName, manager],
+    () =>
+      isDemo ? buildDemoProjectDetail(project.key, project.clientName, manager) : null,
+    [isDemo, project.key, project.clientName, manager],
   );
 
   useEffect(() => {
@@ -55,8 +58,8 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
     };
   }, [project.key]);
 
-  const usingDemo = !loading && dbRows.length === 0;
-  const rows = usingDemo ? demo.rows : dbRows;
+  const usingDemo = Boolean(isDemo && demo && !loading && dbRows.length === 0);
+  const rows = usingDemo && demo ? demo.rows : dbRows;
 
   const boardProject = {
     projectKey: project.key,
@@ -160,12 +163,16 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
             {events.length} dated{overdue ? ` · ${overdue} past due` : ''}
           </span>
         </h3>
-        <ScheduleDeadlineCalendar
-          projectKey={project.key}
-          corner={false}
-          layout="split"
-          rowsOverride={usingDemo ? demo.rows : null}
-        />
+        {!loading && !rows.length ? (
+          <p className="pd-muted">No schedule dates for this project yet.</p>
+        ) : (
+          <ScheduleDeadlineCalendar
+            projectKey={project.key}
+            corner={false}
+            layout="split"
+            rowsOverride={usingDemo && demo ? demo.rows : null}
+          />
+        )}
       </section>
 
       <div className="emp-detail-pair">
@@ -201,7 +208,7 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
             projectKey={project.key}
             clientName={project.clientName}
             compact
-            seedMeetings={demo.meetings}
+            seedMeetings={usingDemo && demo ? demo.meetings : null}
           />
         </section>
       </div>
@@ -216,7 +223,7 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
             project={boardProject}
             mode="pm"
             authorName={authorName}
-            seedMessages={demo.messages}
+            seedMessages={usingDemo && demo ? demo.messages : null}
           />
           {noteThreads.length ? (
             <ul className="emp-note-mini">

@@ -167,11 +167,9 @@ export function EmployeePortal({
         <>
           <header className="emp-hero">
             <div>
-              <p className="pd-kicker">Page 01 · Hours</p>
+              <p className="pd-kicker">Hours</p>
               <h1 className="display">{employeeName}</h1>
-              <p className="emp-lede">
-                Your personal hours and efficiency. Switch to My projects to pick an assigned job.
-              </p>
+              <p className="emp-lede">Your personal hours and efficiency.</p>
             </div>
           </header>
 
@@ -269,10 +267,10 @@ export function EmployeePortal({
         <>
           <header className="emp-hero emp-hero-row">
             <div>
-              <p className="pd-kicker">Page 02 · Projects</p>
+              <p className="pd-kicker">Projects</p>
               <h1 className="display">My projects</h1>
               <p className="emp-lede">
-                Select a project to open its calendar, dates, meetings, documents, and schedule.
+                Open a project for its calendar, meetings, documents, and schedule.
               </p>
             </div>
             <div className="emp-filter-bar">

@@ -97,3 +97,26 @@ export function defaultExpandedSectionIds(
   if (active) return [active.id];
   return [];
 }
+
+/** Nest flat section items into task → subtask trees (by sort order). */
+export type ScheduleTaskNode = {
+  task: ScheduleRow;
+  subtasks: ScheduleRow[];
+};
+
+export function nestSectionItems(items: ScheduleRow[]): ScheduleTaskNode[] {
+  const trees: ScheduleTaskNode[] = [];
+  let current: ScheduleTaskNode | null = null;
+  for (const row of items) {
+    if (row.row_kind === 'task') {
+      current = { task: row, subtasks: [] };
+      trees.push(current);
+      continue;
+    }
+    if (row.row_kind === 'subtask') {
+      if (current) current.subtasks.push(row);
+      else trees.push({ task: row, subtasks: [] });
+    }
+  }
+  return trees;
+}

@@ -6,7 +6,6 @@ import { KpiRow } from '../components/KpiRow';
 import { PlanSetsPanel } from '../components/PlanSetsPanel';
 import { QAPanel } from '../components/QAPanel';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
-import { ScheduleGantt } from '../components/ScheduleGantt';
 import { useAuth } from '../hooks/useAuth';
 import {
   PROCESS_PHASES,
@@ -776,17 +775,10 @@ export function ProjectDashboard({
           </div>
 
 
-          <div className="panel pd-gantt-panel">
-            <h3>
-              Schedule Gantt
-              <span className="tag">tasks · subtasks · deadlines</span>
-            </h3>
-            <ScheduleGantt projectKey={project.key} highlightPhase={phaseRaw} />
-          </div>
-
           <div className="panel pd-schedule-panel">
             <h3>
-              Project schedule <span className="tag">editable · one section of this dashboard</span>
+              Project schedule
+              <span className="tag">list · gantt · roadmap · board</span>
             </h3>
             <ProjectSchedule
               mode="staff"

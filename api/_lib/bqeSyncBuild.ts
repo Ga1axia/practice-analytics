@@ -605,7 +605,9 @@ export function mapEmployeesToRoster(employees: BqeEmployee[]): RosterInsert[] {
   for (const e of employees) {
     const status = String(e.status ?? '').toLowerCase();
     if (status.includes('terminat') || status === '2') continue;
-    const name = `${e.firstName || ''} ${e.lastName || ''}`.replace(/\s+/g, ' ').trim();
+    const name =
+      (e as { displayName?: string | null }).displayName?.trim() ||
+      `${e.firstName || ''} ${e.lastName || ''}`.replace(/\s+/g, ' ').trim();
     if (!name) continue;
     const team = (e.department || e.title || 'Staff').trim() || 'Staff';
     const k = `${team}||${name}`;

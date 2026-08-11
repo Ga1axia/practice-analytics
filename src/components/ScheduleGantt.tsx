@@ -10,6 +10,7 @@ import {
   ganttTimelineBounds,
   type GanttFilter,
 } from '../lib/scheduleGantt';
+import type { ScheduleRow } from '../lib/scheduleTypes';
 
 function fmtShort(d: Date) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -18,19 +19,28 @@ function fmtShort(d: Date) {
 export function ScheduleGantt({
   projectKey,
   highlightPhase,
+  rowsOverride = null,
 }: {
   projectKey: string;
   highlightPhase?: string | null;
+  /** When set, skip Supabase and render these rows. */
+  rowsOverride?: ScheduleRow[] | null;
 }) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!rowsOverride);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<GanttFilter>('all');
   const [scale, setScale] = useState<'week' | 'month'>('month');
-  const [rows, setRows] = useState<Awaited<ReturnType<typeof loadProjectSchedule>>['rows']>([]);
+  const [rows, setRows] = useState<ScheduleRow[]>(rowsOverride || []);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const todaySynced = useRef('');
 
   useEffect(() => {
+    if (rowsOverride) {
+      setRows(rowsOverride);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -44,7 +54,7 @@ export function ScheduleGantt({
     return () => {
       cancelled = true;
     };
-  }, [projectKey]);
+  }, [projectKey, rowsOverride]);
 
   const bars = useMemo(() => buildGanttBars(rows, filter), [rows, filter]);
   const bounds = useMemo(() => ganttTimelineBounds(bars), [bars]);

@@ -840,6 +840,158 @@ footer{
 }
 .pd-client-preview-btn:disabled{ opacity:0.45; cursor:default; }
 
+/* ---------- Schedule view switcher ---------- */
+.schedule-view-toggle{ margin-left:auto; }
+.schedule-view-body{ margin-top:8px; }
+
+/* ---------- Schedule Roadmap ---------- */
+.srm{ display:flex; flex-direction:column; gap:12px; }
+.srm-summary{
+  display:flex; flex-wrap:wrap; gap:8px; font-size:11px; color:var(--ink-soft);
+}
+.srm-list{ display:flex; flex-direction:column; gap:0; max-height:min(72vh, 860px); overflow:auto; }
+.srm-phase{
+  display:grid; grid-template-columns:44px minmax(0,1fr); gap:0 12px;
+  align-items:stretch;
+}
+.srm-rail{
+  display:flex; flex-direction:column; align-items:center; padding-top:4px;
+}
+.srm-node{
+  width:32px; height:32px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:600; color:var(--navy);
+  background:#fff; border:1.5px solid var(--border); z-index:1;
+}
+.srm-phase.tone-active .srm-node,
+.srm-phase.highlight .srm-node{
+  background:var(--navy); color:#fff; border-color:transparent;
+}
+.srm-phase.tone-done .srm-node{
+  background:var(--green, #2E7D46); color:#fff; border-color:transparent;
+}
+.srm-line{
+  flex:1; width:2px; min-height:16px; background:#E4E8EE; margin:4px 0 0;
+}
+.srm-card{
+  border:1px solid var(--border); background:#fff; margin-bottom:12px; min-width:0;
+}
+.srm-phase.highlight .srm-card{
+  border-color:color-mix(in srgb, var(--gold) 55%, var(--border));
+  box-shadow:inset 3px 0 0 var(--gold);
+}
+.srm-head{
+  width:100%; display:flex; align-items:flex-start; gap:12px; justify-content:space-between;
+  text-align:left; background:var(--paper); border:none; padding:14px 16px; cursor:pointer;
+}
+.srm-phase.open .srm-head{ border-bottom:1px solid var(--border); }
+.srm-head-copy{ flex:1; min-width:0; display:flex; flex-direction:column; gap:8px; }
+.srm-title-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.srm-title{
+  margin:0; font-family:'Oswald',sans-serif; font-size:17px; font-weight:600; color:var(--navy);
+}
+.srm-note{ margin:0; font-size:12.5px; color:var(--ink-soft); line-height:1.4; }
+.srm-progress{ display:flex; align-items:center; gap:10px; }
+.srm-progress-track{
+  flex:1; height:6px; background:#EEF1F4; overflow:hidden;
+}
+.srm-progress-fill{ height:100%; background:var(--teal); }
+.srm-phase.tone-done .srm-progress-fill{ background:var(--green, #2E7D46); }
+.srm-phase.tone-idle .srm-progress-fill{ background:#9AA8B5; }
+.srm-progress-label{ font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+.srm-chevron{ color:var(--ink-soft); font-size:12px; margin-top:4px; }
+.srm-body{ padding:8px 12px 14px; animation:processIn 0.22s ease; }
+.srm-empty{ margin:8px 4px; color:var(--ink-soft); font-size:13px; }
+.srm-tree, .srm-subs{ list-style:none; margin:0; padding:0; }
+.srm-task{ border-top:1px solid #F0F2F5; padding:8px 4px; }
+.srm-task:first-child{ border-top:none; }
+.srm-task-row, .srm-sub{
+  display:flex; align-items:flex-start; gap:8px; min-width:0;
+}
+.srm-sub{ padding:5px 0 5px 22px; color:var(--ink-soft); }
+.srm-kind{
+  flex-shrink:0; font-size:9px; letter-spacing:0.04em; text-transform:uppercase;
+  padding:2px 4px; border:1px solid var(--border); color:var(--ink-soft); background:#fff;
+  margin-top:2px;
+}
+.srm-task-row .srm-kind{ background:var(--teal-soft); color:var(--teal); border-color:transparent; }
+.srm-task-name{
+  flex:1; min-width:0; font-size:13px; line-height:1.35; color:var(--ink);
+}
+.srm-task-row .srm-task-name{ font-weight:560; }
+
+/* ---------- Schedule Board ---------- */
+.sboard{ display:flex; flex-direction:column; gap:12px; }
+.sboard-toolbar{
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px;
+}
+.sboard-hide-done{
+  display:inline-flex; align-items:center; gap:6px;
+  font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft); cursor:pointer;
+}
+.sboard-cols{
+  display:grid; grid-template-columns:repeat(5, minmax(180px, 1fr));
+  gap:10px; overflow:auto; max-height:min(72vh, 860px); padding-bottom:4px;
+  align-items:start;
+}
+.sboard-col{
+  background:var(--paper); border:1px solid var(--border); min-width:0;
+  display:flex; flex-direction:column; max-height:100%;
+}
+.sboard-col-head{
+  display:flex; align-items:flex-start; justify-content:space-between; gap:8px;
+  padding:12px 12px 10px; border-bottom:1px solid var(--border);
+  position:sticky; top:0; background:var(--paper); z-index:1;
+}
+.sboard-col-head h4{
+  margin:0; font-family:'Oswald',sans-serif; font-size:15px; font-weight:600; color:var(--navy);
+}
+.sboard-col-hint{ display:block; font-size:10px; color:var(--ink-soft); margin-top:2px; }
+.sboard-count{
+  font-size:11px; color:var(--ink-soft); background:#fff;
+  border:1px solid var(--border); padding:2px 7px;
+}
+.sboard-col.col-active .sboard-col-head{ box-shadow:inset 0 2px 0 var(--teal); }
+.sboard-col.col-upcoming .sboard-col-head{ box-shadow:inset 0 2px 0 var(--gold); }
+.sboard-col.col-idle .sboard-col-head{ box-shadow:inset 0 2px 0 #9AA8B5; }
+.sboard-col.col-done .sboard-col-head{ box-shadow:inset 0 2px 0 var(--green, #2E7D46); }
+.sboard-col.col-open .sboard-col-head{ box-shadow:inset 0 2px 0 #C9D1DB; }
+.sboard-cards{
+  list-style:none; margin:0; padding:8px; display:flex; flex-direction:column; gap:8px;
+  overflow:auto;
+}
+.sboard-empty{
+  padding:16px 8px; text-align:center; color:var(--ink-soft); font-size:12px;
+}
+.sboard-card{
+  background:#fff; border:1px solid var(--border); padding:10px 11px;
+  display:flex; flex-direction:column; gap:7px;
+}
+.sboard-card.kind-subtask{ background:#FAFBFC; }
+.sboard-card-top{
+  display:flex; align-items:center; justify-content:space-between; gap:6px;
+}
+.sboard-sec{
+  font-size:10px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  max-width:14ch;
+}
+.sboard-card-title{
+  font-size:12.5px; font-weight:560; line-height:1.35; color:var(--ink);
+}
+.sboard-card-meta{
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+}
+.sboard-date{ font-size:10.5px; color:var(--ink-soft); }
+
+@media(max-width:1100px){
+  .sboard-cols{ grid-template-columns:repeat(3, minmax(200px, 1fr)); }
+}
+@media(max-width:700px){
+  .sboard-cols{ grid-template-columns:minmax(240px, 1fr); }
+  .schedule-view-toggle{ margin-left:0; width:100%; }
+  .srm-phase{ grid-template-columns:36px minmax(0,1fr); }
+}
+
 /* ---------- Schedule Gantt (Project Dashboard) ---------- */
 .pd-gantt-panel{ margin-bottom:14px; }
 .gantt{ display:flex; flex-direction:column; gap:10px; }

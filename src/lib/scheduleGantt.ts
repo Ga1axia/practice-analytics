@@ -49,13 +49,18 @@ export function rowDateRange(
   return { start: start!, end: end!, milestone };
 }
 
-function statusOf(row: ScheduleRow): string {
+/** Resolve display status, tolerating swapped status/date columns. */
+export function rowStatusLabel(row: ScheduleRow): string {
   const raw = (row.budget_remaining || '').trim();
   if (raw && !parseScheduleDate(raw)) return raw;
   // If status cell held a date, try target_end for a status word
   const end = (row.target_end || '').trim();
   if (end && !parseScheduleDate(end)) return end;
   return raw;
+}
+
+function statusOf(row: ScheduleRow): string {
+  return rowStatusLabel(row);
 }
 
 /**

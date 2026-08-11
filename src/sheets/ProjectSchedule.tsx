@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScheduleBoard } from '../components/ScheduleBoard';
+import { ScheduleGantt } from '../components/ScheduleGantt';
+import { ScheduleRoadmap } from '../components/ScheduleRoadmap';
 import { supabase } from '../lib/supabase';
 import {
   defaultExpandedSectionIds,
@@ -11,6 +14,7 @@ import {
 import type { ScheduleField, ScheduleMeta, ScheduleRow } from '../lib/scheduleTypes';
 
 type StaffField = Exclude<ScheduleField, 'task' | 'client_comments'>;
+type ScheduleView = 'list' | 'gantt' | 'roadmap' | 'board';
 
 const STAFF_FIELDS: { key: StaffField; label: string }[] = [
   { key: 'budget_remaining', label: 'Status' },
@@ -28,6 +32,13 @@ const CUSTOMER_META: { key: Exclude<ScheduleField, 'task' | 'client_comments'>; 
   { key: 'target_start', label: 'Target start' },
   { key: 'target_end', label: 'Target end' },
   { key: 'mdesigns_comments', label: 'M. Designs notes' },
+];
+
+const VIEW_OPTIONS: { id: ScheduleView; label: string }[] = [
+  { id: 'list', label: 'List' },
+  { id: 'gantt', label: 'Gantt' },
+  { id: 'roadmap', label: 'Roadmap' },
+  { id: 'board', label: 'Board' },
 ];
 
 type Props = {
@@ -88,6 +99,7 @@ export function ProjectSchedule({
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [didInitExpand, setDidInitExpand] = useState(false);
+  const [view, setView] = useState<ScheduleView>('list');
 
   const active = useMemo(
     () => schedules.find((s) => s.id === scheduleId) || null,
@@ -309,6 +321,17 @@ export function ProjectSchedule({
     );
   }
 
+  const viewHint =
+    view === 'list'
+      ? isCustomer
+        ? 'Sections stay collapsed until opened. Task names are fixed — add notes in Client’s comments.'
+        : 'Task names are fixed. Open a section to edit status, dates, and notes.'
+      : view === 'gantt'
+        ? 'Timeline of dated tasks, subtasks, and phase rollups.'
+        : view === 'roadmap'
+          ? 'Phase structure with nested tasks and progress.'
+          : 'Status columns across tasks and subtasks. Switch to List to edit.';
+
   const body = (
     <>
       <div className="filters schedule-toolbar">
@@ -330,19 +353,31 @@ export function ProjectSchedule({
             {savingId ? ' · Saving…' : saveNote ? ` · ${saveNote}` : ''}
           </span>
         ) : null}
-        <div className="schedule-actions">
-          <button type="button" className="sched-text-btn" onClick={expandAll}>
-            Expand all
-          </button>
-          <button type="button" className="sched-text-btn" onClick={collapseAll}>
-            Collapse all
-          </button>
+
+        <div className="exec-toggle schedule-view-toggle" role="group" aria-label="Schedule view">
+          {VIEW_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={view === opt.id ? 'on' : ''}
+              onClick={() => setView(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
-        <span className="schedule-hint">
-          {isCustomer
-            ? 'Sections stay collapsed until opened. Task names are fixed — add notes in Client’s comments.'
-            : 'Task names are fixed. Open a section to edit status, dates, and notes.'}
-        </span>
+
+        {view === 'list' ? (
+          <div className="schedule-actions">
+            <button type="button" className="sched-text-btn" onClick={expandAll}>
+              Expand all
+            </button>
+            <button type="button" className="sched-text-btn" onClick={collapseAll}>
+              Collapse all
+            </button>
+          </div>
+        ) : null}
+        <span className="schedule-hint">{viewHint}</span>
       </div>
 
       {loading ? <p className="schedule-status">Loading schedule…</p> : null}
@@ -351,7 +386,28 @@ export function ProjectSchedule({
         <p className="schedule-status">No project schedule is available for your account yet.</p>
       ) : null}
 
-      {sections.length ? <div className="sched-accordion">{sections.map(renderSection)}</div> : null}
+      {!loading && !error && rows.length ? (
+        <div className="schedule-view-body">
+          {view === 'list' ? (
+            <div className="sched-accordion">{sections.map(renderSection)}</div>
+          ) : null}
+          {view === 'gantt' && active ? (
+            <ScheduleGantt
+              projectKey={active.project_key}
+              highlightPhase={highlightPhase}
+              rowsOverride={rows}
+            />
+          ) : null}
+          {view === 'roadmap' ? (
+            <ScheduleRoadmap rows={rows} highlightPhase={highlightPhase} />
+          ) : null}
+          {view === 'board' ? <ScheduleBoard rows={rows} /> : null}
+        </div>
+      ) : null}
+
+      {!loading && !error && schedules.length && !rows.length ? (
+        <p className="schedule-status">This schedule has no rows yet.</p>
+      ) : null}
     </>
   );
 

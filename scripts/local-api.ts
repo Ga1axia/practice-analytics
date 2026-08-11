@@ -102,13 +102,13 @@ async function main() {
 
   const server = createServer(async (req, res) => {
     const parsed = parseUrl(req.url || '/', true);
-    const path = (parsed.pathname || '/').replace(/\/$/, '') || '/';
-    const handler = handlers[path];
+    const pathName = (parsed.pathname || '/').replace(/\/$/, '') || '/';
+    const handler = handlers[pathName];
 
     if (!handler) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: `No local API route for ${path}` }));
+      res.end(JSON.stringify({ error: `No local API route for ${pathName}` }));
       return;
     }
 
@@ -122,10 +122,8 @@ async function main() {
         cookies: {},
       }) as VercelRequest;
       await handler(vReq, wrapRes(res));
-      if (!res.writableEnded) {
-        // Handler returned without writing (e.g. early auth return already wrote)
-      }
     } catch (e) {
+      console.error('[api]', pathName, e);
       if (!res.headersSent) {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');

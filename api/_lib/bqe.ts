@@ -198,31 +198,56 @@ export async function getValidAccessToken(): Promise<{
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+export class BqeHttpError extends Error {
+  status: number;
+  body: string;
+  constructor(path: string, status: number, body: string) {
+    super(`BQE GET ${path} failed (${status}): ${body.slice(0, 500)}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function bqeGet<T>(path: string, query?: Record<string, string>): Promise<T> {
   const { accessToken, endpoint } = await getValidAccessToken();
   const url = new URL(endpoint + (path.startsWith('/') ? path : `/${path}`));
   if (query) {
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   }
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`BQE GET ${path} failed (${res.status}): ${text.slice(0, 500)}`);
+
+  // CORE allows ~100 calls/minute — back off on 429
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    const text = await res.text();
+    if (res.status === 429) {
+      const waitMatch = text.match(/try again in (\d+)/i);
+      const waitSec = waitMatch ? Number(waitMatch[1]) : 30;
+      await sleep(Math.min(Math.max(waitSec, 5), 90) * 1000);
+      continue;
+    }
+    if (!res.ok) {
+      throw new BqeHttpError(path, res.status, text);
+    }
+    if (!text || res.status === 204) return null as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(
+        `BQE GET ${path} returned non-JSON (${res.status}): ${text.slice(0, 300)}`,
+      );
+    }
   }
-  if (!text || res.status === 204) return null as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(
-      `BQE GET ${path} returned non-JSON (${res.status}): ${text.slice(0, 300)}`,
-    );
-  }
+  throw new BqeHttpError(path, 429, 'Rate limit exceeded after retries');
 }
 
 function asList<T>(payload: unknown): T[] {
@@ -333,6 +358,7 @@ export type BqeEmployee = {
   id?: string;
   firstName?: string | null;
   lastName?: string | null;
+  displayName?: string | null;
   status?: string | number | null;
   department?: string | null;
   title?: string | null;

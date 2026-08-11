@@ -156,8 +156,9 @@ export function BqeConnectPanel() {
         <span className="tag">Projects · Time · Invoices · Employees</span>
       </h3>
       <p className="plist-upload-help">
-        Connect with a CORE admin login, then sync. Sync replaces projects, hours, A/R, and billing
-        tables with live CORE data (last 36 months of time &amp; invoices — no Excel merge).
+        Connect with a CORE admin login, then sync. Sync pulls projects, time entries, employees, and
+        invoices when your CORE subscription includes them (last 36 months). Requires{' '}
+        <span className="mono">npm run dev:api</span> locally.
       </p>
 
       {loading ? <p className="plist-upload-help">Checking connection…</p> : null}

@@ -46,27 +46,29 @@ Schema: [`supabase/schema.sql`](supabase/schema.sql)
 ```bash
 cd "Practice Analytics"
 cp .env.example .env.local
-# fill VITE_SUPABASE_* (and optionally ANTHROPIC_API_KEY)
+# fill VITE_SUPABASE_* + server keys (see table)
 npm install
+# Terminal 1 — API (BQE connect/sync, Ask This Sheet)
+npm run dev:api
+# Terminal 2 — UI
 npm run dev
 ```
 
-Open the Vite URL (usually http://localhost:5173) for production sign-in, or http://localhost:5173/demo for the demo tour.
-
-### Q&A API locally
-
-```bash
-npm run dev:api
-```
+Open the Vite URL (usually http://localhost:5173) for production sign-in, or http://localhost:5173/demo for the demo tour. BQE Connect/Sync requires **both** terminals — Vite proxies `/api` to `http://127.0.0.1:8787`.
 
 | Var | Where |
 |-----|--------|
 | `VITE_SUPABASE_URL` | Client |
 | `VITE_SUPABASE_ANON_KEY` | Client |
-| `SUPABASE_URL` | Server (`/api/ask`) |
+| `SUPABASE_URL` | Server (`/api/*`) |
 | `SUPABASE_ANON_KEY` | Server (user JWT + RLS) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Seed script only |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server — BQE token store + project sync (required) |
+| `CORE_CLIENT_ID` / `CORE_CLIENT_SECRET` | Server — BQE OAuth app |
+| `BQE_REDIRECT_URI` | Server — must match Developer Portal (local: `http://localhost:5173/api/bqe/callback`) |
+| `BQE_APP_ORIGIN` | Server — e.g. `http://localhost:5173` |
 | `ANTHROPIC_API_KEY` | Server only |
+
+On Vercel, set the same server vars in Project → Settings → Environment Variables (Production + Preview).
 
 ## Production
 

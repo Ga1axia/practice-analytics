@@ -27,6 +27,28 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
+/** Parse JSON when possible; surface plain-text server crashes (e.g. Vercel). */
+async function readApiJson<T extends { error?: string }>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text) {
+    throw new Error(res.ok ? 'Empty response from API' : `Request failed (${res.status})`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
+    if (/A server error has occurred/i.test(snippet)) {
+      throw new Error(
+        'API crashed before returning JSON. Check server logs and that SUPABASE_SERVICE_ROLE_KEY, CORE_CLIENT_ID, and CORE_CLIENT_SECRET are set (Vercel project env or .env.local + npm run dev:api).',
+      );
+    }
+    if (/ECONNREFUSED|Local API is not running/i.test(snippet)) {
+      throw new Error('Local API is not running. Start it with: npm run dev:api');
+    }
+    throw new Error(`API returned non-JSON (${res.status}): ${snippet}`);
+  }
+}
+
 function fmtWhen(iso: string | null): string {
   if (!iso) return '—';
   try {
@@ -49,7 +71,7 @@ export function BqeConnectPanel() {
     setErr(null);
     try {
       const res = await fetch('/api/bqe/status', { headers: await authHeaders() });
-      const body = (await res.json()) as BqeStatus;
+      const body = await readApiJson<BqeStatus>(res);
       if (!res.ok) throw new Error(body.error || 'Failed to load BQE status');
       setStatus(body);
     } catch (e) {
@@ -69,7 +91,7 @@ export function BqeConnectPanel() {
     const bqe = params.get('bqe');
     if (!bqe) return;
     if (bqe === 'connected') {
-      setMsg('Connected to BQE CORE. Click Sync projects to pull live data.');
+      setMsg('Connected to BQE CORE. Click Sync from CORE to pull projects, time, and invoices.');
       void refreshStatus();
     } else if (bqe === 'denied') {
       setErr(`BQE authorization declined: ${params.get('error') || 'denied'}`);
@@ -89,7 +111,7 @@ export function BqeConnectPanel() {
     setErr(null);
     try {
       const res = await fetch('/api/bqe/connect', { headers: await authHeaders() });
-      const body = (await res.json()) as { authorizeUrl?: string; error?: string };
+      const body = await readApiJson<{ authorizeUrl?: string; error?: string }>(res);
       if (!res.ok || !body.authorizeUrl) {
         throw new Error(body.error || 'Could not start BQE connect');
       }
@@ -109,7 +131,7 @@ export function BqeConnectPanel() {
         method: 'POST',
         headers: await authHeaders(),
       });
-      const body = (await res.json()) as { message?: string; error?: string };
+      const body = await readApiJson<{ message?: string; error?: string }>(res);
       if (!res.ok) throw new Error(body.error || 'Sync failed');
       setMsg(body.message || 'Sync complete.');
       await refreshStatus();
@@ -131,11 +153,11 @@ export function BqeConnectPanel() {
     <div className="panel plist-upload">
       <h3>
         BQE CORE live data
-        <span className="tag">Sole source · Projects API</span>
+        <span className="tag">Projects · Time · Invoices · Employees</span>
       </h3>
       <p className="plist-upload-help">
-        Connect with a CORE admin login, then sync. Sync replaces the project list with live CORE
-        data only (no Excel merge).
+        Connect with a CORE admin login, then sync. Sync replaces projects, hours, A/R, and billing
+        tables with live CORE data (last 36 months of time &amp; invoices — no Excel merge).
       </p>
 
       {loading ? <p className="plist-upload-help">Checking connection…</p> : null}
@@ -180,7 +202,7 @@ export function BqeConnectPanel() {
           onClick={() => void sync()}
           style={{ marginLeft: 8 }}
         >
-          {busy ? 'Working…' : 'Sync projects'}
+          {busy ? 'Working…' : 'Sync from CORE'}
         </button>
       </div>
 

@@ -215,22 +215,60 @@ export async function bqeGet<T>(path: string, query?: Record<string, string>): P
   if (!res.ok) {
     throw new Error(`BQE GET ${path} failed (${res.status}): ${text.slice(0, 500)}`);
   }
-  return text ? (JSON.parse(text) as T) : (null as T);
+  if (!text || res.status === 204) return null as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      `BQE GET ${path} returned non-JSON (${res.status}): ${text.slice(0, 300)}`,
+    );
+  }
+}
+
+function asList<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    for (const key of ['value', 'data', 'items', 'results']) {
+      if (Array.isArray(obj[key])) return obj[key] as T[];
+    }
+  }
+  return [];
 }
 
 /** Paginate a CORE list endpoint (page = "n,size"). */
-export async function bqeListAll<T>(path: string, pageSize = 100): Promise<T[]> {
+export async function bqeListAll<T>(
+  path: string,
+  pageSize = 100,
+  query?: Record<string, string>,
+): Promise<T[]> {
   const out: T[] = [];
   let page = 1;
+  // Expand forces max 100/page per CORE docs
+  const size = query?.expand ? Math.min(pageSize, 100) : pageSize;
   for (;;) {
-    const batch = await bqeGet<T[]>(path, { page: `${page},${pageSize}` });
-    if (!Array.isArray(batch) || !batch.length) break;
+    const payload = await bqeGet<unknown>(path, {
+      ...(query || {}),
+      page: `${page},${size}`,
+    });
+    const batch = asList<T>(payload);
+    if (!batch.length) break;
     out.push(...batch);
-    if (batch.length < pageSize) break;
+    if (batch.length < size) break;
     page += 1;
-    if (page > 200) break; // safety
+    if (page > 500) break; // safety
   }
   return out;
+}
+
+/** ISO date (YYYY-MM-DD) for CORE where filters — lookback months from today. */
+export function bqeSinceDate(monthsBack = 36): string {
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - monthsBack);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 export type BqeProject = {
@@ -256,6 +294,48 @@ export type BqeProject = {
   hasChild?: boolean | null;
   address?: { city?: string | null }[] | null;
   percentComplete?: number | null;
+};
+
+export type BqeTimeEntry = {
+  id?: string;
+  date?: string | null;
+  projectId?: string | null;
+  resourceId?: string | null;
+  resource?: string | null;
+  actualHours?: number | null;
+  billable?: boolean | null;
+  billRate?: number | null;
+  costRate?: number | null;
+  isWrittenOff?: boolean | null;
+};
+
+export type BqeInvoiceDetail = {
+  id?: string;
+  projectId?: string | null;
+  rootProjectId?: string | null;
+  clientId?: string | null;
+  client?: string | null;
+  project?: string | null;
+  amount?: number | null;
+};
+
+export type BqeInvoice = {
+  id?: string;
+  date?: string | null;
+  invoiceAmount?: number | null;
+  balance?: number | null;
+  isDraft?: boolean | null;
+  isVoid?: boolean | null;
+  invoiceDetails?: BqeInvoiceDetail[] | null;
+};
+
+export type BqeEmployee = {
+  id?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  status?: string | number | null;
+  department?: string | null;
+  title?: string | null;
 };
 
 export function mapBqeStatus(status: string | number | null | undefined): string {

@@ -1,229 +1,183 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   bqeListAll,
-  mapBqeContractType,
-  mapBqeStatus,
+  bqeSinceDate,
   serviceSupabase,
+  type BqeEmployee,
+  type BqeInvoice,
   type BqeProject,
+  type BqeTimeEntry,
 } from '../_lib/bqe';
+import {
+  applyTimeAndInvoices,
+  mapCoreProjects,
+  mapEmployeesToRoster,
+} from '../_lib/bqeSyncBuild';
 import { requireAdmin } from '../_lib/requireAdmin';
 
-type ProjectInsert = {
-  project: string;
-  client: string | null;
-  city: string | null;
-  manager: string | null;
-  status: string;
-  type: string | null;
-  phase: string;
-  contract: number;
-  spent: number;
-  billed: number;
-  pct_used: null;
-  pct_billed: null;
-  retainer_paid: number;
-  retainer_balance: number;
-  ar: number;
-  profit: number;
-  margin: null;
-  row_kind: 'project' | 'phase';
-  parent_project: string | null;
-  billed_hours: null;
-  spent_hours: null;
-  contract_outstanding: null;
-  sort_order: number;
-};
+type Sb = ReturnType<typeof serviceSupabase>;
 
-function displayOf(p: BqeProject): string {
-  return (p.displayName || p.name || p.code || 'Untitled').trim() || 'Untitled';
+async function clearTable(sb: Sb, table: string) {
+  const { error } = await sb.from(table).delete().gte('id', 0);
+  if (error) throw new Error(`Clear ${table} failed: ${error.message}`);
 }
 
-/** Allocate a unique `project` key (pa_projects.project is UNIQUE). */
-function allocateUnique(base: string, id: string, used: Set<string>): string {
-  const clean = base.replace(/\s+/g, ' ').trim() || 'Untitled';
-  if (!used.has(clean)) {
-    used.add(clean);
-    return clean;
-  }
-  const withCode = id ? `${clean} [${id.slice(0, 8)}]` : clean;
-  if (!used.has(withCode)) {
-    used.add(withCode);
-    return withCode;
-  }
-  let n = 2;
-  for (;;) {
-    const candidate = `${clean} (${n})`;
-    if (!used.has(candidate)) {
-      used.add(candidate);
-      return candidate;
-    }
-    n += 1;
-  }
-}
-
-function mapCoreProjects(projects: BqeProject[]): ProjectInsert[] {
-  const byId = new Map(projects.map((p) => [p.id, p]));
-  const used = new Set<string>();
-  const idToKey = new Map<string, string>();
-
-  // Roots first so phase parent_project can point at the uniquified parent key
-  const roots = projects.filter((p) => !p.parentId || !byId.has(p.parentId));
-  const phases = projects.filter((p) => p.parentId && byId.has(p.parentId));
-
-  const rows: ProjectInsert[] = [];
-  let sort = 0;
-
-  for (const p of roots) {
-    const key = allocateUnique(displayOf(p), p.id, used);
-    idToKey.set(p.id, key);
-    const city =
-      Array.isArray(p.address) && p.address[0]?.city ? String(p.address[0].city) : null;
-    rows.push({
-      project: key,
-      client: p.client || null,
-      city,
-      manager: p.manager || null,
-      status: mapBqeStatus(p.status),
-      type: mapBqeContractType(p.contractType),
-      phase: 'Other',
-      contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,
-      spent: 0,
-      billed: 0,
-      pct_used: null,
-      pct_billed: null,
-      retainer_paid: 0,
-      retainer_balance: 0,
-      ar: 0,
-      profit: 0,
-      margin: null,
-      row_kind: 'project',
-      parent_project: null,
-      billed_hours: null,
-      spent_hours: null,
-      contract_outstanding: null,
-      sort_order: sort++,
-    });
-  }
-
-  for (const p of phases) {
-    const parent = byId.get(p.parentId!)!;
-    const parentKey = idToKey.get(parent.id) || displayOf(parent);
-    const phaseName = (p.phaseDescription || p.phaseName || displayOf(p)).trim() || 'Phase';
-    const base = `${parentKey} - ${phaseName}`;
-    const key = allocateUnique(base, p.id, used);
-    idToKey.set(p.id, key);
-    const city =
-      Array.isArray(p.address) && p.address[0]?.city
-        ? String(p.address[0].city)
-        : Array.isArray(parent.address) && parent.address[0]?.city
-          ? String(parent.address[0].city)
-          : null;
-    rows.push({
-      project: key,
-      client: p.client || parent.client || null,
-      city,
-      manager: p.manager || parent.manager || null,
-      status: mapBqeStatus(p.status ?? parent.status),
-      type: mapBqeContractType(p.contractType ?? parent.contractType),
-      phase: phaseName,
-      contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,
-      spent: 0,
-      billed: 0,
-      pct_used: null,
-      pct_billed: null,
-      retainer_paid: 0,
-      retainer_balance: 0,
-      ar: 0,
-      profit: 0,
-      margin: null,
-      row_kind: 'phase',
-      parent_project: parentKey,
-      billed_hours: null,
-      spent_hours: null,
-      contract_outstanding: null,
-      sort_order: sort++,
-    });
-  }
-
-  return rows;
-}
-
-async function replaceProjects(
-  sb: ReturnType<typeof serviceSupabase>,
-  rows: ProjectInsert[],
+async function insertChunks<T extends Record<string, unknown>>(
+  sb: Sb,
+  table: string,
+  rows: T[],
+  chunkSize = 200,
 ): Promise<number> {
-  // Hard clear — service role bypasses RLS
-  const { error: delErr } = await sb.from('pa_projects').delete().gte('id', 0);
-  if (delErr) throw new Error(`Clear projects failed: ${delErr.message}`);
-
   if (!rows.length) return 0;
-
-  // Insert in chunks (PostgREST payload limits)
-  const chunkSize = 200;
   let inserted = 0;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
-    const { error: insErr } = await sb.from('pa_projects').insert(chunk);
-    if (insErr) throw new Error(`Insert projects failed: ${insErr.message}`);
+    const { error } = await sb.from(table).insert(chunk);
+    if (error) throw new Error(`Insert ${table} failed: ${error.message}`);
     inserted += chunk.length;
   }
   return inserted;
 }
 
+/** Allow longer CORE pagination + DB replace on Vercel. */
+export const config = { maxDuration: 300 };
+
 /**
- * Replace pa_projects entirely from BQE CORE /project (no Excel / seed merge).
+ * Full CORE sync: projects + time entries + invoices + employees.
+ * Replaces local analytics tables with live CORE-derived figures (no Excel merge).
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-  const admin = await requireAdmin(req, res);
-  if (!admin) return;
 
-  const sb = serviceSupabase();
   try {
-    const projects = await bqeListAll<BqeProject>('/project', 100);
-    const rows = mapCoreProjects(projects);
-    const inserted = await replaceProjects(sb, rows);
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
 
-    const msg =
-      projects.length === 0
-        ? 'BQE CORE returned 0 projects — local project list cleared.'
-        : `Replaced project list with ${inserted} rows from BQE CORE (${projects.length} CORE records).`;
-
-    await sb
-      .from('pa_bqe_connection')
-      .update({
-        last_sync_at: new Date().toISOString(),
-        last_sync_status: 'ok',
-        last_sync_message: msg,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1);
-
-    res.status(200).json({
-      ok: true,
-      coreProjects: projects.length,
-      rows: rows.length,
-      inserted,
-      message: msg,
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'sync failed';
+    const sb = serviceSupabase();
     try {
+      const since = bqeSinceDate(36);
+      const whereDate = `date >= '${since}'`;
+
+      async function listOrThrow<T>(
+        path: string,
+        pageSize: number,
+        query?: Record<string, string>,
+        fallbackQuery?: Record<string, string>,
+      ): Promise<T[]> {
+        try {
+          return await bqeListAll<T>(path, pageSize, query);
+        } catch (e) {
+          if (!fallbackQuery) throw e;
+          return bqeListAll<T>(path, pageSize, fallbackQuery);
+        }
+      }
+
+      const [projects, timeEntries, invoices, employees] = await Promise.all([
+        bqeListAll<BqeProject>('/project', 500),
+        listOrThrow<BqeTimeEntry>(
+          '/timeentry',
+          500,
+          {
+            where: whereDate,
+            fields:
+              'date,projectId,resourceId,resource,actualHours,billable,billRate,costRate,isWrittenOff',
+          },
+          { where: whereDate },
+        ),
+        listOrThrow<BqeInvoice>(
+          '/invoice',
+          100,
+          { where: whereDate, expand: 'invoiceDetails' },
+          { where: whereDate },
+        ),
+        listOrThrow<BqeEmployee>(
+          '/employee',
+          200,
+          { fields: 'id,firstName,lastName,status,department,title' },
+          undefined,
+        ).catch(() => bqeListAll<BqeEmployee>('/employee', 200)),
+      ]);
+
+      const mapped = mapCoreProjects(projects);
+      const built = applyTimeAndInvoices(mapped, timeEntries, invoices);
+      const roster = mapEmployeesToRoster(employees);
+
+      // Replace dependent tables
+      await clearTable(sb, 'pa_projects');
+      await clearTable(sb, 'pa_employee_monthly');
+      await clearTable(sb, 'pa_employee_totals');
+      await clearTable(sb, 'pa_employee_roster');
+      await clearTable(sb, 'pa_ar_clients');
+      await clearTable(sb, 'pa_invoice_ledger');
+      await clearTable(sb, 'pa_monthly_revenue');
+      await clearTable(sb, 'pa_company_monthly');
+      await clearTable(sb, 'pa_project_monthly_billed');
+      await clearTable(sb, 'pa_client_monthly_billed');
+
+      const insertedProjects = await insertChunks(sb, 'pa_projects', built.projects);
+      await insertChunks(sb, 'pa_employee_monthly', built.empMonthly);
+      await insertChunks(sb, 'pa_employee_totals', built.empTotals);
+      await insertChunks(sb, 'pa_employee_roster', roster);
+      await insertChunks(sb, 'pa_ar_clients', built.arClients);
+      await insertChunks(sb, 'pa_invoice_ledger', built.invoiceLedger);
+      await insertChunks(sb, 'pa_monthly_revenue', built.monthlyRevenue);
+      await insertChunks(sb, 'pa_company_monthly', built.companyMonthly);
+      await insertChunks(sb, 'pa_project_monthly_billed', built.projectMonthlyBilled);
+      await insertChunks(sb, 'pa_client_monthly_billed', built.clientMonthlyBilled);
+
+      const msg =
+        `Synced from BQE CORE since ${since}: ` +
+        `${projects.length} projects → ${insertedProjects} rows · ` +
+        `${built.stats.timeEntries} time entries (${built.stats.matchedTime} matched) · ` +
+        `${built.stats.invoices} invoices (${built.stats.matchedInvoiceLines} project lines) · ` +
+        `${roster.length} employees · ` +
+        `${built.empTotals.length} employee hour totals · ` +
+        `${built.arClients.length} A/R clients.`;
+
       await sb
         .from('pa_bqe_connection')
         .update({
           last_sync_at: new Date().toISOString(),
-          last_sync_status: 'error',
+          last_sync_status: 'ok',
           last_sync_message: msg.slice(0, 500),
           updated_at: new Date().toISOString(),
         })
         .eq('id', 1);
-    } catch {
-      /* ignore */
+
+      res.status(200).json({
+        ok: true,
+        since,
+        coreProjects: projects.length,
+        timeEntries: built.stats.timeEntries,
+        invoices: built.stats.invoices,
+        employees: employees.length,
+        insertedProjects,
+        message: msg,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'sync failed';
+      try {
+        await sb
+          .from('pa_bqe_connection')
+          .update({
+            last_sync_at: new Date().toISOString(),
+            last_sync_status: 'error',
+            last_sync_message: msg.slice(0, 500),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', 1);
+      } catch {
+        /* ignore */
+      }
+      res.status(500).json({ error: msg });
     }
-    res.status(500).json({ error: msg });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'sync failed';
+    if (!res.headersSent) {
+      res.status(500).json({ error: msg });
+    }
   }
 }

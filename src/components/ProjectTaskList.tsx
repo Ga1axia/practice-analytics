@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AddScheduleTaskForm } from './AddScheduleTaskForm';
+import { ScheduleDateInput } from './ScheduleDateInput';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from '../lib/architecturalProcess';
 import {
   setTaskComplete,
@@ -6,6 +8,13 @@ import {
   tasksFromScheduleRows,
   type EmployeeTask,
 } from '../lib/employeeTasks';
+import { parseScheduleDate } from '../lib/scheduleDates';
+import {
+  deleteScheduleRow,
+  phaseTitlesFromRows,
+  renameScheduleTask,
+  setScheduleRowDates,
+} from '../lib/scheduleMutations';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 
 function phaseStyle(phase: string): { background: string; color: string } {
@@ -32,19 +41,22 @@ export function ProjectTaskList({
   employeeName: string;
   rows: ScheduleRow[];
   writable?: boolean;
-  /** Called after a successful checkmark so parent can refresh local rows. */
   onRowsChange?: (rows: ScheduleRow[]) => void;
 }) {
   const [view, setView] = useState<'open' | 'all' | 'done'>('open');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localRows, setLocalRows] = useState(rows);
-  /** Phase sections start collapsed. */
   const [openPhases, setOpenPhases] = useState<Set<string>>(() => new Set());
+  const [adding, setAdding] = useState(false);
+  const [addPhase, setAddPhase] = useState('');
 
   useEffect(() => {
     setLocalRows(rows);
   }, [rows]);
+
+  const scheduleId = localRows[0]?.schedule_id || '';
+  const phaseOptions = useMemo(() => phaseTitlesFromRows(localRows), [localRows]);
 
   const tasks = useMemo(
     () =>
@@ -97,6 +109,11 @@ export function ProjectTaskList({
     setOpenPhases(new Set());
   }
 
+  function commitRows(nextRows: ScheduleRow[]) {
+    setLocalRows(nextRows);
+    onRowsChange?.(nextRows);
+  }
+
   async function onToggle(task: EmployeeTask) {
     if (busyId || !task.writable) return;
     setBusyId(task.id);
@@ -108,21 +125,70 @@ export function ProjectTaskList({
       setError(res.error || 'Could not update task');
       return;
     }
-    const nextRows = localRows.map((r) =>
-      r.id === task.rowId
-        ? {
-            ...r,
-            budget_remaining: next ? 'Completed' : 'Incomplete',
-            actual_end: res.endRaw,
-          }
-        : r,
+    commitRows(
+      localRows.map((r) =>
+        r.id === task.rowId
+          ? {
+              ...r,
+              budget_remaining: next ? 'Completed' : 'Incomplete',
+              actual_end: res.endRaw,
+            }
+          : r,
+      ),
     );
-    setLocalRows(nextRows);
-    onRowsChange?.(nextRows);
   }
 
-  if (!tasks.length) {
-    return <p className="pd-muted">No tasks on this project schedule yet.</p>;
+  async function onRename(task: EmployeeTask, name: string) {
+    if (!task.writable || name.trim() === task.task) return;
+    setBusyId(task.id);
+    const res = await renameScheduleTask({
+      projectKey,
+      rowId: task.rowId,
+      task: name,
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    commitRows(localRows.map((r) => (r.id === task.rowId ? { ...r, task: name.trim() } : r)));
+  }
+
+  async function onDateChange(
+    task: EmployeeTask,
+    field: 'target_start' | 'target_end',
+    value: string,
+  ) {
+    if (!task.writable) return;
+    setBusyId(task.id);
+    setError(null);
+    const res = await setScheduleRowDates({
+      projectKey,
+      rowId: task.rowId,
+      targetStart: field === 'target_start' ? value : undefined,
+      targetEnd: field === 'target_end' ? value : undefined,
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    commitRows(
+      localRows.map((r) => (r.id === task.rowId ? { ...r, [field]: value } : r)),
+    );
+  }
+
+  async function onDelete(task: EmployeeTask) {
+    if (!task.writable || busyId) return;
+    if (!window.confirm(`Delete “${task.task}”?`)) return;
+    setBusyId(task.id);
+    const res = await deleteScheduleRow({ projectKey, rowId: task.rowId });
+    setBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    commitRows(localRows.filter((r) => r.id !== task.rowId));
   }
 
   return (
@@ -159,15 +225,49 @@ export function ProjectTaskList({
             Collapse all
           </button>
         </div>
+        {writable && scheduleId ? (
+          <button
+            type="button"
+            className="emp-primary-btn"
+            onClick={() => {
+              setAddPhase(phaseOptions[0] || '');
+              setAdding((v) => !v);
+            }}
+          >
+            {adding ? 'Close' : 'Add task'}
+          </button>
+        ) : null}
       </div>
 
       <p className="pd-muted emp-project-tasks-hint">
-        Phases start folded — open a phase to see and check off tasks.
+        Check off work, edit names and dates inline, or add a task under any phase.
       </p>
+
+      {adding && scheduleId ? (
+        <div className="emp-add-task-inline">
+          <AddScheduleTaskForm
+            projectKey={projectKey}
+            scheduleId={scheduleId}
+            phaseOptions={phaseOptions}
+            rows={localRows}
+            defaultPhase={addPhase}
+            onCancel={() => setAdding(false)}
+            onCreated={(row) => {
+              setAdding(false);
+              setOpenPhases((prev) => new Set(prev).add(addPhase || phaseOptions[0] || ''));
+              commitRows(
+                [...localRows, row].sort((a, b) => a.sort_order - b.sort_order),
+              );
+            }}
+          />
+        </div>
+      ) : null}
 
       {error ? <p className="plist-upload-err">{error}</p> : null}
 
-      {!filtered.length ? (
+      {!tasks.length && !adding ? (
+        <p className="pd-muted">No tasks on this project schedule yet.</p>
+      ) : !filtered.length && !adding ? (
         <p className="pd-muted">No tasks in this view.</p>
       ) : (
         byPhase.map(([phase, list]) => {
@@ -202,7 +302,7 @@ export function ProjectTaskList({
                 <ul className="emp-project-task-list">
                   {list.map((t) => (
                     <li key={t.id} className={t.complete ? 'done' : ''}>
-                      <label className="emp-project-task-item">
+                      <div className="emp-project-task-item emp-project-task-item-edit">
                         <input
                           type="checkbox"
                           checked={t.complete}
@@ -210,22 +310,95 @@ export function ProjectTaskList({
                           onChange={() => void onToggle(t)}
                           aria-label={`Mark ${t.task} ${t.complete ? 'incomplete' : 'complete'}`}
                         />
-                        <span className="emp-project-task-body">
-                          <strong>{t.task}</strong>
-                          <span className="mono soft">
-                            {t.kind === 'subtask' ? 'Subtask' : 'Task'}
-                            {t.dueRaw ? ` · due ${t.dueRaw}` : ''}
-                            {t.startRaw ? ` · start ${t.startRaw}` : ''}
-                          </span>
-                        </span>
+                        <div className="emp-project-task-body">
+                          {t.writable ? (
+                            <input
+                              type="text"
+                              className="emp-task-name-input"
+                              defaultValue={t.task}
+                              key={`${t.id}:${t.task}`}
+                              disabled={busyId === t.id}
+                              aria-label="Task name"
+                              onBlur={(e) => void onRename(t, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }}
+                            />
+                          ) : (
+                            <strong>{t.task}</strong>
+                          )}
+                          <div className="emp-project-task-dates">
+                            <label>
+                              <span>Start</span>
+                              {t.writable ? (
+                                <ScheduleDateInput
+                                  value={t.startRaw}
+                                  disabled={busyId === t.id}
+                                  ariaLabel={`Start for ${t.task}`}
+                                  onCommit={(v) => void onDateChange(t, 'target_start', v)}
+                                />
+                              ) : (
+                                <span className="mono soft">{t.startRaw || '—'}</span>
+                              )}
+                            </label>
+                            <label>
+                              <span>Due</span>
+                              {t.writable ? (
+                                <ScheduleDateInput
+                                  value={t.dueRaw}
+                                  disabled={busyId === t.id}
+                                  ariaLabel={`Due for ${t.task}`}
+                                  onCommit={(v) => void onDateChange(t, 'target_end', v)}
+                                />
+                              ) : (
+                                <span className="mono soft">{t.dueRaw || '—'}</span>
+                              )}
+                            </label>
+                            <span className="mono soft">
+                              {t.kind === 'subtask' ? 'Subtask' : 'Task'}
+                              {parseScheduleDate(t.endRaw)
+                                ? ` · ended ${t.endRaw}`
+                                : ''}
+                            </span>
+                          </div>
+                        </div>
                         <span
                           className={`emp-task-status ${t.complete ? 'complete' : 'incomplete'}`}
                         >
                           {t.status}
                         </span>
-                      </label>
+                        {t.writable ? (
+                          <button
+                            type="button"
+                            className="emp-task-delete"
+                            disabled={busyId === t.id}
+                            title="Delete task"
+                            aria-label={`Delete ${t.task}`}
+                            onClick={() => void onDelete(t)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
+                  {writable ? (
+                    <li className="emp-project-task-add-row">
+                      <button
+                        type="button"
+                        className="cp-text-btn"
+                        onClick={() => {
+                          setAddPhase(phase);
+                          setAdding(true);
+                          setOpenPhases((prev) => new Set(prev).add(phase));
+                        }}
+                      >
+                        + Add under {phase}
+                      </button>
+                    </li>
+                  ) : null}
                 </ul>
               ) : null}
             </div>

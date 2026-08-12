@@ -33,7 +33,19 @@ export function clearInflightSchedule(projectKey: string) {
 export function patchCachedScheduleRow(
   projectKey: string,
   rowId: string,
-  patch: Partial<Pick<ScheduleRow, 'budget_remaining' | 'actual_end' | 'target_start' | 'target_end'>>,
+  patch: Partial<
+    Pick<
+      ScheduleRow,
+      | 'task'
+      | 'budget_remaining'
+      | 'actual_end'
+      | 'actual_start'
+      | 'target_start'
+      | 'target_end'
+      | 'sort_order'
+      | 'row_kind'
+    >
+  >,
 ): boolean {
   const entry = cache.get(projectKey);
   if (!entry) return false;

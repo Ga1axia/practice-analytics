@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AddScheduleTaskForm } from '../components/AddScheduleTaskForm';
 import { EmployeeGantt } from '../components/EmployeeGantt';
+import { ScheduleDateInput } from '../components/ScheduleDateInput';
 import {
   loadEmployeeAgenda,
   type AgendaItem,
   type AgendaKind,
 } from '../lib/employeeAgenda';
 import { useDemoMode } from '../hooks/useDemoMode';
-import { monthMatrix, startOfDay } from '../lib/scheduleDates';
+import { monthMatrix, parseScheduleDate, startOfDay } from '../lib/scheduleDates';
 import type { ProjectNode } from '../lib/projectListHierarchy';
+import { ensureProjectSchedule } from '../lib/scheduleEnsure';
+import {
+  formatScheduleDate,
+  phaseTitlesFromRows,
+  setScheduleRowDates,
+} from '../lib/scheduleMutations';
+import type { ScheduleRow } from '../lib/scheduleTypes';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -38,6 +47,11 @@ function kindLabel(k: AgendaKind) {
   return 'Task';
 }
 
+function padYmd(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Props) {
   const isDemo = useDemoMode();
   const [items, setItems] = useState<AgendaItem[]>([]);
@@ -50,6 +64,20 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
   const [selected, setSelected] = useState(() => startOfDay(new Date()));
   const [filter, setFilter] = useState<'all' | AgendaKind>('all');
   const [view, setView] = useState<CalView>('gantt');
+  const [reloadTick, setReloadTick] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addProjectKey, setAddProjectKey] = useState('');
+  const [addMeta, setAddMeta] = useState<{
+    scheduleId: string;
+    phases: string[];
+    rows: ScheduleRow[];
+  } | null>(null);
+
+  async function reload() {
+    setReloadTick((n) => n + 1);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +94,61 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
     return () => {
       cancelled = true;
     };
-  }, [projects, employeeName, isDemo]);
+  }, [projects, employeeName, isDemo, reloadTick]);
+
+  useEffect(() => {
+    if (!adding) return;
+    const key = addProjectKey || projects[0]?.key || '';
+    if (!key) return;
+    const project = projects.find((p) => p.key === key);
+    if (!project) return;
+    let cancelled = false;
+    void ensureProjectSchedule({
+      projectKey: project.key,
+      clientName: project.clientName,
+      title: project.title,
+    }).then((ensured) => {
+      if (cancelled) return;
+      setAddMeta({
+        scheduleId: ensured.meta?.id || '',
+        phases: phaseTitlesFromRows(ensured.rows),
+        rows: ensured.rows,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [adding, addProjectKey, projects]);
+
+  async function onMoveDeadline(item: AgendaItem, scheduleText: string) {
+    if (!item.rowId || item.kind === 'meeting') return;
+    setBusyId(item.id);
+    setError(null);
+    const field = item.dateField === 'target_start' ? 'target_start' : 'target_end';
+    const res = await setScheduleRowDates({
+      projectKey: item.projectKey,
+      rowId: item.rowId,
+      targetStart: field === 'target_start' ? scheduleText : undefined,
+      targetEnd: field === 'target_end' ? scheduleText : undefined,
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    const nextDate = parseScheduleDate(scheduleText);
+    if (!nextDate) {
+      void reload();
+      return;
+    }
+    const key = padYmd(nextDate);
+    setItems((prev) =>
+      prev.map((x) =>
+        x.id === item.id ? { ...x, date: nextDate, dateKey: key } : x,
+      ),
+    );
+    setSelected(startOfDay(nextDate));
+  }
 
   const today = startOfDay(new Date());
   const filtered = useMemo(
@@ -136,11 +218,22 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
           <h1 className="display">Upcoming work</h1>
           <p className="emp-lede">
             Meetings, deadlines, and tasks across your{' '}
-            {projects.length} assigned project{projects.length === 1 ? '' : 's'}. Schedules and
-            due dates are generated automatically for each phase and subtask.
+            {projects.length} assigned project{projects.length === 1 ? '' : 's'}. Change due dates
+            inline, or add a task on the selected day.
           </p>
         </div>
         <div className="emp-cal-controls">
+          <button
+            type="button"
+            className="emp-primary-btn"
+            disabled={!projects.length}
+            onClick={() => {
+              setAddProjectKey(projects[0]?.key || '');
+              setAdding((v) => !v);
+            }}
+          >
+            {adding ? 'Close' : 'Add task'}
+          </button>
           <div className="emp-status-toggle" role="group" aria-label="Calendar view">
             <button
               type="button"
@@ -181,12 +274,58 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
         </div>
       </header>
 
+      {error ? <p className="plist-upload-err">{error}</p> : null}
+
+      {adding ? (
+        <div className="panel emp-add-task-panel">
+          <div className="emp-add-task-project">
+            <label>
+              <span>Project</span>
+              <select
+                value={addProjectKey}
+                onChange={(e) => {
+                  setAddProjectKey(e.target.value);
+                  setAddMeta(null);
+                }}
+              >
+                {projects.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.title} — {p.clientName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {!addMeta?.scheduleId ? (
+            <p className="pd-muted">Preparing schedule…</p>
+          ) : (
+            <AddScheduleTaskForm
+              projectKey={addProjectKey}
+              scheduleId={addMeta.scheduleId}
+              phaseOptions={addMeta.phases}
+              rows={addMeta.rows}
+              defaultDueYmd={padYmd(selected)}
+              onCancel={() => setAdding(false)}
+              onCreated={() => {
+                setAdding(false);
+                void reload();
+              }}
+            />
+          )}
+        </div>
+      ) : null}
+
       {view === 'gantt' ? (
         <section className="panel emp-gantt-panel">
           <h3>
-            Schedule Gantt <span className="tag">All assigned projects</span>
+            Schedule Gantt <span className="tag">Click a bar to edit dates</span>
           </h3>
-          <EmployeeGantt projects={projects} onOpenProject={onOpenProject} />
+          <EmployeeGantt
+            projects={projects}
+            onOpenProject={onOpenProject}
+            reloadToken={reloadTick}
+            onDatesChanged={() => void reload()}
+          />
         </section>
       ) : null}
 
@@ -283,18 +422,31 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
               })}
             </h4>
             {!dayItems.length ? (
-              <p className="pd-muted">Nothing scheduled this day.</p>
+              <p className="pd-muted">Nothing scheduled this day. Use Add task to create one.</p>
             ) : (
-              <ul className="emp-agenda-list">
+              <ul className="emp-agenda-list emp-agenda-list-edit">
                 {dayItems.map((i) => (
                   <li key={i.id}>
-                    <button type="button" onClick={() => onOpenProject(i.projectKey)}>
-                      <span className={`emp-agenda-kind ${i.kind}`}>{kindLabel(i.kind)}</span>
-                      <strong>{i.title}</strong>
-                      <span className="mono">
-                        {i.projectTitle} · {i.clientName}
-                      </span>
-                    </button>
+                    <div className="emp-agenda-edit-row">
+                      <button type="button" onClick={() => onOpenProject(i.projectKey)}>
+                        <span className={`emp-agenda-kind ${i.kind}`}>{kindLabel(i.kind)}</span>
+                        <strong>{i.title}</strong>
+                        <span className="mono">
+                          {i.projectTitle} · {i.clientName}
+                        </span>
+                      </button>
+                      {i.rowId && i.kind !== 'meeting' ? (
+                        <label className="emp-agenda-date-edit">
+                          <span>Move</span>
+                          <ScheduleDateInput
+                            value={formatScheduleDate(i.date)}
+                            disabled={busyId === i.id}
+                            ariaLabel={`Move deadline for ${i.title}`}
+                            onCommit={(v) => void onMoveDeadline(i, v)}
+                          />
+                        </label>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -308,14 +460,24 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
               <h3>
                 Past due <span className="tag">{overdue.length}</span>
               </h3>
-              <ul className="emp-agenda-list">
+              <ul className="emp-agenda-list emp-agenda-list-edit">
                 {overdue.map((i) => (
                   <li key={i.id}>
-                    <button type="button" onClick={() => onOpenProject(i.projectKey)}>
-                      <span className="mono">{i.dateKey}</span>
-                      <strong>{i.title}</strong>
-                      <span className="mono soft">{i.projectTitle}</span>
-                    </button>
+                    <div className="emp-agenda-edit-row">
+                      <button type="button" onClick={() => onOpenProject(i.projectKey)}>
+                        <span className="mono">{i.dateKey}</span>
+                        <strong>{i.title}</strong>
+                        <span className="mono soft">{i.projectTitle}</span>
+                      </button>
+                      {i.rowId ? (
+                        <ScheduleDateInput
+                          value={formatScheduleDate(i.date)}
+                          disabled={busyId === i.id}
+                          ariaLabel={`Reschedule ${i.title}`}
+                          onCommit={(v) => void onMoveDeadline(i, v)}
+                        />
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -352,15 +514,25 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
             {!workUpcoming.length ? (
               <p className="pd-muted">No upcoming dated work.</p>
             ) : (
-              <ul className="emp-agenda-list">
+              <ul className="emp-agenda-list emp-agenda-list-edit">
                 {workUpcoming.map((i) => (
                   <li key={i.id}>
-                    <button type="button" onClick={() => onOpenProject(i.projectKey)}>
-                      <span className={`emp-agenda-kind ${i.kind}`}>{kindLabel(i.kind)}</span>
-                      <span className="mono">{i.dateKey}</span>
-                      <strong>{i.title}</strong>
-                      <span className="mono soft">{i.projectTitle}</span>
-                    </button>
+                    <div className="emp-agenda-edit-row">
+                      <button type="button" onClick={() => onOpenProject(i.projectKey)}>
+                        <span className={`emp-agenda-kind ${i.kind}`}>{kindLabel(i.kind)}</span>
+                        <span className="mono">{i.dateKey}</span>
+                        <strong>{i.title}</strong>
+                        <span className="mono soft">{i.projectTitle}</span>
+                      </button>
+                      {i.rowId ? (
+                        <ScheduleDateInput
+                          value={formatScheduleDate(i.date)}
+                          disabled={busyId === i.id}
+                          ariaLabel={`Reschedule ${i.title}`}
+                          onCommit={(v) => void onMoveDeadline(i, v)}
+                        />
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>

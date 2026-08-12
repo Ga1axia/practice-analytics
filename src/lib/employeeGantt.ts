@@ -11,6 +11,7 @@ export type EmployeeGanttBar = GanttBar & {
   projectKey: string;
   projectTitle: string;
   clientName: string;
+  rowId: string;
 };
 
 /** Load schedules once (cached) and build Gantt bars for all kinds. Filter client-side. */
@@ -37,6 +38,7 @@ export async function loadEmployeeGantt(
         bars.push({
           ...b,
           id: `${p.key}:${b.id}`,
+          rowId: b.id,
           label: b.kind === 'phase' ? `${p.title} · ${b.label}` : b.label,
           section: `${p.title} · ${b.section}`,
           projectKey: p.key,

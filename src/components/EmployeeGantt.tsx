@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ScheduleDateInput } from './ScheduleDateInput';
 import {
   filterEmployeeGanttBars,
   loadEmployeeGantt,
@@ -12,6 +13,7 @@ import {
   ganttTimelineBounds,
   type GanttFilter,
 } from '../lib/scheduleGantt';
+import { formatScheduleDate, setScheduleRowDates } from '../lib/scheduleMutations';
 import { startOfDay } from '../lib/scheduleDates';
 import type { ProjectNode } from '../lib/projectListHierarchy';
 
@@ -23,11 +25,16 @@ export function EmployeeGantt({
   projects,
   onOpenProject,
   initialProjectKey = '',
+  reloadToken = 0,
+  onDatesChanged,
 }: {
   projects: (ProjectNode & { clientName: string })[];
   onOpenProject: (key: string) => void;
   /** Pre-select a project filter (e.g. from project detail). */
   initialProjectKey?: string;
+  /** Bump to force reload after external edits. */
+  reloadToken?: number;
+  onDatesChanged?: () => void;
 }) {
   const [kindFilter, setKindFilter] = useState<GanttFilter>('all');
   const [projectKey, setProjectKey] = useState(initialProjectKey);
@@ -35,6 +42,8 @@ export function EmployeeGantt({
   const [allBars, setAllBars] = useState<EmployeeGanttBar[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<EmployeeGanttBar | null>(null);
+  const [saving, setSaving] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const projectsKey = useMemo(
     () => projects.map((p) => p.key).join('|'),
@@ -56,7 +65,7 @@ export function EmployeeGantt({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectsKey tracks identity
-  }, [projectsKey]);
+  }, [projectsKey, reloadToken]);
 
   useEffect(() => {
     if (initialProjectKey) setProjectKey(initialProjectKey);
@@ -82,8 +91,73 @@ export function EmployeeGantt({
   const pxPerDay = scale === 'week' ? 14 : 6;
   const timelineWidth = bounds ? Math.max(totalDays * pxPerDay, 720) : 720;
 
+  async function saveSelectedDates(startText: string, endText: string) {
+    if (!selected || selected.kind === 'phase') return;
+    setSaving(true);
+    setError(null);
+    const res = await setScheduleRowDates({
+      projectKey: selected.projectKey,
+      rowId: selected.rowId,
+      targetStart: startText,
+      targetEnd: endText,
+    });
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setSelected(null);
+    onDatesChanged?.();
+    // Local refresh
+    const res2 = await loadEmployeeGantt(projects);
+    setAllBars(res2.bars);
+  }
+
   return (
     <div className="gantt emp-gantt">
+      {selected && selected.kind !== 'phase' ? (
+        <div className="emp-gantt-edit panel">
+          <div>
+            <p className="pd-kicker">{selected.projectTitle}</p>
+            <strong>{selected.label}</strong>
+          </div>
+          <label>
+            <span>Start</span>
+            <ScheduleDateInput
+              value={formatScheduleDate(selected.start)}
+              disabled={saving}
+              ariaLabel="Gantt start date"
+              onCommit={(v) => {
+                const end = formatScheduleDate(selected.end);
+                void saveSelectedDates(v || end, end);
+              }}
+            />
+          </label>
+          <label>
+            <span>Due / end</span>
+            <ScheduleDateInput
+              value={formatScheduleDate(selected.end)}
+              disabled={saving}
+              ariaLabel="Gantt end date"
+              onCommit={(v) => {
+                const start = formatScheduleDate(selected.start);
+                void saveSelectedDates(start, v || start);
+              }}
+            />
+          </label>
+          <button type="button" className="cp-text-btn" onClick={() => setSelected(null)}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="cp-text-btn"
+            onClick={() => onOpenProject(selected.projectKey)}
+          >
+            Open project
+          </button>
+        </div>
+      ) : null}
+
       <div className="gantt-toolbar emp-gantt-toolbar">
         <label className="emp-gantt-project">
           <span className="f-label">Project</span>
@@ -183,9 +257,15 @@ export function EmployeeGantt({
                   <button
                     key={bar.id}
                     type="button"
-                    className={`gantt-row depth-${bar.depth} kind-${bar.kind} emp-gantt-row`}
-                    onClick={() => onOpenProject(bar.projectKey)}
-                    title={`${bar.projectTitle}\n${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}`}
+                    className={`gantt-row depth-${bar.depth} kind-${bar.kind} emp-gantt-row${selected?.id === bar.id ? ' selected' : ''}`}
+                    onClick={() => {
+                      if (bar.kind === 'phase') {
+                        onOpenProject(bar.projectKey);
+                        return;
+                      }
+                      setSelected(bar);
+                    }}
+                    title={`${bar.projectTitle}\n${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}\nClick to edit dates`}
                   >
                     <div className="gantt-label-col">
                       <span className={`gantt-kind-tag ${bar.kind}`}>

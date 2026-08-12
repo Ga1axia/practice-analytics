@@ -2818,6 +2818,97 @@ footer{
   grid-template-columns:minmax(52px, 28%) 1fr 34px minmax(44px, auto);
 }
 .emp-page-hidden{ display:none !important; }
+.emp-date-input{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  border:1px solid var(--border);
+  background:#fff;
+  color:var(--navy);
+  padding:3px 6px;
+  max-width:138px;
+}
+.emp-task-name-input{
+  width:100%;
+  border:1px solid transparent;
+  background:transparent;
+  font:inherit;
+  font-weight:600;
+  color:var(--navy);
+  padding:2px 4px;
+  border-radius:2px;
+}
+.emp-task-name-input:hover,
+.emp-task-name-input:focus{
+  border-color:var(--border);
+  background:#fff;
+  outline:none;
+}
+.emp-task-delete{
+  border:0; background:transparent; color:var(--ink-soft);
+  font-size:18px; line-height:1; cursor:pointer; padding:2px 6px;
+}
+.emp-task-delete:hover{ color:var(--rust); }
+.emp-tasks-table .col-actions{ width:36px; text-align:center; }
+.emp-add-task-panel{ margin:0 0 12px; padding:14px 16px; }
+.emp-add-task-project{ margin-bottom:10px; }
+.emp-add-task-project label,
+.emp-add-task label{
+  display:flex; flex-direction:column; gap:4px;
+  font-size:11px; color:var(--ink-soft);
+}
+.emp-add-task-project select,
+.emp-add-task input[type="text"],
+.emp-add-task select,
+.emp-add-task input[type="date"]{
+  font-size:13px; color:var(--navy);
+  border:1px solid var(--border); background:#fff; padding:6px 8px;
+}
+.emp-add-task-grid{
+  display:grid;
+  grid-template-columns:2fr 1.2fr 0.8fr 0.9fr 0.9fr;
+  gap:10px;
+}
+@media(max-width:900px){
+  .emp-add-task-grid{ grid-template-columns:1fr 1fr; }
+}
+.emp-add-task-actions{
+  display:flex; gap:10px; align-items:center; margin-top:12px;
+}
+.emp-add-task-inline{
+  margin:0 0 12px; padding:10px 12px;
+  border:1px solid var(--border); background:#FAFBFC;
+}
+.emp-project-task-item-edit{
+  display:grid;
+  grid-template-columns:22px 1fr auto auto;
+  gap:8px; align-items:start;
+  padding:8px 4px;
+}
+.emp-project-task-dates{
+  display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; margin-top:4px;
+}
+.emp-project-task-dates label{
+  display:flex; align-items:center; gap:6px;
+  font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em;
+}
+.emp-project-task-add-row{ padding:6px 8px 10px; }
+.emp-agenda-list-edit .emp-agenda-edit-row{
+  display:flex; gap:10px; align-items:center; justify-content:space-between;
+}
+.emp-agenda-list-edit .emp-agenda-edit-row > button{ flex:1; text-align:left; }
+.emp-agenda-date-edit{
+  display:flex; flex-direction:column; gap:2px;
+  font-size:10px; color:var(--ink-soft); text-transform:uppercase;
+}
+.emp-gantt-edit{
+  display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;
+  margin-bottom:10px; padding:10px 12px;
+}
+.emp-gantt-edit label{
+  display:flex; flex-direction:column; gap:4px;
+  font-size:10px; color:var(--ink-soft); text-transform:uppercase;
+}
+.emp-gantt-row.selected{ outline:1px solid var(--gold); background:rgba(168,120,58,0.06); }
 .emp-project-tasks{ margin-top:4px; }
 .emp-project-tasks-bar{ margin-bottom:8px; flex-wrap:wrap; gap:8px; }
 .emp-project-tasks-hint{ margin:0 0 10px; font-size:12px; }

@@ -20,6 +20,10 @@ export type AgendaItem = {
   clientName: string;
   status: string;
   section?: string;
+  /** Schedule row id when this item maps to a task/deadline (not meetings). */
+  rowId?: string;
+  /** Which date field drives the calendar placement. */
+  dateField?: 'target_end' | 'target_start' | 'budget_remaining';
 };
 
 function dateKey(d: Date) {
@@ -101,6 +105,8 @@ export async function loadEmployeeAgenda(
           clientName: p.clientName,
           status: e.status,
           section: e.section,
+          rowId: e.rowId,
+          dateField: e.source,
         });
       }
 

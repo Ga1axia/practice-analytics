@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5';
+type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, 'public', any>;
 
@@ -416,6 +416,45 @@ async function buildContext(
         'What phase is active?',
         'Which tasks still need client comments?',
         'How much has been billed on this project?',
+      ],
+    };
+  }
+
+  if (sheet === 's6') {
+    const [caps, allocs, syncRun] = await Promise.all([
+      fetchAll<{
+        employee_name: string;
+        weekly_capacity_hours: number;
+        role: string | null;
+        discipline: string | null;
+        active: boolean;
+      }>(supabase, 'pa_employee_capacity'),
+      fetchAll<{
+        employee_name: string;
+        week_start: string;
+        planned_hours: number;
+      }>(supabase, 'pa_employee_phase_allocations'),
+      supabase
+        .from('pa_bqe_sync_runs')
+        .select('completed_at,status')
+        .in('sync_type', ['historical', 'incremental'])
+        .in('status', ['succeeded', 'partial'])
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    return {
+      ctx: {
+        sheet_mode: 'staffing_workload',
+        employee_capacity_rows: caps.slice(0, 200),
+        allocation_sample: allocs.slice(0, 200),
+        last_time_entry_sync: syncRun.data || null,
+        note: 'Staffing uses observed time entries plus planned allocations. Do not invent forward workload from timesheets alone.',
+      },
+      sheetLabel: 'Staffing',
+      examples: [
+        'Who has open capacity this week?',
+        'Which employees are over capacity?',
       ],
     };
   }

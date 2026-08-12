@@ -1,8 +1,8 @@
 type Kpi = { k: string; v: string; cls?: string; sub?: string; active?: boolean };
 
-export function KpiRow({ items }: { items: Kpi[] }) {
+export function KpiRow({ items, className }: { items: Kpi[]; className?: string }) {
   return (
-    <div className="kpi-row">
+    <div className={['kpi-row', className].filter(Boolean).join(' ')}>
       {items.map((x) => (
         <div
           key={x.k}

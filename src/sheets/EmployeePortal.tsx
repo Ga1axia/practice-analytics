@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { EfficiencyLineChart, StackedHoursChart } from '../components/Charts';
+import { EmployeeTimecard } from '../components/EmployeeTimecard';
 import { KpiRow } from '../components/KpiRow';
 import { ProjectSchedulePulse } from '../components/ProjectSchedulePulse';
 import { processPhaseLabel } from '../lib/architecturalProcess';
@@ -38,9 +39,20 @@ export function EmployeePortal({
   employeeName: string;
 }) {
   const [page, setPage] = useState<PageId>('hours');
+  const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['hours']));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+
+  function go(next: PageId) {
+    setVisited((prev) => {
+      if (prev.has(next)) return prev;
+      const copy = new Set(prev);
+      copy.add(next);
+      return copy;
+    });
+    setPage(next);
+  }
 
   const totals = useMemo(
     () => data.emp_totals.find((e) => e.employee === employeeName) || null,
@@ -101,12 +113,12 @@ export function EmployeePortal({
   const clientCount = new Set(bookSource.map((p) => p.clientName)).size;
 
   function goProjects() {
-    setPage('projects');
+    go('projects');
   }
 
   function selectProject(key: string) {
     setSelectedKey(key);
-    setPage('project');
+    go('project');
     requestAnimationFrame(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       document.getElementById('emp-project-page')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -124,9 +136,9 @@ export function EmployeePortal({
         <button
           type="button"
           className={page === 'hours' ? 'active' : ''}
-          onClick={() => setPage('hours')}
+          onClick={() => go('hours')}
         >
-          <span className="num">01</span>My hours
+          <span className="num">01</span>My timecard
         </button>
         <button
           type="button"
@@ -138,14 +150,14 @@ export function EmployeePortal({
         <button
           type="button"
           className={page === 'tasks' ? 'active' : ''}
-          onClick={() => setPage('tasks')}
+          onClick={() => go('tasks')}
         >
           <span className="num">03</span>My tasks
         </button>
         <button
           type="button"
           className={page === 'calendar' ? 'active' : ''}
-          onClick={() => setPage('calendar')}
+          onClick={() => go('calendar')}
         >
           <span className="num">04</span>My calendar
         </button>
@@ -155,7 +167,7 @@ export function EmployeePortal({
           onClick={() => {
             if (!selectedKey && activeProjects[0]) setSelectedKey(activeProjects[0].key);
             else if (!selectedKey && allProjects[0]) setSelectedKey(allProjects[0].key);
-            setPage('project');
+            go('project');
           }}
           disabled={!allProjects.length}
         >
@@ -163,57 +175,58 @@ export function EmployeePortal({
         </button>
       </nav>
 
-      {page === 'hours' ? (
+      <div className={page === 'hours' ? 'emp-page' : 'emp-page emp-page-hidden'} hidden={page !== 'hours'}>
         <>
-          <header className="emp-hero">
-            <div>
-              <p className="pd-kicker">Hours</p>
-              <h1 className="display">{employeeName}</h1>
-              <p className="emp-lede">Your personal hours and efficiency.</p>
-            </div>
-          </header>
+          <div className="emp-hours-top">
+            <header className="emp-hero emp-hero-hours">
+              <div>
+                <p className="pd-kicker">My timecard</p>
+                <h1 className="display">{employeeName}</h1>
+                <p className="emp-lede">
+                  Phase mix, project load, and efficiency from your BQE time entries.
+                </p>
+              </div>
+            </header>
 
-          <KpiRow
-            items={[
-              {
-                k: 'Billable hours',
-                v: (totals?.bill_hours || 0).toLocaleString('en-US', {
-                  maximumFractionDigits: 1,
-                }),
-                cls: 'accent-teal',
-              },
-              {
-                k: 'Efficiency',
-                v: totals ? fmtPct(totals.efficiency || 0) : '—',
-                cls: 'accent-gold',
-              },
-              {
-                k: 'Active projects',
-                v: String(activeProjects.length),
-              },
-              {
-                k: 'All assigned',
-                v: String(allProjects.length),
-              },
-              {
-                k: 'Non-billable hours',
-                v: (totals?.nb_hours || 0).toLocaleString('en-US', {
-                  maximumFractionDigits: 1,
-                }),
-              },
-              {
-                k: 'Standard hours',
-                v: (totals?.standard_hours || 0).toLocaleString('en-US', {
-                  maximumFractionDigits: 1,
-                }),
-              },
-            ]}
-          />
+            <KpiRow
+              className="emp-kpi-row"
+              items={[
+                {
+                  k: 'Billable hours',
+                  v: Math.round(totals?.bill_hours || 0).toLocaleString('en-US'),
+                  cls: 'accent-teal',
+                },
+                {
+                  k: 'Efficiency',
+                  v: totals ? fmtPct(totals.efficiency || 0) : '—',
+                  cls: 'accent-gold',
+                },
+                {
+                  k: 'Active projects',
+                  v: String(activeProjects.length),
+                },
+                {
+                  k: 'All assigned',
+                  v: String(allProjects.length),
+                },
+                {
+                  k: 'Non-billable',
+                  v: Math.round(totals?.nb_hours || 0).toLocaleString('en-US'),
+                },
+                {
+                  k: 'Standard hours',
+                  v: Math.round(totals?.standard_hours || 0).toLocaleString('en-US'),
+                },
+              ]}
+            />
+
+            <EmployeeTimecard employeeName={employeeName} />
+          </div>
 
           <div className="grid grid-2">
             <div className="panel">
               <h3>
-                My hours <span className="tag">last 12 months</span>
+                Monthly hours <span className="tag">last 12 months</span>
               </h3>
               {trailing.length ? (
                 <div className="chart-wrap tall">
@@ -229,7 +242,7 @@ export function EmployeePortal({
             </div>
             <div className="panel">
               <h3>
-                My efficiency <span className="tag">billable / standard</span>
+                Efficiency <span className="tag">billable / standard</span>
               </h3>
               {trailing.length ? (
                 <div className="chart-wrap tall">
@@ -257,20 +270,23 @@ export function EmployeePortal({
               .
             </p>
             <button type="button" className="emp-primary-btn" onClick={goProjects}>
-              Open my projects
+              Browse my projects
             </button>
           </div>
         </>
-      ) : null}
+      </div>
 
-      {page === 'projects' ? (
+      <div
+        className={page === 'projects' ? 'emp-page' : 'emp-page emp-page-hidden'}
+        hidden={page !== 'projects'}
+      >
         <>
           <header className="emp-hero emp-hero-row">
             <div>
               <p className="pd-kicker">Projects</p>
               <h1 className="display">My projects</h1>
               <p className="emp-lede">
-                Open a project for its calendar, meetings, documents, and schedule.
+                Open a project for its task list, calendar, meetings, and schedule.
               </p>
             </div>
             <div className="emp-filter-bar">
@@ -384,33 +400,46 @@ export function EmployeePortal({
                         <span className="v">{myPhases.length || p.phases.length}</span>
                       </div>
                     </div>
-                    <span className="emp-gallery-cta">Open project →</span>
                   </button>
                 );
               })}
             </div>
           )}
         </>
+      </div>
+
+      {visited.has('tasks') ? (
+        <div
+          className={page === 'tasks' ? 'emp-page' : 'emp-page emp-page-hidden'}
+          hidden={page !== 'tasks'}
+        >
+          <EmployeeTasks
+            projects={activeProjects.length ? activeProjects : allProjects}
+            employeeName={employeeName}
+            onOpenProject={selectProject}
+            active={page === 'tasks'}
+          />
+        </div>
       ) : null}
 
-      {page === 'tasks' ? (
-        <EmployeeTasks
-          projects={activeProjects.length ? activeProjects : allProjects}
-          employeeName={employeeName}
-          onOpenProject={selectProject}
-        />
+      {visited.has('calendar') ? (
+        <div
+          className={page === 'calendar' ? 'emp-page' : 'emp-page emp-page-hidden'}
+          hidden={page !== 'calendar'}
+        >
+          <EmployeeCalendar
+            projects={activeProjects.length ? activeProjects : allProjects}
+            employeeName={employeeName}
+            onOpenProject={selectProject}
+          />
+        </div>
       ) : null}
 
-      {page === 'calendar' ? (
-        <EmployeeCalendar
-          projects={activeProjects.length ? activeProjects : allProjects}
-          employeeName={employeeName}
-          onOpenProject={selectProject}
-        />
-      ) : null}
-
-      {page === 'project' ? (
-        <>
+      {visited.has('project') ? (
+        <div
+          className={page === 'project' ? 'emp-page' : 'emp-page emp-page-hidden'}
+          hidden={page !== 'project'}
+        >
           <div className="emp-toolbar emp-project-picker">
             <button type="button" className="sched-text-btn" onClick={goProjects}>
               ← My projects
@@ -458,7 +487,7 @@ export function EmployeePortal({
               </button>
             </div>
           )}
-        </>
+        </div>
       ) : null}
     </div>
   );

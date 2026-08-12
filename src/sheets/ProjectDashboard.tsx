@@ -4,7 +4,7 @@ import { ClientProjectBoard } from '../components/ClientProjectBoard';
 import { DoughnutChart, GaugeRing, VBarChart } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { PlanSetsPanel } from '../components/PlanSetsPanel';
-import { QAPanel } from '../components/QAPanel';
+import { ProjectHoursBreakdown } from '../components/ProjectHoursBreakdown';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -13,6 +13,7 @@ import {
   processPhaseLabel,
 } from '../lib/architecturalProcess';
 import { fmtPct, fmtUSD, monthLabel, palette } from '../lib/format';
+import { phaseDisplayName } from '../lib/phaseAbbrev';
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
 import { groupScheduleSections, statusTone } from '../lib/scheduleSections';
@@ -302,29 +303,16 @@ export function ProjectDashboard({
 
   const phaseChart = useMemo(() => {
     if (!project?.phases.length) return null;
+    const contract = project.phases.map((p) => p.row.contract || 0);
+    const billed = project.phases.map((p) => p.row.billed || 0);
     return {
-      labels: project.phases.map((p) => p.label),
-      contract: project.phases.map((p) => p.row.contract || 0),
-      billed: project.phases.map((p) => p.row.billed || 0),
+      labels: project.phases.map((p) => phaseDisplayName(p.row.phase, p.row.project) || p.label),
+      contract,
+      billed,
+      /** Unbilled remainder so stacked bars total to contract. */
+      remaining: contract.map((c, i) => Math.max(0, c - (billed[i] || 0))),
     };
   }, [project]);
-
-  const staffing = useMemo(() => {
-    if (!project) return [] as { employee: string; hours: number }[];
-    const out: { employee: string; hours: number }[] = [];
-    for (const [employee, tops] of Object.entries(data.emp_top_projects || {})) {
-      for (const t of tops) {
-        if (
-          projectMatches(project.key, t.project) ||
-          projectMatches(project.title, t.project) ||
-          detailRows.some((r) => projectMatches(r.project, t.project))
-        ) {
-          out.push({ employee, hours: t.hours || 0 });
-        }
-      }
-    }
-    return out.sort((a, b) => b.hours - a.hours).slice(0, 10);
-  }, [data.emp_top_projects, project, detailRows]);
 
   if (!allProjects.length) {
     return (
@@ -472,12 +460,18 @@ export function ProjectDashboard({
             </div>
             <div className="panel pd-gauge-card pd-process-card">
               <h3>
-                Process <span className="tag">{process ? `${phaseIdx + 1}/${PROCESS_PHASES.length}` : 'unmapped'}</span>
+                Process{' '}
+                <span className="tag">
+                  {process
+                    ? process.id === 'additional'
+                      ? 'Add. Services'
+                      : `${phaseIdx + 1}/${PROCESS_PHASES.filter((p) => p.id !== 'additional').length}`
+                    : 'unmapped'}
+                </span>
               </h3>
               {process ? (
                 <>
                   <p className="pd-process-name">{process.name}</p>
-                  <p className="pd-muted">{process.summary}</p>
                   <p className="pd-milestone mono">Milestone · {process.milestone}</p>
                 </>
               ) : (
@@ -486,155 +480,197 @@ export function ProjectDashboard({
             </div>
           </div>
 
-          <div className="grid grid-2">
-            <div className="panel">
-              <h3>
-                Phase / fee breakdown <span className="tag">{detailRows.length} rows</span>
-              </h3>
-              <div className="table-scroll">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>Phase / line</th>
-                      <th>Status</th>
-                      <th>Lead</th>
-                      <th className="num">Contract</th>
-                      <th className="num">Billed</th>
-                      <th className="num">Outstanding</th>
-                      <th className="num">Hours</th>
-                      <th className="num">Profit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailRows.map((r) => (
-                      <tr key={r.project}>
-                        <td>
-                          <div className="pd-phase-cell">
-                            <strong>{r.phase && r.phase !== 'Other' ? r.phase : r.project}</strong>
-                            {r.phase && r.phase !== 'Other' && r.project !== project.key ? (
-                              <span className="mono soft">{r.project}</span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td>
-                          {r.status ? (
-                            <span className={`badge ${(r.status || '').toLowerCase()}`}>
-                              {r.status}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>{r.manager || '—'}</td>
-                        <td className="num">{fmtUSD(r.contract || 0)}</td>
-                        <td className="num">{fmtUSD(r.billed || 0)}</td>
-                        <td className="num">{fmtUSD(rowOutstanding(r))}</td>
-                        <td className="num">{fmtHours(r.billed_hours || 0)}</td>
-                        <td className="num">{fmtUSD(r.profit || 0)}</td>
+          <div className="panel pd-finance-panel">
+            <div className="pd-finance-grid">
+              <div className="pd-fee-block">
+                <h3>
+                  Phase / fee <span className="tag">{detailRows.length}</span>
+                </h3>
+                <div className="table-scroll pd-fee-scroll">
+                  <table className="data pd-fee-table">
+                    <thead>
+                      <tr>
+                        <th>Phase</th>
+                        <th>Status</th>
+                        <th className="num">Contract</th>
+                        <th className="num">Billed</th>
+                        <th className="num">Out.</th>
+                        <th className="num">Hrs</th>
+                        <th className="num">Profit</th>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan={3}>
-                        <strong>Totals</strong>
-                      </td>
-                      <td className="num">
-                        <strong>{fmtUSD(contract)}</strong>
-                      </td>
-                      <td className="num">
-                        <strong>{fmtUSD(billed)}</strong>
-                      </td>
-                      <td className="num">
-                        <strong>{fmtUSD(Math.max(0, outstanding))}</strong>
-                      </td>
-                      <td className="num">
-                        <strong>{fmtHours(billedHours)}</strong>
-                      </td>
-                      <td className="num">
-                        <strong>{fmtUSD(profit)}</strong>
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-
-            <div className="panel">
-              <h3>
-                Contract by phase <span className="tag">composition</span>
-              </h3>
-              {phaseChart && phaseChart.labels.length ? (
-                <div className="chart-wrap tall">
-                  <DoughnutChart
-                    labels={phaseChart.labels}
-                    values={phaseChart.contract}
-                    colors={[
-                      palette.navy,
-                      palette.gold,
-                      palette.teal,
-                      '#3A6EA5',
-                      '#6B4C8A',
-                      '#C47A5A',
-                      '#4C6580',
-                      '#8B6B8A',
-                    ]}
-                  />
+                    </thead>
+                    <tbody>
+                      {detailRows.map((r) => (
+                        <tr key={r.project}>
+                          <td>
+                            <strong>{phaseDisplayName(r.phase, r.project)}</strong>
+                          </td>
+                          <td>
+                            {r.status ? (
+                              <span className={`badge ${(r.status || '').toLowerCase()}`}>
+                                {r.status}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="num">{fmtUSD(r.contract || 0)}</td>
+                          <td className="num">{fmtUSD(r.billed || 0)}</td>
+                          <td className="num">{fmtUSD(rowOutstanding(r))}</td>
+                          <td className="num">{fmtHours(r.billed_hours || 0)}</td>
+                          <td className="num">{fmtUSD(r.profit || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}>
+                          <strong>Totals</strong>
+                        </td>
+                        <td className="num">
+                          <strong>{fmtUSD(contract)}</strong>
+                        </td>
+                        <td className="num">
+                          <strong>{fmtUSD(billed)}</strong>
+                        </td>
+                        <td className="num">
+                          <strong>{fmtUSD(Math.max(0, outstanding))}</strong>
+                        </td>
+                        <td className="num">
+                          <strong>{fmtHours(billedHours)}</strong>
+                        </td>
+                        <td className="num">
+                          <strong>{fmtUSD(profit)}</strong>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
-              ) : (
-                <p className="pd-muted">No phase lines to chart for this project.</p>
-              )}
+              </div>
+
+              <div className="pd-charts-panel">
+                <h3>
+                  Charts <span className="tag">by phase</span>
+                </h3>
+                <div className="pd-charts-grid">
+                  <div className="pd-chart-cell pd-chart-doughnut">
+                    <h4>Contract by phase</h4>
+                    {phaseChart && phaseChart.labels.length ? (
+                      <div className="chart-wrap pd-doughnut-wrap">
+                        <DoughnutChart
+                          labels={phaseChart.labels}
+                          values={phaseChart.contract}
+                          colors={[
+                            palette.navy,
+                            palette.gold,
+                            palette.teal,
+                            '#3A6EA5',
+                            '#6B4C8A',
+                            '#C47A5A',
+                            '#4C6580',
+                            '#8B6B8A',
+                          ]}
+                        />
+                      </div>
+                    ) : (
+                      <p className="pd-muted">No phase lines to chart yet.</p>
+                    )}
+                  </div>
+
+                  {phaseChart && phaseChart.labels.length > 1 ? (
+                    <div className="pd-chart-cell">
+                      <h4>Contract vs billed</h4>
+                      <div className="chart-wrap pd-chart-bar">
+                        <VBarChart
+                          labels={phaseChart.labels}
+                          stacked
+                          datasets={[
+                            {
+                              label: 'Billed',
+                              values: phaseChart.billed,
+                              color: palette.gold,
+                            },
+                            {
+                              label: 'Remaining',
+                              values: phaseChart.remaining,
+                              color: palette.navy,
+                            },
+                          ]}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div
+                    className={`pd-chart-cell${
+                      !(phaseChart && phaseChart.labels.length > 1) ? ' pd-chart-wide' : ''
+                    }`}
+                  >
+                    <h4>Monthly billed</h4>
+                    {monthlyLabels.length ? (
+                      <div className="chart-wrap pd-chart-bar">
+                        <VBarChart
+                          labels={monthlyLabels.map(monthLabel)}
+                          datasets={[
+                            {
+                              label: 'Billed',
+                              values: monthlyValues,
+                              color: palette.gold,
+                            },
+                          ]}
+                        />
+                      </div>
+                    ) : (
+                      <p className="pd-muted">No monthly billed history for this project yet.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {phaseChart && phaseChart.labels.length > 1 ? (
-            <div className="panel">
-              <h3>
-                Contract vs billed by phase <span className="tag">detail</span>
-              </h3>
-              <div className="chart-wrap tall">
-                <VBarChart
-                  labels={phaseChart.labels}
-                  datasets={[
-                    { label: 'Contract', values: phaseChart.contract, color: palette.navy },
-                    { label: 'Billed', values: phaseChart.billed, color: palette.gold },
-                  ]}
-                />
-              </div>
-            </div>
-          ) : null}
+          <ProjectHoursBreakdown
+            projectTitle={project.title}
+            projectFullName={project.key || project.row?.project || project.title}
+            projectCode={project.code}
+          />
 
-          <div className="grid grid-2">
-            <div className="panel">
-              <h3>
-                Monthly billed <span className="tag">project</span>
-              </h3>
-              {monthlyLabels.length ? (
-                <div className="chart-wrap tall">
-                  <VBarChart
-                    labels={monthlyLabels.map(monthLabel)}
-                    datasets={[
-                      {
-                        label: 'Billed',
-                        values: monthlyValues,
-                        color: palette.gold,
-                      },
-                    ]}
-                  />
-                </div>
-              ) : (
-                <p className="pd-muted">
-                  No monthly billed history loaded for this project yet (needs project monthly export).
-                </p>
-              )}
-            </div>
+          <div className="panel">
+            <PlanSetsPanel projectKey={project.key} projectTitle={project.title} />
+          </div>
 
-            <div className="panel">
-              <h3>
-                Client A/R aging <span className="tag">{clientName}</span>
-              </h3>
-              {arClient ? (
-                <>
+          <div className="panel">
+            <h3>
+              Client communication <span className="tag">from schedule notes</span>
+            </h3>
+            <CommPulse projectKey={project.key} manager={manager} />
+          </div>
+
+          <div className="panel pd-meetings-panel">
+            <ClientMeetingsPanel projectKey={project.key} clientName={clientName} />
+          </div>
+
+          <div className="panel pd-schedule-panel">
+            <h3>
+              Project schedule
+              <span className="tag">list · gantt · roadmap · board</span>
+            </h3>
+            <ProjectSchedule
+              mode="staff"
+              preferredProjectKey={project.key}
+              highlightPhase={phaseRaw}
+              embedded
+              lockProject
+            />
+          </div>
+
+          <div className="panel pd-bottom-finance">
+            <div className="pd-bottom-grid">
+              <div>
+                <h3>
+                  Client A/R aging <span className="tag">{clientName}</span>
+                </h3>
+                {arClient ? (
                   <div className="pd-ar-grid">
                     <div>
                       <span className="k">Balance</span>
@@ -661,155 +697,44 @@ export function ProjectDashboard({
                       <span className="v">{fmtUSD(arClient.credit)}</span>
                     </div>
                   </div>
-                  <p className="pd-muted">
-                    Aging is client-level (not project-split) when names match the A/R export.
-                  </p>
-                </>
-              ) : (
-                <p className="pd-muted">
-                  No A/R aging row matched “{clientName}”. Project outstanding above still reflects
-                  contract outstanding / AR on project lines.
-                </p>
-              )}
+                ) : (
+                  <p className="pd-muted">No A/R aging row matched “{clientName}”.</p>
+                )}
+              </div>
 
-              <h3 style={{ marginTop: 22 }}>
-                Staffing touch <span className="tag">top projects export</span>
-              </h3>
-              {staffing.length ? (
-                <div className="table-scroll">
-                  <table className="data">
-                    <thead>
-                      <tr>
-                        <th>Employee</th>
-                        <th className="num">Hours</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {staffing.map((s) => (
-                        <tr key={s.employee}>
-                          <td>{s.employee}</td>
-                          <td className="num">{fmtHours(s.hours)}</td>
+              <div className="pd-bottom-invoices">
+                <h3>
+                  Invoices <span className="tag">{invoices.length} · {fmtUSD(invoiceTotal)}</span>
+                </h3>
+                {invoices.length ? (
+                  <div className="table-scroll pd-bottom-scroll">
+                    <table className="data pd-fee-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Project</th>
+                          <th className="num">#</th>
+                          <th className="num">Amount</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="pd-muted">No employee top-project hours matched this job yet.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="panel">
-            <h3>
-              Invoices <span className="tag">{invoices.length} · {fmtUSD(invoiceTotal)}</span>
-            </h3>
-            {invoices.length ? (
-              <div className="table-scroll">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Client</th>
-                      <th>Project</th>
-                      <th className="num">Invoice #</th>
-                      <th className="num">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {invoices.map((inv, i) => (
-                      <tr key={`${inv.n}-${inv.d}-${i}`}>
-                        <td className="mono">{inv.d || '—'}</td>
-                        <td>{inv.c}</td>
-                        <td>{inv.p || '—'}</td>
-                        <td className="num mono">{inv.n || '—'}</td>
-                        <td className="num">{fmtUSD(inv.b || 0)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="pd-muted">No invoice ledger rows matched this project or client.</p>
-            )}
-          </div>
-
-          {process ? (
-            <div className="grid grid-2">
-              <div className="panel">
-                <h3>
-                  Client responsibilities <span className="tag">{process.shortName}</span>
-                </h3>
-                <ol className="pd-checklist">
-                  {process.client.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ol>
-              </div>
-              <div className="panel">
-                <h3>
-                  Architect responsibilities <span className="tag">{process.shortName}</span>
-                </h3>
-                <ol className="pd-checklist soft">
-                  {process.architect.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ol>
+                      </thead>
+                      <tbody>
+                        {invoices.map((inv, i) => (
+                          <tr key={`${inv.n}-${inv.d}-${i}`}>
+                            <td className="mono">{inv.d || '—'}</td>
+                            <td>{inv.p || '—'}</td>
+                            <td className="num mono">{inv.n || '—'}</td>
+                            <td className="num">{fmtUSD(inv.b || 0)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="pd-muted">No invoice rows matched this project or client.</p>
+                )}
               </div>
             </div>
-          ) : null}
-
-          <div className="panel">
-            <PlanSetsPanel projectKey={project.key} projectTitle={project.title} />
           </div>
-
-          <div className="panel">
-            <h3>
-              Client communication <span className="tag">from schedule notes</span>
-            </h3>
-            <CommPulse projectKey={project.key} manager={manager} />
-          </div>
-
-          <div className="panel pd-meetings-panel">
-            <ClientMeetingsPanel projectKey={project.key} clientName={clientName} />
-          </div>
-
-
-          <div className="panel pd-schedule-panel">
-            <h3>
-              Project schedule
-              <span className="tag">list · gantt · roadmap · board</span>
-            </h3>
-            <ProjectSchedule
-              mode="staff"
-              preferredProjectKey={project.key}
-              highlightPhase={phaseRaw}
-              embedded
-              lockProject
-            />
-          </div>
-
-          {!lockedEmployee ? (
-            <QAPanel
-              sheet="s4"
-              chips={[
-                `What is open on ${project.title}?`,
-                'Summarize client comments needing a reply',
-                'What is the contract vs billed for this project?',
-              ]}
-              examples={[
-                'What phase is active?',
-                'Which tasks still need client comments?',
-                'How much has been billed on this project?',
-              ]}
-              filters={{
-                project: project.key,
-                client: clientName,
-                manager: manager || '',
-                phase: phaseRaw || '',
-              }}
-            />
-          ) : null}
 
           {previewClient ? (
             <div className="pd-preview-overlay" role="dialog" aria-modal="true" aria-label="Client portal preview">

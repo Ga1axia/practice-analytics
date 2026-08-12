@@ -5,7 +5,8 @@ export type ProcessPhaseId =
   | 'contractor'
   | 'design-dev'
   | 'cd'
-  | 'construction';
+  | 'construction'
+  | 'additional';
 
 export type ProcessPhase = {
   id: ProcessPhaseId;
@@ -95,12 +96,14 @@ export const PROCESS_PHASES: ProcessPhase[] = [
     architect: [
       'Assist you in qualifying, soliciting, and evaluating general contractors.',
       'Help select and compare bids from contractors.',
+      'Coordinate value engineering with the selected contractor when scope or budget adjustments are needed.',
     ],
     client: [
       'Meet and interview potential contractors. Check references. Understand each contractor’s process.',
       'Finalize the contractor and be comfortable with their estimated budget.',
+      'Decide on value-engineering changes with the contractor and approve drawing adjustments.',
     ],
-    match: ['contractor'],
+    match: ['contractor', 'value engineering', 'value-engineering'],
   },
   {
     id: 'design-dev',
@@ -165,16 +168,39 @@ export const PROCESS_PHASES: ProcessPhase[] = [
     ],
     match: ['construction support', 'construction admin', 'ca'],
   },
+  {
+    id: 'additional',
+    name: 'Additional Services',
+    shortName: 'Add. Services',
+    color: '#9AA8B5',
+    colorSoft: '#E3E7EC',
+    milestone: 'Scope Additions',
+    summary:
+      'Work outside the core design phases — added scope, special studies, and other services as agreed.',
+    architect: [
+      'Define and track additional-service scope separately from the base contract phases.',
+      'Coordinate deliverables and fees for approved additions with the client.',
+    ],
+    client: [
+      'Confirm additional-service scope and fees before work proceeds.',
+      'Provide information needed for studies, revisions, or other added scope.',
+    ],
+    match: ['additional service', 'additional services'],
+  },
 ];
 
 export function matchProcessPhaseIndex(phase: string | null | undefined): number {
   if (!phase) return -1;
   const p = phase.trim().toLowerCase();
+  if (!p || p === 'internal/pto' || p.includes('internal/pto')) return -1;
 
-  // Prefer specific matches before the broad "design" alias on schematic
+  const additionalIdx = PROCESS_PHASES.findIndex((s) => s.id === 'additional');
+
+  // Prefer specific matches before schematic's broad "design" and the additional catchall
   const specific = PROCESS_PHASES.findIndex(
     (step) =>
       step.id !== 'schematic' &&
+      step.id !== 'additional' &&
       step.match.some((m) => p === m || p.includes(m)),
   );
   if (specific >= 0) return specific;
@@ -188,7 +214,8 @@ export function matchProcessPhaseIndex(phase: string | null | undefined): number
     return PROCESS_PHASES.findIndex((s) => s.id === 'design-dev');
   }
 
-  return -1;
+  // Catchall: Additional Services, Other, and any unmapped phase label
+  return additionalIdx;
 }
 
 export function processPhaseLabel(phase: string | null | undefined): string {

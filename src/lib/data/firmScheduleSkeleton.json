@@ -1,0 +1,542 @@
+[
+  {
+    "sort_order": 0,
+    "row_kind": "task",
+    "task": "Contract presented",
+    "na": false
+  },
+  {
+    "sort_order": 1,
+    "row_kind": "task",
+    "task": "Contract signed",
+    "na": false
+  },
+  {
+    "sort_order": 2,
+    "row_kind": "task",
+    "task": "Schedule of deliverables presented to clients",
+    "na": false
+  },
+  {
+    "sort_order": 3,
+    "row_kind": "phase",
+    "task": "Pre-Design",
+    "na": false
+  },
+  {
+    "sort_order": 4,
+    "row_kind": "task",
+    "task": "Original Progamming meeting",
+    "na": false
+  },
+  {
+    "sort_order": 5,
+    "row_kind": "subtask",
+    "task": "Program draft submited to Clients for review",
+    "na": false
+  },
+  {
+    "sort_order": 6,
+    "row_kind": "subtask",
+    "task": "Program Approval by Clients",
+    "na": false
+  },
+  {
+    "sort_order": 7,
+    "row_kind": "task",
+    "task": "Zoning Analysis/Code Search",
+    "na": false
+  },
+  {
+    "sort_order": 8,
+    "row_kind": "subtask",
+    "task": "Zoning completion and send to Clients",
+    "na": false
+  },
+  {
+    "sort_order": 9,
+    "row_kind": "task",
+    "task": "Existing Condition Drawings - Request for proposals",
+    "na": true
+  },
+  {
+    "sort_order": 10,
+    "row_kind": "subtask",
+    "task": "Existing Condition Drawings - Field measurements",
+    "na": true
+  },
+  {
+    "sort_order": 11,
+    "row_kind": "subtask",
+    "task": "Existing Condition Drawings - Completion",
+    "na": true
+  },
+  {
+    "sort_order": 12,
+    "row_kind": "task",
+    "task": "Surveyor request for proposals sent",
+    "na": false
+  },
+  {
+    "sort_order": 13,
+    "row_kind": "subtask",
+    "task": "Surveyor- Cad and PDF recieved",
+    "na": false
+  },
+  {
+    "sort_order": 14,
+    "row_kind": "task",
+    "task": "Soils Engineer - Request for proposal sent",
+    "na": false
+  },
+  {
+    "sort_order": 15,
+    "row_kind": "subtask",
+    "task": "Soils Engineer - Field testing done",
+    "na": false
+  },
+  {
+    "sort_order": 16,
+    "row_kind": "subtask",
+    "task": "Soils Engineer - Soils report recieved",
+    "na": false
+  },
+  {
+    "sort_order": 17,
+    "row_kind": "phase",
+    "task": "Schematic Design",
+    "na": false
+  },
+  {
+    "sort_order": 18,
+    "row_kind": "task",
+    "task": "Start of schematic design",
+    "na": false
+  },
+  {
+    "sort_order": 19,
+    "row_kind": "task",
+    "task": "First Floor Plan presentation",
+    "na": false
+  },
+  {
+    "sort_order": 20,
+    "row_kind": "task",
+    "task": "Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 21,
+    "row_kind": "task",
+    "task": "Second Floor Plan presentation",
+    "na": false
+  },
+  {
+    "sort_order": 22,
+    "row_kind": "task",
+    "task": "Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 23,
+    "row_kind": "task",
+    "task": "Third presentation for plans",
+    "na": false
+  },
+  {
+    "sort_order": 24,
+    "row_kind": "task",
+    "task": "Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 25,
+    "row_kind": "task",
+    "task": "Fourth Floor Plan Presentation",
+    "na": false
+  },
+  {
+    "sort_order": 26,
+    "row_kind": "task",
+    "task": "Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 27,
+    "row_kind": "task",
+    "task": "Fifth Floor Plan Presentation (additional Service)",
+    "na": false
+  },
+  {
+    "sort_order": 28,
+    "row_kind": "task",
+    "task": "Client Feedback and review (additional Service)",
+    "na": false
+  },
+  {
+    "sort_order": 29,
+    "row_kind": "task",
+    "task": "Share Updated Floor Plan (additional service)",
+    "na": false
+  },
+  {
+    "sort_order": 30,
+    "row_kind": "task",
+    "task": "Sign off on plans",
+    "na": false
+  },
+  {
+    "sort_order": 31,
+    "row_kind": "task",
+    "task": "Review with planning staff",
+    "na": false
+  },
+  {
+    "sort_order": 32,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation start - Only after clients sign off on plans and review with City",
+    "na": false
+  },
+  {
+    "sort_order": 33,
+    "row_kind": "task",
+    "task": "First Elevations / 3-D presentation finished",
+    "na": false
+  },
+  {
+    "sort_order": 34,
+    "row_kind": "task",
+    "task": "First Elevations / 3-D presentation to Client",
+    "na": false
+  },
+  {
+    "sort_order": 35,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 36,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation - Second revision",
+    "na": false
+  },
+  {
+    "sort_order": 37,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation Client feedback and review",
+    "na": false
+  },
+  {
+    "sort_order": 38,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation - Third revision",
+    "na": false
+  },
+  {
+    "sort_order": 39,
+    "row_kind": "task",
+    "task": "Elevations / 3-D presentation -Client sign off",
+    "na": false
+  },
+  {
+    "sort_order": 40,
+    "row_kind": "task",
+    "task": "Review with planning staff for pre-application meeting",
+    "na": false
+  },
+  {
+    "sort_order": 41,
+    "row_kind": "task",
+    "task": "Meeting with client to update on planning staff finding",
+    "na": false
+  },
+  {
+    "sort_order": 42,
+    "row_kind": "phase",
+    "task": "Planning Package",
+    "na": false
+  },
+  {
+    "sort_order": 43,
+    "row_kind": "task",
+    "task": "Planning package start",
+    "na": false
+  },
+  {
+    "sort_order": 44,
+    "row_kind": "subtask",
+    "task": "Planning package: Information/documents requested from clients",
+    "na": false
+  },
+  {
+    "sort_order": 45,
+    "row_kind": "subtask",
+    "task": "Consultant/Engineers work",
+    "na": false
+  },
+  {
+    "sort_order": 46,
+    "row_kind": "subtask",
+    "task": "Consultant/Engineers work coordination with MDA",
+    "na": false
+  },
+  {
+    "sort_order": 47,
+    "row_kind": "subtask",
+    "task": "Planning Package finish",
+    "na": false
+  },
+  {
+    "sort_order": 48,
+    "row_kind": "subtask",
+    "task": "Planning package submittal",
+    "na": false
+  },
+  {
+    "sort_order": 49,
+    "row_kind": "subtask",
+    "task": "Planning comments",
+    "na": false
+  },
+  {
+    "sort_order": 50,
+    "row_kind": "subtask",
+    "task": "Story Pole Installation",
+    "na": false
+  },
+  {
+    "sort_order": 51,
+    "row_kind": "subtask",
+    "task": "Planning re-submittal",
+    "na": false
+  },
+  {
+    "sort_order": 52,
+    "row_kind": "subtask",
+    "task": "Planning comments second round",
+    "na": false
+  },
+  {
+    "sort_order": 53,
+    "row_kind": "subtask",
+    "task": "Planning approval tentative, if no commission hearing",
+    "na": false
+  },
+  {
+    "sort_order": 54,
+    "row_kind": "subtask",
+    "task": "Planning Permit Issuance",
+    "na": false
+  },
+  {
+    "sort_order": 55,
+    "row_kind": "subtask",
+    "task": "Planning commissioner/ design review scheduled",
+    "na": false
+  },
+  {
+    "sort_order": 56,
+    "row_kind": "subtask",
+    "task": "Planning commissioner/ design review approval with Conditions",
+    "na": false
+  },
+  {
+    "sort_order": 57,
+    "row_kind": "subtask",
+    "task": "Planning approval",
+    "na": false
+  },
+  {
+    "sort_order": 58,
+    "row_kind": "phase",
+    "task": "Contractor Selection",
+    "na": false
+  },
+  {
+    "sort_order": 59,
+    "row_kind": "task",
+    "task": "Contractor introduction email",
+    "na": false
+  },
+  {
+    "sort_order": 60,
+    "row_kind": "task",
+    "task": "Contractor finalzied for bidding by the Clients",
+    "na": false
+  },
+  {
+    "sort_order": 61,
+    "row_kind": "task",
+    "task": "Contractor pre-bid package distributed",
+    "na": false
+  },
+  {
+    "sort_order": 62,
+    "row_kind": "task",
+    "task": "Contractor pre-bid proposals recieved",
+    "na": false
+  },
+  {
+    "sort_order": 63,
+    "row_kind": "task",
+    "task": "Contractor pre-bid proposals coordination",
+    "na": false
+  },
+  {
+    "sort_order": 64,
+    "row_kind": "task",
+    "task": "Contractor selection meeting with clients",
+    "na": false
+  },
+  {
+    "sort_order": 65,
+    "row_kind": "task",
+    "task": "Contractor selected",
+    "na": false
+  },
+  {
+    "sort_order": 66,
+    "row_kind": "task",
+    "task": "Value Engineering if any (Add 1-4 weeks to time depending on the scope of changes)",
+    "na": false
+  },
+  {
+    "sort_order": 67,
+    "row_kind": "subtask",
+    "task": "Contractor feedback",
+    "na": false
+  },
+  {
+    "sort_order": 68,
+    "row_kind": "subtask",
+    "task": "Drawing adjustments",
+    "na": false
+  },
+  {
+    "sort_order": 69,
+    "row_kind": "phase",
+    "task": "Design Development",
+    "na": false
+  },
+  {
+    "sort_order": 70,
+    "row_kind": "task",
+    "task": "Design Development Started",
+    "na": false
+  },
+  {
+    "sort_order": 71,
+    "row_kind": "task",
+    "task": "Design Development Finished",
+    "na": false
+  },
+  {
+    "sort_order": 72,
+    "row_kind": "phase",
+    "task": "Construction Documents",
+    "na": false
+  },
+  {
+    "sort_order": 73,
+    "row_kind": "task",
+    "task": "Start of Construction Documents - Tentative",
+    "na": false
+  },
+  {
+    "sort_order": 74,
+    "row_kind": "task",
+    "task": "Coordination with consultants - ongoing throughout this process",
+    "na": false
+  },
+  {
+    "sort_order": 75,
+    "row_kind": "task",
+    "task": "Construction Documents Finished",
+    "na": false
+  },
+  {
+    "sort_order": 76,
+    "row_kind": "task",
+    "task": "Construction Documents Submittal",
+    "na": false
+  },
+  {
+    "sort_order": 77,
+    "row_kind": "task",
+    "task": "Building Comments",
+    "na": false
+  },
+  {
+    "sort_order": 78,
+    "row_kind": "task",
+    "task": "Construction Documents Re-Submittal",
+    "na": false
+  },
+  {
+    "sort_order": 79,
+    "row_kind": "task",
+    "task": "Building Comments second round",
+    "na": false
+  },
+  {
+    "sort_order": 80,
+    "row_kind": "task",
+    "task": "Construction Document Re-Submittal",
+    "na": false
+  },
+  {
+    "sort_order": 81,
+    "row_kind": "task",
+    "task": "Permit Approval tentative",
+    "na": false
+  },
+  {
+    "sort_order": 82,
+    "row_kind": "phase",
+    "task": "Interior Design (Schedule more defined once scope and timing of when we are starting is defined)",
+    "na": false
+  },
+  {
+    "sort_order": 83,
+    "row_kind": "task",
+    "task": "Interior design (Takes 2-3 months typically)",
+    "na": false
+  },
+  {
+    "sort_order": 84,
+    "row_kind": "phase",
+    "task": "Other items for clients to think about",
+    "na": false
+  },
+  {
+    "sort_order": 85,
+    "row_kind": "task",
+    "task": "Moving and storage",
+    "na": false
+  },
+  {
+    "sort_order": 86,
+    "row_kind": "task",
+    "task": "Deconstruction verses demolition",
+    "na": false
+  },
+  {
+    "sort_order": 87,
+    "row_kind": "task",
+    "task": "Vastu dates for deconstruction",
+    "na": false
+  },
+  {
+    "sort_order": 88,
+    "row_kind": "task",
+    "task": "Vastu dates for start of construction",
+    "na": false
+  },
+  {
+    "sort_order": 89,
+    "row_kind": "task",
+    "task": "Other items TBD",
+    "na": false
+  }
+]

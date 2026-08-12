@@ -1,19 +1,92 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
+import { KpiRow } from '../components/KpiRow';
 import { PlanSetsPanel } from '../components/PlanSetsPanel';
+import { ProjectTaskList } from '../components/ProjectTaskList';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
 import { useAuth } from '../hooks/useAuth';
 import { useDemoMode } from '../hooks/useDemoMode';
-import { processPhaseLabel } from '../lib/architecturalProcess';
+import {
+  matchProcessPhaseIndex,
+  PROCESS_PHASES,
+  processPhaseLabel,
+} from '../lib/architecturalProcess';
 import { buildDemoProjectDetail } from '../lib/demoProjectDetail';
 import { fmtUSD } from '../lib/format';
-import { loadProjectSchedule, scheduleDeliverables } from '../lib/loadProjectSchedule';
+import { scheduleDeliverables } from '../lib/loadProjectSchedule';
 import type { ProjectNode } from '../lib/projectListHierarchy';
+import {
+  loadProjectLoggedHours,
+  type ProjectLoggedHours,
+} from '../lib/projectLoggedHours';
 import { rowOutstanding } from '../lib/receivable';
 import { buildDeadlineEvents } from '../lib/scheduleDates';
+import { ensureProjectSchedule } from '../lib/scheduleEnsure';
 import { groupScheduleSections, statusTone } from '../lib/scheduleSections';
 import type { ScheduleRow } from '../lib/scheduleTypes';
+
+const PHASE_FALLBACK_COLORS = [
+  '#146C6B',
+  '#3A6EA5',
+  '#2F4F7A',
+  '#A8783A',
+  '#5B7C6E',
+  '#7A5A22',
+  '#4C6580',
+  '#8B6B4A',
+];
+
+function phaseColor(label: string, i: number): string {
+  const idx = matchProcessPhaseIndex(label);
+  if (idx >= 0) return PROCESS_PHASES[idx]!.color;
+  return PHASE_FALLBACK_COLORS[i % PHASE_FALLBACK_COLORS.length]!;
+}
+
+type PhaseHourSlice = { label: string; hours: number; color: string; share: number };
+
+function PhaseHoursChart({
+  slices,
+  source,
+}: {
+  slices: PhaseHourSlice[];
+  source: string;
+}) {
+  if (!slices.length) return null;
+  const total = slices.reduce((a, s) => a + s.hours, 0);
+  return (
+    <section className="panel emp-phase-hours">
+      <h3>
+        Hours by phase <span className="tag">{source}</span>
+      </h3>
+      <div
+        className="emp-phase-stack"
+        role="img"
+        aria-label={`Hours by phase totaling ${total.toFixed(0)}`}
+      >
+        {slices.map((s) => (
+          <div
+            key={s.label}
+            className="emp-phase-stack-seg"
+            style={{ width: `${Math.max(s.share * 100, 0.8)}%`, background: s.color }}
+            title={`${s.label}: ${s.hours.toFixed(1)}h (${Math.round(s.share * 100)}%)`}
+          />
+        ))}
+      </div>
+      <ul className="emp-phase-stack-legend">
+        {slices.map((s) => (
+          <li key={s.label}>
+            <i style={{ background: s.color }} />
+            <span className="lab">{s.label}</span>
+            <span className="mono">
+              {s.hours.toFixed(0)}h · {Math.round(s.share * 100)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 type Props = {
   project: ProjectNode & { clientName: string };
@@ -25,6 +98,8 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
   const { profile } = useAuth();
   const [dbRows, setDbRows] = useState<ScheduleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hours, setHours] = useState<ProjectLoggedHours | null>(null);
+  const [hoursLoading, setHoursLoading] = useState(true);
 
   const detailRows = useMemo(() => {
     if (project.phases.length) return project.phases.map((p) => p.row);
@@ -48,15 +123,39 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { rows: loaded } = await loadProjectSchedule(project.key);
+      const ensured = await ensureProjectSchedule({
+        projectKey: project.key,
+        clientName: project.clientName,
+        title: project.title,
+      });
       if (cancelled) return;
-      setDbRows(loaded);
+      setDbRows(ensured.rows);
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [project.key]);
+  }, [project.key, project.clientName, project.title]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setHoursLoading(true);
+      const res = await loadProjectLoggedHours({
+        employeeName,
+        projectTitle: project.title,
+        projectFullName: project.row?.project || project.key,
+        projectCode: project.code,
+        clientName: project.clientName,
+      });
+      if (cancelled) return;
+      setHours(res);
+      setHoursLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeName, project.title, project.row?.project, project.key, project.code, project.clientName]);
 
   const usingDemo = Boolean(isDemo && demo && !loading && dbRows.length === 0);
   const rows = usingDemo && demo ? demo.rows : dbRows;
@@ -101,6 +200,43 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
   );
 
   const deliverables = useMemo(() => scheduleDeliverables(rows).slice(0, 8), [rows]);
+
+  /** Prefer Project List spent hours by phase; fall back to this employee's TE mix. */
+  const phaseHourSlices = useMemo((): { slices: PhaseHourSlice[]; source: string } => {
+    const fromList = project.phases
+      .map((ph) => ({
+        label: processPhaseLabel(ph.label || ph.row.phase) || ph.label || 'Phase',
+        hours: Number(ph.row.spent_hours) || 0,
+      }))
+      .filter((s) => s.hours > 0);
+    const listTotal = fromList.reduce((a, s) => a + s.hours, 0);
+    if (listTotal > 0) {
+      return {
+        source: 'Project spent',
+        slices: fromList
+          .sort((a, b) => b.hours - a.hours)
+          .map((s, i) => ({
+            ...s,
+            share: s.hours / listTotal,
+            color: phaseColor(s.label, i),
+          })),
+      };
+    }
+    const fromTe = hours?.byPhase || [];
+    const teTotal = fromTe.reduce((a, s) => a + s.hours, 0);
+    if (teTotal > 0) {
+      return {
+        source: 'Your logged hours',
+        slices: fromTe.map((s, i) => ({
+          label: processPhaseLabel(s.label) || s.label,
+          hours: s.hours,
+          share: s.hours / teTotal,
+          color: phaseColor(s.label, i),
+        })),
+      };
+    }
+    return { slices: [], source: '' };
+  }, [project.phases, hours]);
 
   const noteThreads = useMemo(() => {
     const sections = groupScheduleSections(rows);
@@ -156,24 +292,96 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
         </div>
       </header>
 
-      <section className="panel emp-detail-cal">
-        <h3>
-          Project calendar{' '}
-          <span className="tag">
-            {events.length} dated{overdue ? ` · ${overdue} past due` : ''}
-          </span>
-        </h3>
-        {!loading && !rows.length ? (
-          <p className="pd-muted">No schedule dates for this project yet.</p>
-        ) : (
-          <ScheduleDeadlineCalendar
-            projectKey={project.key}
-            corner={false}
-            layout="split"
-            rowsOverride={usingDemo && demo ? demo.rows : null}
-          />
-        )}
-      </section>
+      <KpiRow
+        items={[
+          {
+            k: 'Your hours',
+            v: hoursLoading ? '…' : (hours?.yourHours ?? 0).toFixed(1),
+            cls: 'accent-teal',
+          },
+          {
+            k: 'Your billable',
+            v: hoursLoading ? '…' : (hours?.yourBillable ?? 0).toFixed(1),
+            cls: 'accent-gold',
+          },
+          {
+            k: 'Project spent h',
+            v: project.spentHours
+              ? project.spentHours.toLocaleString('en-US', { maximumFractionDigits: 0 })
+              : '—',
+          },
+          {
+            k: 'Project billed h',
+            v: project.billedHours
+              ? project.billedHours.toLocaleString('en-US', { maximumFractionDigits: 0 })
+              : '—',
+          },
+          {
+            k: 'Your entries',
+            v: hoursLoading ? '…' : String(hours?.entries ?? 0),
+          },
+          {
+            k: 'Contract',
+            v: fmtUSD(project.contract),
+          },
+        ]}
+      />
+      {hours?.error ? (
+        <p className="plist-upload-err" style={{ marginTop: -8 }}>
+          {hours.error}
+        </p>
+      ) : null}
+
+      {phaseHourSlices.slices.length ? (
+        <PhaseHoursChart slices={phaseHourSlices.slices} source={phaseHourSlices.source} />
+      ) : !hoursLoading ? (
+        <p className="pd-muted emp-project-hours-mix">
+          No phase hour breakdown available for this project yet.
+        </p>
+      ) : null}
+
+      <div className="emp-project-main">
+        <section className="panel emp-detail-cal">
+          <h3>
+            Project calendar{' '}
+            <span className="tag">
+              {events.length} dated{overdue ? ` · ${overdue} past due` : ''}
+            </span>
+          </h3>
+          {!loading && !rows.length ? (
+            <p className="pd-muted">No schedule dates for this project yet.</p>
+          ) : (
+            <ScheduleDeadlineCalendar
+              projectKey={project.key}
+              corner={false}
+              layout="calendar"
+              rowsOverride={rows.length ? rows : null}
+            />
+          )}
+        </section>
+
+        <aside className="panel emp-project-tasks-panel">
+          <h3>
+            Task list{' '}
+            <span className="tag">
+              {loading ? '…' : `${rows.filter((r) => r.row_kind !== 'phase').length}`}
+            </span>
+          </h3>
+          {loading ? (
+            <p className="pd-muted">Loading tasks…</p>
+          ) : (
+            <ProjectTaskList
+              projectKey={project.key}
+              projectTitle={project.title}
+              clientName={project.clientName}
+              employeeName={employeeName}
+              rows={rows}
+              writable={!usingDemo}
+              onRowsChange={setDbRows}
+            />
+          )}
+        </aside>
+      </div>
 
       <div className="emp-detail-pair">
         <section className="panel">

@@ -1,7 +1,9 @@
 import { buildDemoProjectDetail } from './demoProjectDetail';
 import { loadProjectSchedule } from './loadProjectSchedule';
 import type { ProjectNode } from './projectListHierarchy';
+import { patchCachedScheduleRow } from './scheduleCache';
 import { parseScheduleDate, startOfDay } from './scheduleDates';
+import { ensureProjectSchedule } from './scheduleEnsure';
 import { groupScheduleSections } from './scheduleSections';
 import type { ScheduleRow } from './scheduleTypes';
 import { supabase } from './supabase';
@@ -161,7 +163,16 @@ export async function loadEmployeeTasks(
 
   await Promise.all(
     slice.map(async (p) => {
-      const { rows: dbRows } = await loadProjectSchedule(p.key);
+      const ensured = await ensureProjectSchedule({
+        projectKey: p.key,
+        clientName: p.clientName,
+        title: p.title,
+      });
+      let dbRows = ensured.rows;
+      if (!dbRows.length && !ensured.error) {
+        const loaded = await loadProjectSchedule(p.key);
+        dbRows = loaded.rows;
+      }
       const demo = allowDemoSeed
         ? buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName))
         : null;
@@ -274,5 +285,55 @@ export async function setTaskComplete(
     })
     .eq('id', task.rowId);
   if (error) return { ok: false, error: error.message, endRaw };
+  patchCachedScheduleRow(task.projectKey, task.rowId, {
+    budget_remaining: status,
+    actual_end: endRaw,
+  });
   return { ok: true, endRaw };
+}
+
+/** Build EmployeeTask rows for a single project from schedule rows (already loaded). */
+export function tasksFromScheduleRows(
+  project: { key: string; title: string; clientName: string },
+  rows: ScheduleRow[],
+  employeeName: string,
+  writable = true,
+): EmployeeTask[] {
+  const priorities = loadPriorityMap();
+  const tasks: EmployeeTask[] = [];
+  const sections = groupScheduleSections(rows);
+  for (const section of sections) {
+    for (const row of section.items) {
+      if (row.row_kind !== 'task' && row.row_kind !== 'subtask') continue;
+      const label = (row.task || '').trim();
+      if (!label) continue;
+      const { start, due, end } = rowDates(row);
+      const status = statusLabel(row);
+      const complete = isCompleteStatus(status);
+      const priority = priorities[row.id] || inferPriority(due, complete);
+      tasks.push({
+        id: `${project.key}:${row.id}`,
+        rowId: row.id,
+        scheduleId: row.schedule_id,
+        projectKey: project.key,
+        projectTitle: project.title,
+        clientName: project.clientName,
+        phase: section.title,
+        kind: row.row_kind,
+        task: label,
+        startRaw: start ? fmtDate(start) : (row.target_start || '').trim(),
+        dueRaw: due ? fmtDate(due) : (row.target_end || '').trim(),
+        endRaw: end ? fmtDate(end) : (row.actual_end || '').trim(),
+        start,
+        due,
+        end,
+        status: complete ? 'Complete' : status || 'Incomplete',
+        complete,
+        priority,
+        mentionsEmployee: mentionsName(label, employeeName),
+        writable,
+      });
+    }
+  }
+  return tasks;
 }

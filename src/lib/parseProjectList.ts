@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { extractPhaseLabel } from './phaseAbbrev';
 import type { ProjectRow } from './types';
 
 /** Project code suffix like "26-005" or "ID - Name - 26-024". */
@@ -39,12 +40,7 @@ export function isProjectCodeRow(name: string): boolean {
   return PROJECT_CODE_RE.test(name);
 }
 
-/** Extract phase label from "Client Name - Phase Name". */
-export function extractPhaseLabel(projectName: string): string {
-  const parts = projectName.split(' - ');
-  if (parts.length < 2) return projectName;
-  return parts.slice(1).join(' - ').trim() || projectName;
-}
+export { extractPhaseLabel } from './phaseAbbrev';
 
 function findSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
   const preferred = wb.SheetNames.find((n) => /project\s*list/i.test(n));

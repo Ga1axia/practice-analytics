@@ -11,6 +11,7 @@ import {
   statusTone,
   type ScheduleSection,
 } from '../lib/scheduleSections';
+import { ensureProjectSchedule } from '../lib/scheduleEnsure';
 import type { ScheduleField, ScheduleMeta, ScheduleRow } from '../lib/scheduleTypes';
 
 type StaffField = Exclude<ScheduleField, 'task' | 'client_comments'>;
@@ -111,6 +112,15 @@ export function ProjectSchedule({
   const loadSchedules = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    if (preferredProjectKey) {
+      await ensureProjectSchedule({
+        projectKey: preferredProjectKey,
+        clientName: '',
+        title: preferredProjectKey,
+      });
+    }
+
     const { data, error: err } = await supabase
       .from('pa_schedules')
       .select('id, project_key, client_name, title')

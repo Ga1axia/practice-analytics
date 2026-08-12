@@ -13,7 +13,8 @@ import GridLayout, {
   type Layout,
 } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
-import { GaugeRing, HBarChart, VBarChart } from '../components/Charts';
+import { BillNbEfficiencyChart, GaugeRing, HBarChart, VBarChart } from '../components/Charts';
+import { buildEfficiencyAnalysis } from '../lib/efficiencyAnalysis';
 import { fmtUSD, fmtUSDk, palette } from '../lib/format';
 import {
   managerInitials,
@@ -36,7 +37,7 @@ import type { DashboardData, ProjectRow } from '../lib/types';
 
 type ReportProject = ProjectNode & { spent: number; profit: number };
 
-const LAYOUT_KEY = 'pa-main-report-layout-v4';
+const LAYOUT_KEY = 'pa-main-report-layout-v5';
 const GRID_ROWS = 14;
 const GRID_MARGIN: [number, number] = [6, 6];
 
@@ -45,7 +46,7 @@ const DEFAULT_LAYOUT: Layout = [
   { i: 'kpis', x: 0, y: 0, w: 7, h: 2, minW: 4, minH: 1 },
   { i: 'filters', x: 7, y: 0, w: 5, h: 2, minW: 3, minH: 2 },
   { i: 'table', x: 0, y: 2, w: 8, h: 8, minW: 4, minH: 4 },
-  { i: 'gauges', x: 8, y: 2, w: 4, h: 8, minW: 2, minH: 3 },
+  { i: 'gauges', x: 8, y: 2, w: 4, h: 8, minW: 3, minH: 5 },
   { i: 'client', x: 0, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
   { i: 'budget', x: 3, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
   { i: 'team', x: 6, y: 10, w: 3, h: 4, minW: 2, minH: 2 },
@@ -368,13 +369,20 @@ export function MainReport({
       if (projectFilter && p.key !== projectFilter) continue;
       if (clientFilter && clientByProject.get(p.key) !== clientFilter) continue;
 
-      if (projectStatus) {
+      // Explicit project pick wins over status (dropdown lists all statuses).
+      const statusLocked = !!projectFilter && p.key === projectFilter;
+      if (projectStatus && !statusLocked) {
         const pst = reportProjectStatus(p);
         if ((pst || 'ACTIVE').toUpperCase() !== projectStatus.toUpperCase()) continue;
       }
 
       const phases = p.phases.filter((ph) => {
-        if (phaseStatus && (ph.row.status || 'ACTIVE') !== phaseStatus) return false;
+        if (
+          phaseStatus &&
+          (ph.row.status || 'ACTIVE').toUpperCase() !== phaseStatus.toUpperCase()
+        ) {
+          return false;
+        }
         if (phase && (ph.row.phase || '') !== phase) return false;
         if (manager && ph.row.manager !== manager) return false;
         if (selectedManagers.size && !selectedManagers.has(ph.row.manager || '')) return false;
@@ -386,7 +394,8 @@ export function MainReport({
       if (hasPhaseFilters && !shownPhases.length) {
         if (!p.row) continue;
         const hdrOk =
-          (!phaseStatus || (p.row.status || 'ACTIVE') === phaseStatus) &&
+          (!phaseStatus ||
+            (p.row.status || 'ACTIVE').toUpperCase() === phaseStatus.toUpperCase()) &&
           (!manager || p.row.manager === manager) &&
           (!selectedManagers.size || selectedManagers.has(p.row.manager || ''));
         if (!hdrOk || phase) continue;
@@ -464,6 +473,28 @@ export function MainReport({
     setFocus({ kind: 'project', projectKey: projectFilter });
   }, [projectFilter]);
 
+  // Drop project filter when other filters exclude it (avoids empty scoped view).
+  useEffect(() => {
+    if (!projectFilter) return;
+    if (filteredProjects.some((p) => p.key === projectFilter)) return;
+    setProjectFilter('');
+    setFocus(null);
+  }, [projectFilter, filteredProjects]);
+
+  // Keep click-focus in sync with the filtered set (stale phase/project → $0 KPIs).
+  useEffect(() => {
+    if (!focus) return;
+    const proj = filteredProjects.find((p) => p.key === focus.projectKey);
+    if (!proj) {
+      setFocus(null);
+      return;
+    }
+    if (focus.kind === 'phase') {
+      const phaseOk = proj.phases.some((ph) => ph.row.project === focus.phaseKey);
+      if (!phaseOk) setFocus({ kind: 'project', projectKey: focus.projectKey });
+    }
+  }, [focus, filteredProjects]);
+
   const onlyProjectKey = filteredProjects.length === 1 ? filteredProjects[0]!.key : '';
   // If filters leave a single project, keep its phases expanded.
   useEffect(() => {
@@ -477,17 +508,43 @@ export function MainReport({
       p.phases.forEach((ph) => rows.push(ph.row));
       if (!p.phases.length && p.row) rows.push(p.row);
     });
-    return rows.length ? rows : detailRows(data.projects);
-  }, [filteredProjects, data.projects]);
+    // Only fall back to firm-wide rows when no filters are narrowing the view.
+    const filtersIdle =
+      !projectFilter &&
+      !clientFilter &&
+      !projectStatus &&
+      !phaseStatus &&
+      !phase &&
+      !manager &&
+      !selectedManagers.size &&
+      !aiFiltersActive(aiFilters);
+    return rows.length ? rows : filtersIdle ? detailRows(data.projects) : [];
+  }, [
+    filteredProjects,
+    data.projects,
+    projectFilter,
+    clientFilter,
+    projectStatus,
+    phaseStatus,
+    phase,
+    manager,
+    selectedManagers,
+    aiFilters,
+  ]);
 
   /** Rows driving KPIs + charts — narrowed by click focus when set. */
   const scopedRows = useMemo(() => {
     if (!focus) return filteredRows;
-    if (focus.kind === 'phase') {
-      return filteredRows.filter((r) => r.project === focus.phaseKey);
-    }
+
     const proj = filteredProjects.find((p) => p.key === focus.projectKey);
     if (!proj) return filteredRows;
+
+    if (focus.kind === 'phase') {
+      const phaseRows = filteredRows.filter((r) => r.project === focus.phaseKey);
+      if (phaseRows.length) return phaseRows;
+      // Phase disappeared under filters — use the project rollup instead of zeros.
+    }
+
     if (proj.phases.length) return proj.phases.map((ph) => ph.row);
     return proj.row ? [proj.row] : filteredRows;
   }, [focus, filteredRows, filteredProjects]);
@@ -532,13 +589,16 @@ export function MainReport({
       earnedPct: contract > 0 ? spent / contract : 0,
       // Margin: profit/billed when profit exists; else unavailable → 0
       marginPct: billed > 0 && profit ? profit / billed : 0,
-      // Utilization proxy: billed hrs / spent hrs
-      utilPct: spentHours > 0 ? billedHours / spentHours : 0,
       workInHand: contract - spent,
       balance: receivable,
       nonBillableHours: Math.max(spentHours - billedHours, 0),
     };
   }, [scopedRows, data.ar_clients]);
+
+  const efficiencyAnalysis = useMemo(
+    () => buildEfficiencyAnalysis(data.company_monthly),
+    [data.company_monthly],
+  );
 
   const clientPerf = useMemo(() => {
     const map: Record<string, number> = {};
@@ -781,7 +841,19 @@ export function MainReport({
                     >
                       <option value="">All</option>
                       {allProjects
-                        .filter((p) => !clientFilter || clientByProject.get(p.key) === clientFilter)
+                        .filter((p) => {
+                          if (clientFilter && clientByProject.get(p.key) !== clientFilter) {
+                            return false;
+                          }
+                          if (
+                            projectStatus &&
+                            (reportProjectStatus(p) || 'ACTIVE').toUpperCase() !==
+                              projectStatus.toUpperCase()
+                          ) {
+                            return false;
+                          }
+                          return true;
+                        })
                         .map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.title}
@@ -898,6 +970,14 @@ export function MainReport({
                       </tr>
                     </thead>
                     <tbody>
+                      {displayProjects.length === 0 ? (
+                        <tr>
+                          <td colSpan={15} className="plist-empty">
+                            No projects match the current filters. Clear a filter or set Project
+                            status to All.
+                          </td>
+                        </tr>
+                      ) : null}
                       {displayProjects.map((p) => {
                         const open = forceOpen || openProjects.has(p.key);
                         const projSelected =
@@ -1003,63 +1083,56 @@ export function MainReport({
             </div>
 
             <div key="gauges">
-              <Tile title="Performance rings" tag="scoped">
-                <div className="mr-gauges fill">
-                  <div className="mr-gauge">
-                    <div className="mr-gauge-label mono">Billing</div>
-                    <GaugeRing pct={kpis.billingPct} color={palette.gold} />
-                    <dl className="mr-gauge-stats">
-                      <div>
-                        <dt>Billed</dt>
-                        <dd>{fmtUSD(kpis.billed)}</dd>
-                      </div>
-                      <div>
-                        <dt>Contract</dt>
-                        <dd>{fmtUSD(kpis.contract)}</dd>
-                      </div>
-                    </dl>
+              <Tile title="Performance" tag="rings + efficiency">
+                <div className="mr-perf fill">
+                  <div className="mr-gauges mr-gauges-compact">
+                    <div className="mr-gauge">
+                      <div className="mr-gauge-label mono">Billing</div>
+                      <GaugeRing pct={kpis.billingPct} color={palette.gold} />
+                      <dl className="mr-gauge-stats">
+                        <div>
+                          <dt>Billed</dt>
+                          <dd>{fmtUSD(kpis.billed)}</dd>
+                        </div>
+                        <div>
+                          <dt>Contract</dt>
+                          <dd>{fmtUSD(kpis.contract)}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <div className="mr-gauge">
+                      <div className="mr-gauge-label mono">Earned</div>
+                      <GaugeRing
+                        pct={kpis.earnedPct}
+                        color={kpis.earnedPct > 1 ? palette.rust : palette.teal}
+                      />
+                      <dl className="mr-gauge-stats">
+                        <div>
+                          <dt>Spent</dt>
+                          <dd>{fmtUSD(kpis.spent)}</dd>
+                        </div>
+                        <div>
+                          <dt>WIP</dt>
+                          <dd>{fmtUSD(kpis.workInHand)}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <div className="mr-gauge">
+                      <div className="mr-gauge-label mono">Margin</div>
+                      <GaugeRing pct={kpis.marginPct} color={palette.green} />
+                      <dl className="mr-gauge-stats">
+                        <div>
+                          <dt>Profit</dt>
+                          <dd>{kpis.profit ? fmtUSD(kpis.profit) : '—'}</dd>
+                        </div>
+                      </dl>
+                    </div>
                   </div>
-                  <div className="mr-gauge">
-                    <div className="mr-gauge-label mono">Earned</div>
-                    <GaugeRing
-                      pct={kpis.earnedPct}
-                      color={kpis.earnedPct > 1 ? palette.rust : palette.teal}
-                    />
-                    <dl className="mr-gauge-stats">
-                      <div>
-                        <dt>Spent</dt>
-                        <dd>{fmtUSD(kpis.spent)}</dd>
-                      </div>
-                      <div>
-                        <dt>WIP</dt>
-                        <dd>{fmtUSD(kpis.workInHand)}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  <div className="mr-gauge">
-                    <div className="mr-gauge-label mono">Margin</div>
-                    <GaugeRing pct={kpis.marginPct} color={palette.green} />
-                    <dl className="mr-gauge-stats">
-                      <div>
-                        <dt>Profit</dt>
-                        <dd>{kpis.profit ? fmtUSD(kpis.profit) : '—'}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  <div className="mr-gauge">
-                    <div className="mr-gauge-label mono">Utilization</div>
-                    <GaugeRing pct={kpis.utilPct} color="#3A6EA5" />
-                    <dl className="mr-gauge-stats">
-                      <div>
-                        <dt>Billable</dt>
-                        <dd>{kpis.billedHours.toFixed(0)}h</dd>
-                      </div>
-                      <div>
-                        <dt>Total</dt>
-                        <dd>{kpis.spentHours.toFixed(0)}h</dd>
-                      </div>
-                    </dl>
-                  </div>
+                  {efficiencyAnalysis ? (
+                    <BillNbEfficiencyChart analysis={efficiencyAnalysis} />
+                  ) : (
+                    <div className="plist-empty">No firm hours for efficiency analysis yet.</div>
+                  )}
                 </div>
               </Tile>
             </div>

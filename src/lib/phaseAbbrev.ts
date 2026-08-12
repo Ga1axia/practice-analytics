@@ -1,3 +1,24 @@
+/** Extract phase label from "Project Name - Phase Name". */
+export function extractPhaseLabel(projectName: string): string {
+  const parts = projectName.split(' - ');
+  if (parts.length < 2) return projectName;
+  return parts.slice(1).join(' - ').trim() || projectName;
+}
+
+/** Clean phase name for charts/tables — never the full "Project - Phase" string. */
+export function phaseDisplayName(
+  phase: string | null | undefined,
+  projectName?: string | null,
+): string {
+  const raw = (phase || '').trim();
+  if (raw && raw.toLowerCase() !== 'other') {
+    return extractPhaseLabel(raw);
+  }
+  const fromProject = extractPhaseLabel((projectName || '').trim());
+  if (fromProject && fromProject !== (projectName || '').trim()) return fromProject;
+  return 'Additional Services';
+}
+
 /** Short phase codes used in the Main Report table (Power BI style). */
 const RULES: { re: RegExp; code: string }[] = [
   { re: /reimbursable/i, code: 'RS' },

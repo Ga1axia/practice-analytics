@@ -13,6 +13,10 @@ import { ScheduleDeadlineCalendar } from './ScheduleDeadlineCalendar';
 
 function stageState(i: number, currentIdx: number): 'done' | 'current' | 'upcoming' {
   if (currentIdx < 0) return 'upcoming';
+  // Additional Services is a catchall, not the end of the main sequence
+  if (PROCESS_PHASES[currentIdx]?.id === 'additional') {
+    return PROCESS_PHASES[i]?.id === 'additional' ? 'current' : 'upcoming';
+  }
   if (i < currentIdx) return 'done';
   if (i === currentIdx) return 'current';
   return 'upcoming';
@@ -95,9 +99,11 @@ export function ClientProjectBoard({
           <div className="cp-stages-head">
             <p className="customer-kicker">Stages</p>
             <p className="cp-stages-lede">
-              {phaseIdx >= 0
-                ? `Stage ${phaseIdx + 1} of ${PROCESS_PHASES.length}`
-                : 'Full process'}
+              {currentPhase?.id === 'additional'
+                ? 'Additional Services'
+                : phaseIdx >= 0
+                  ? `Stage ${phaseIdx + 1} of ${PROCESS_PHASES.filter((p) => p.id !== 'additional').length}`
+                  : 'Full process'}
             </p>
           </div>
           <ol className="cp-stage-rail">

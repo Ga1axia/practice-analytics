@@ -925,7 +925,7 @@
   },
   {
     "sort_order": 66,
-    "row_kind": "phase",
+    "row_kind": "task",
     "task": "Value Engineering if any (Add 1-4 weeks to time depending on the scope of changes)",
     "budget_remaining": "Not Active",
     "target_start": "Average: 2 weeks - Side by Side as Planning Phase",
@@ -939,7 +939,7 @@
   },
   {
     "sort_order": 67,
-    "row_kind": "task",
+    "row_kind": "subtask",
     "task": "Contractor feedback",
     "budget_remaining": "",
     "target_start": "",
@@ -953,7 +953,7 @@
   },
   {
     "sort_order": 68,
-    "row_kind": "task",
+    "row_kind": "subtask",
     "task": "Drawing adjustments",
     "budget_remaining": "",
     "target_start": "",

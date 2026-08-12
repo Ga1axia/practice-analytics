@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { EmployeeGantt } from '../components/EmployeeGantt';
 import {
   loadEmployeeAgenda,
   type AgendaItem,
@@ -15,6 +16,8 @@ type Props = {
   employeeName: string;
   onOpenProject: (key: string) => void;
 };
+
+type CalView = 'month' | 'gantt';
 
 function dayKey(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -46,6 +49,7 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
   });
   const [selected, setSelected] = useState(() => startOfDay(new Date()));
   const [filter, setFilter] = useState<'all' | AgendaKind>('all');
+  const [view, setView] = useState<CalView>('gantt');
 
   useEffect(() => {
     let cancelled = false;
@@ -132,32 +136,63 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
           <h1 className="display">Upcoming work</h1>
           <p className="emp-lede">
             Meetings, deadlines, and tasks across your{' '}
-            {projects.length} assigned project{projects.length === 1 ? '' : 's'}.
+            {projects.length} assigned project{projects.length === 1 ? '' : 's'}. Schedules and
+            due dates are generated automatically for each phase and subtask.
           </p>
         </div>
-        <div className="emp-status-toggle" role="group" aria-label="Agenda filter">
-          {(
-            [
-              ['all', 'All'],
-              ['meeting', 'Meetings'],
-              ['deadline', 'Deadlines'],
-              ['task', 'Tasks'],
-            ] as const
-          ).map(([id, label]) => (
+        <div className="emp-cal-controls">
+          <div className="emp-status-toggle" role="group" aria-label="Calendar view">
             <button
-              key={id}
               type="button"
-              className={filter === id ? 'on' : ''}
-              onClick={() => setFilter(id)}
+              className={view === 'gantt' ? 'on' : ''}
+              onClick={() => setView('gantt')}
             >
-              {label}
+              Gantt
             </button>
-          ))}
+            <button
+              type="button"
+              className={view === 'month' ? 'on' : ''}
+              onClick={() => setView('month')}
+            >
+              Month
+            </button>
+          </div>
+          {view === 'month' ? (
+            <div className="emp-status-toggle" role="group" aria-label="Agenda filter">
+              {(
+                [
+                  ['all', 'All'],
+                  ['meeting', 'Meetings'],
+                  ['deadline', 'Deadlines'],
+                  ['task', 'Tasks'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={filter === id ? 'on' : ''}
+                  onClick={() => setFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </header>
 
-      {loading ? <p className="pd-muted">Loading your calendar…</p> : null}
+      {view === 'gantt' ? (
+        <section className="panel emp-gantt-panel">
+          <h3>
+            Schedule Gantt <span className="tag">All assigned projects</span>
+          </h3>
+          <EmployeeGantt projects={projects} onOpenProject={onOpenProject} />
+        </section>
+      ) : null}
 
+      {view === 'month' && loading ? <p className="pd-muted">Loading your calendar…</p> : null}
+
+      {view === 'month' ? (
       <div className="emp-agenda-layout">
         <section className="panel emp-agenda-cal">
           <div className="cp-cal-toolbar">
@@ -333,6 +368,7 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
           </section>
         </aside>
       </div>
+      ) : null}
     </div>
   );
 }

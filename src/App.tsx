@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BrandMark } from './components/BrandMark';
-import { FloatingChat } from './components/FloatingChat';
+import { AskAiNavButton, FloatingChat } from './components/FloatingChat';
 import { LoginPage } from './components/LoginPage';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { DataProvider, useDashboard } from './hooks/useDashboard';
@@ -16,6 +16,7 @@ import { ProjectAnalysis } from './sheets/ProjectAnalysis';
 import { ProjectList } from './sheets/ProjectList';
 import { ProjectDashboard } from './sheets/ProjectDashboard';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
+import { Staffing } from './sheets/Staffing';
 import type { SheetId } from './lib/types';
 import './styles/global.css';
 
@@ -24,6 +25,7 @@ function StaffShell() {
   const { profile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
   const [sheet, setSheet] = useState<SheetId>('exec');
+  const [chatOpen, setChatOpen] = useState(false);
   const [viewAction, setViewAction] = useState<{ seq: number; action: ChatViewAction } | null>(
     null,
   );
@@ -75,7 +77,16 @@ function StaffShell() {
               {profile?.email}
             </div>
           </div>
-          <div className="tb-cell">
+          <div className="tb-cell tb-cell-actions">
+            <AskAiNavButton
+              open={chatOpen}
+              onClick={() => {
+                const x = window.scrollX;
+                const y = window.scrollY;
+                setChatOpen((o) => !o);
+                requestAnimationFrame(() => window.scrollTo(x, y));
+              }}
+            />
             <button type="button" className="signout-btn" onClick={() => void signOut()}>
               Sign out
             </button>
@@ -133,6 +144,13 @@ function StaffShell() {
         >
           <span className="num">SHEET A-5</span>Project List
         </button>
+        <button
+          type="button"
+          className={sheet === 's6' ? 'active' : ''}
+          onClick={() => setSheet('s6')}
+        >
+          <span className="num">SHEET A-6</span>Staffing
+        </button>
       </nav>
 
       <main className={fillViewport ? 'main-fill' : undefined}>
@@ -145,6 +163,7 @@ function StaffShell() {
         {sheet === 's3' ? <FinancialAR data={data} /> : null}
         {sheet === 's4' ? <ProjectDashboard data={data} /> : null}
         {sheet === 's5' ? <ProjectList data={data} /> : null}
+        {sheet === 's6' ? <Staffing /> : null}
       </main>
 
       {!fillViewport ? (
@@ -155,7 +174,13 @@ function StaffShell() {
         </footer>
       ) : null}
 
-      <FloatingChat sheet={sheet} data={data} onViewAction={applyChatView} />
+      <FloatingChat
+        sheet={sheet}
+        data={data}
+        onViewAction={applyChatView}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+      />
     </div>
   );
 }

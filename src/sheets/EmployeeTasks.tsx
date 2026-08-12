@@ -46,10 +46,13 @@ export function EmployeeTasks({
   projects,
   employeeName,
   onOpenProject,
+  active = true,
 }: {
   projects: (ProjectNode & { clientName: string })[];
   employeeName: string;
   onOpenProject?: (projectKey: string) => void;
+  /** When false (kept mounted but hidden), skip network; refresh from cache on show. */
+  active?: boolean;
 }) {
   const isDemo = useDemoMode();
   const [loading, setLoading] = useState(true);
@@ -61,10 +64,12 @@ export function EmployeeTasks({
   const [view, setView] = useState<StatusView>('open');
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const projectsKey = useMemo(() => projects.map((p) => p.key).join('|'), [projects]);
 
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
-    setLoading(true);
+    setLoading((prev) => (tasks.length ? prev : true));
     setError(null);
     void (async () => {
       try {
@@ -81,7 +86,8 @@ export function EmployeeTasks({
     return () => {
       cancelled = true;
     };
-  }, [projects, employeeName, isDemo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when shown / book changes
+  }, [active, projectsKey, employeeName, isDemo]);
 
   function toggleSort(key: TaskSortKey) {
     if (sortKey === key) {

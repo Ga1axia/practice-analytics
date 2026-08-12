@@ -212,6 +212,32 @@ export class BqeHttpError extends Error {
   }
 }
 
+/** Exported for unit tests — compute backoff delay for 429 / 5xx. */
+export function bqeRetryDelayMs(
+  attempt: number,
+  status: number,
+  retryAfterHeader: string | null,
+  bodyText: string,
+): number {
+  if (retryAfterHeader) {
+    const asSec = Number(retryAfterHeader);
+    if (Number.isFinite(asSec) && asSec >= 0) {
+      return Math.min(Math.max(asSec, 1), 120) * 1000;
+    }
+    const when = Date.parse(retryAfterHeader);
+    if (!Number.isNaN(when)) {
+      return Math.min(Math.max(when - Date.now(), 1000), 120_000);
+    }
+  }
+  if (status === 429) {
+    const waitMatch = bodyText.match(/try again in (\d+)/i);
+    const waitSec = waitMatch ? Number(waitMatch[1]) : 30;
+    return Math.min(Math.max(waitSec, 5), 90) * 1000;
+  }
+  // Exponential backoff for 5xx (capped)
+  return Math.min(1000 * 2 ** attempt, 30_000);
+}
+
 export async function bqeGet<T>(path: string, query?: Record<string, string>): Promise<T> {
   const { accessToken, endpoint } = await getValidAccessToken();
   const url = new URL(endpoint + (path.startsWith('/') ? path : `/${path}`));
@@ -219,7 +245,7 @@ export async function bqeGet<T>(path: string, query?: Record<string, string>): P
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   }
 
-  // CORE allows ~100 calls/minute — back off on 429
+  // CORE allows ~100 calls/minute — back off on 429 / transient 5xx
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const res = await fetch(url.toString(), {
       headers: {
@@ -229,10 +255,15 @@ export async function bqeGet<T>(path: string, query?: Record<string, string>): P
       },
     });
     const text = await res.text();
-    if (res.status === 429) {
-      const waitMatch = text.match(/try again in (\d+)/i);
-      const waitSec = waitMatch ? Number(waitMatch[1]) : 30;
-      await sleep(Math.min(Math.max(waitSec, 5), 90) * 1000);
+    const retryable = res.status === 429 || (res.status >= 500 && res.status <= 599);
+    if (retryable && attempt < 5) {
+      const delay = bqeRetryDelayMs(
+        attempt,
+        res.status,
+        res.headers.get('retry-after'),
+        text,
+      );
+      await sleep(delay);
       continue;
     }
     if (!res.ok) {
@@ -325,14 +356,57 @@ export type BqeTimeEntry = {
   id?: string;
   date?: string | null;
   projectId?: string | null;
+  project?: string | null;
+  client?: string | null;
+  activityId?: string | null;
+  activity?: string | null;
+  description?: string | null;
+  memo?: string | null;
   resourceId?: string | null;
   resource?: string | null;
   actualHours?: number | null;
+  /** Hours billed to client (may differ from actual). */
+  clientHours?: number | null;
   billable?: boolean | null;
   billRate?: number | null;
   costRate?: number | null;
+  /** CORE BilledStatus: 0 Unbilled, 2 Billed (typical). */
+  billStatus?: number | string | null;
+  wudMultiplier?: number | null;
+  extra?: boolean | null;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+  isWrittenOff?: boolean | null;
+  createdOn?: string | null;
+  lastUpdated?: string | null;
+};
+
+/** Fields requested when persisting time entries (excludes rates). */
+export const BQE_TIME_ENTRY_PERSIST_FIELDS =
+  'id,date,projectId,project,client,activity,activityId,resourceId,resource,' +
+  'actualHours,clientHours,billable,billStatus,extra,isWrittenOff,' +
+  'description,memo,invoiceId,createdOn,lastUpdated';
+
+export type BqeExpenseEntry = {
+  id?: string;
+  date?: string | null;
+  projectId?: string | null;
+  project?: string | null;
+  billable?: boolean | null;
+  billStatus?: number | string | null;
+  units?: number | null;
+  costRate?: number | null;
+  chargeAmount?: number | null;
+  markup?: number | null;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
   isWrittenOff?: boolean | null;
 };
+
+/** CORE BilledStatus — entry has been put on an invoice. */
+export function isCoreBilledStatus(status: number | string | null | undefined): boolean {
+  return Number(status) === 2;
+}
 
 export type BqeInvoiceDetail = {
   id?: string;

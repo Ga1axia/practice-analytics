@@ -3,6 +3,7 @@ import { buildDemoProjectDetail } from './demoProjectDetail';
 import { loadProjectSchedule } from './loadProjectSchedule';
 import type { ProjectNode } from './projectListHierarchy';
 import { buildDeadlineEvents, startOfDay } from './scheduleDates';
+import { ensureProjectSchedule } from './scheduleEnsure';
 import { groupScheduleSections } from './scheduleSections';
 import { supabase } from './supabase';
 
@@ -64,7 +65,16 @@ export async function loadEmployeeAgenda(
 
   await Promise.all(
     slice.map(async (p) => {
-      const { rows: dbRows } = await loadProjectSchedule(p.key);
+      const ensured = await ensureProjectSchedule({
+        projectKey: p.key,
+        clientName: p.clientName,
+        title: p.title,
+      });
+      let dbRows = ensured.rows;
+      if (!dbRows.length && !ensured.error) {
+        const loaded = await loadProjectSchedule(p.key);
+        dbRows = loaded.rows;
+      }
       const demo = allowDemoSeed
         ? buildDemoProjectDetail(p.key, p.clientName, managerFor(p, employeeName))
         : null;

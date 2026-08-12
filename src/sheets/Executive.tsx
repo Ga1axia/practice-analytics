@@ -18,8 +18,7 @@ import {
   type WorkType,
 } from '../lib/workType';
 
-const OTHER_PHASE_COLOR = '#9AA8B5';
-const PHASE_KEYS = [...PROCESS_PHASES.map((p) => p.shortName), 'Other'];
+const PHASE_KEYS = PROCESS_PHASES.map((p) => p.shortName);
 
 type LoadSort = 'load' | 'city';
 
@@ -37,7 +36,12 @@ type EmpPhaseLoad = {
 
 function phaseBucket(phase: string | null | undefined): string {
   const idx = matchProcessPhaseIndex(phase);
-  return idx >= 0 ? PROCESS_PHASES[idx]!.shortName : 'Other';
+  if (idx >= 0) return PROCESS_PHASES[idx]!.shortName;
+  return PROCESS_PHASES.find((p) => p.id === 'additional')?.shortName || 'Add. Services';
+}
+
+function phaseColor(key: string): string {
+  return PROCESS_PHASES.find((p) => p.shortName === key)?.color || '#9AA8B5';
 }
 
 function emptyPhaseMap(): Record<string, number> {
@@ -171,7 +175,7 @@ export function Executive({ data }: { data: DashboardData }) {
     for (const r of data.projects) {
       if (!r.manager || r.row_kind === 'project') continue;
       const phase = (r.phase || '').trim();
-      if (!phase || phase === 'Other' || phase === 'Internal/PTO') continue;
+      if (!phase || phase === 'Internal/PTO') continue;
       if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
 
       const acc = ensure(r.manager);
@@ -222,7 +226,7 @@ export function Executive({ data }: { data: DashboardData }) {
         employees,
         PHASE_KEYS,
         (e, k) => e.phaseCounts[k] || 0,
-        (k) => PROCESS_PHASES.find((p) => p.shortName === k)?.color || OTHER_PHASE_COLOR,
+        phaseColor,
       ),
     };
   }, [employeeLoad, loadSort]);
@@ -237,7 +241,7 @@ export function Executive({ data }: { data: DashboardData }) {
         employees,
         PHASE_KEYS,
         (e, k) => e.phaseContracts[k] || 0,
-        (k) => PROCESS_PHASES.find((p) => p.shortName === k)?.color || OTHER_PHASE_COLOR,
+        phaseColor,
       ),
     };
   }, [employeeLoad, loadSort]);
@@ -270,7 +274,7 @@ export function Executive({ data }: { data: DashboardData }) {
       if (r.row_kind === 'project') continue;
       if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
       const phase = (r.phase || '').trim();
-      if (!phase || phase === 'Other' || phase === 'Internal/PTO') continue;
+      if (!phase || phase === 'Internal/PTO') continue;
       const city = projectCity.get(projectKeyOf(r)) || cityOf(r);
       map.set(city, (map.get(city) || 0) + (r.contract || 0));
     }

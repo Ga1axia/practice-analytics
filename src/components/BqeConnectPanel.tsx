@@ -14,6 +14,9 @@ type BqeStatus = {
   lastSyncAt: string | null;
   lastSyncStatus: string | null;
   lastSyncMessage: string | null;
+  lastTimeEntrySyncAt?: string | null;
+  lastTimeEntrySyncStatus?: string | null;
+  timeEntryCount?: number | null;
   expiresAt: string | null;
   error?: string;
 };
@@ -130,6 +133,7 @@ export function BqeConnectPanel() {
       const res = await fetch('/api/bqe/sync', {
         method: 'POST',
         headers: await authHeaders(),
+        body: JSON.stringify({ includeTimeEntries: true }),
       });
       const body = await readApiJson<{ message?: string; error?: string }>(res);
       if (!res.ok) throw new Error(body.error || 'Sync failed');
@@ -138,6 +142,36 @@ export function BqeConnectPanel() {
       await reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Sync failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncTimeEntries(mode: 'historical' | 'incremental') {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const res = await fetch('/api/bqe/sync', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ mode }),
+      });
+      const body = await readApiJson<{
+        message?: string;
+        error?: string;
+        fetched?: number;
+        inserted?: number;
+        updated?: number;
+      }>(res);
+      if (!res.ok) throw new Error(body.error || 'Time entry sync failed');
+      setMsg(
+        body.message ||
+          `Time entries: fetched ${body.fetched ?? 0}, inserted ${body.inserted ?? 0}, updated ${body.updated ?? 0}`,
+      );
+      await refreshStatus();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Time entry sync failed');
     } finally {
       setBusy(false);
     }
@@ -182,6 +216,11 @@ export function BqeConnectPanel() {
                 {status.lastSyncStatus ? ` (${status.lastSyncStatus})` : ''}
               </div>
               {status.lastSyncMessage ? <div>{status.lastSyncMessage}</div> : null}
+              <div>
+                Time entries: {status.timeEntryCount ?? '—'} stored · last import{' '}
+                {fmtWhen(status.lastTimeEntrySyncAt ?? null)}
+                {status.lastTimeEntrySyncStatus ? ` (${status.lastTimeEntrySyncStatus})` : ''}
+              </div>
             </>
           ) : null}
         </div>
@@ -204,6 +243,24 @@ export function BqeConnectPanel() {
           style={{ marginLeft: 8 }}
         >
           {busy ? 'Working…' : 'Sync from CORE'}
+        </button>
+        <button
+          type="button"
+          className="plist-upload-btn"
+          disabled={busy || !status?.connected}
+          onClick={() => void syncTimeEntries('historical')}
+          style={{ marginLeft: 8 }}
+        >
+          Import historical time entries
+        </button>
+        <button
+          type="button"
+          className="plist-upload-btn"
+          disabled={busy || !status?.connected}
+          onClick={() => void syncTimeEntries('incremental')}
+          style={{ marginLeft: 8 }}
+        >
+          Incremental time entries
         </button>
       </div>
 

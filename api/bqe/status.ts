@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { bqeConfig, hasServiceRole, loadConnection } from '../_lib/bqe';
+import { bqeConfig, hasServiceRole, loadConnection, serviceSupabase } from '../_lib/bqe';
 import { requireAdmin } from '../_lib/requireAdmin';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -15,11 +15,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const serviceOk = hasServiceRole();
     let conn = null;
     let connError: string | null = null;
+    let lastTimeEntrySyncAt: string | null = null;
+    let lastTimeEntrySyncStatus: string | null = null;
+    let timeEntryCount: number | null = null;
+
     if (serviceOk) {
       try {
         conn = await loadConnection();
       } catch (e) {
         connError = e instanceof Error ? e.message : 'Could not load connection';
+      }
+      try {
+        const sb = serviceSupabase();
+        const { data: run } = await sb
+          .from('pa_bqe_sync_runs')
+          .select('completed_at, status, sync_type')
+          .in('sync_type', ['historical', 'incremental'])
+          .in('status', ['succeeded', 'partial'])
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        lastTimeEntrySyncAt = (run?.completed_at as string) || null;
+        lastTimeEntrySyncStatus = (run?.status as string) || null;
+        const { count } = await sb
+          .from('pa_time_entries')
+          .select('id', { count: 'exact', head: true });
+        timeEntryCount = count ?? 0;
+      } catch {
+        /* tables may not exist until migration */
       }
     }
 
@@ -35,6 +58,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       lastSyncAt: conn?.last_sync_at || null,
       lastSyncStatus: conn?.last_sync_status || null,
       lastSyncMessage: conn?.last_sync_message || null,
+      lastTimeEntrySyncAt,
+      lastTimeEntrySyncStatus,
+      timeEntryCount,
       expiresAt: conn?.expires_at || null,
       error: connError,
     });

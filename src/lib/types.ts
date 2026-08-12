@@ -91,6 +91,13 @@ export type CompanyMonthly = {
   total_hours: number;
   standard_hours: number;
   efficiency: number;
+  /** Network-days × 8 × employees (before PTO). */
+  capacity_hours?: number;
+  client_nb_hours?: number;
+  mbd_hours?: number;
+  pto_sick_hours?: number;
+  others_nb_hours?: number;
+  probono_hours?: number;
 };
 
 export type TopClient = {
@@ -130,4 +137,4 @@ export type DashboardData = {
   invoice_ledger: InvoiceRow[];
 };
 
-export type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5';
+export type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6';

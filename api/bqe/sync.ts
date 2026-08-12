@@ -5,6 +5,7 @@ import {
   bqeSinceDate,
   serviceSupabase,
   type BqeEmployee,
+  type BqeExpenseEntry,
   type BqeInvoice,
   type BqeProject,
   type BqeTimeEntry,
@@ -14,9 +15,22 @@ import {
   mapCoreProjects,
   mapEmployeesToRoster,
 } from '../_lib/bqeSyncBuild';
+import {
+  persistFetchedTimeEntries,
+  runTimeEntrySync,
+  type TimeEntrySyncMode,
+} from '../_lib/bqeTimeEntrySync';
 import { requireAdmin } from '../_lib/requireAdmin';
 
 type Sb = ReturnType<typeof serviceSupabase>;
+
+type SyncBody = {
+  mode?: 'historical' | 'incremental' | 'dry_run' | 'aggregates';
+  since?: string;
+  until?: string;
+  /** When running aggregates, also persist raw time entries (incremental). */
+  includeTimeEntries?: boolean;
+};
 
 async function clearTable(sb: Sb, table: string) {
   const { error } = await sb.from(table).delete().gte('id', 0);
@@ -59,12 +73,20 @@ async function tryList<T>(
   }
 }
 
+function parseBody(req: VercelRequest): SyncBody {
+  const raw = req.body;
+  if (!raw || typeof raw !== 'object') return {};
+  return raw as SyncBody;
+}
+
 /** Allow longer CORE pagination + DB replace on Vercel. */
 export const config = { maxDuration: 300 };
 
 /**
- * Full CORE sync: projects + time entries + invoices (if subscribed) + employees.
- * Replaces local analytics tables with live CORE-derived figures (no Excel merge).
+ * BQE CORE sync.
+ * - Default / mode omitted / mode=aggregates: existing aggregate analytics replace.
+ * - mode=historical|incremental|dry_run: persist (or count) raw time entries only.
+ * - includeTimeEntries on aggregates: also runs incremental TE persist after aggregates.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -75,6 +97,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
+
+    const body = parseBody(req);
+    const mode = body.mode;
+
+    if (mode === 'historical' || mode === 'incremental' || mode === 'dry_run') {
+      const sb = serviceSupabase();
+      const result = await runTimeEntrySync(sb, {
+        mode: mode as TimeEntrySyncMode,
+        since: body.since,
+        until: body.until,
+        initiatedBy: admin.userId,
+      });
+      const statusCode = result.status === 'failed' ? 500 : 200;
+      res.status(statusCode).json({
+        ok: result.status !== 'failed',
+        syncRunId: result.syncRunId,
+        status: result.status,
+        mode: result.mode,
+        since: result.since,
+        until: result.until,
+        fetched: result.fetched,
+        inserted: result.inserted,
+        updated: result.updated,
+        skipped: result.skipped,
+        cursor: result.cursor,
+        lastUpdatedCursor: result.lastUpdatedCursor,
+        warnings: result.warnings,
+        error: result.error,
+        message:
+          result.status === 'failed'
+            ? result.error
+            : `Time entry ${result.mode}: fetched ${result.fetched}, inserted ${result.inserted}, updated ${result.updated}, skipped ${result.skipped}.`,
+      });
+      return;
+    }
 
     const sb = serviceSupabase();
     try {
@@ -91,12 +148,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           bqeListAll<BqeTimeEntry>('/timeentry', 1000, {
             where: whereDate,
             fields:
-              'date,projectId,resourceId,resource,actualHours,billable,billRate,costRate,isWrittenOff',
+              'id,date,projectId,project,client,activity,activityId,resourceId,resource,actualHours,clientHours,billable,billRate,costRate,billStatus,wudMultiplier,extra,isWrittenOff,description,memo,invoiceId,createdOn,lastUpdated',
           }),
         warnings,
       );
 
-      // Invoice module often requires a separate CORE subscription
+      const expenseEntries = await tryList(
+        'Expense Entry',
+        () =>
+          bqeListAll<BqeExpenseEntry>('/expenseentry', 500, {
+            where: whereDate,
+            fields:
+              'date,projectId,project,billable,billStatus,units,costRate,chargeAmount,markup,isWrittenOff',
+          }),
+        warnings,
+      );
+
       let invoices = await tryList(
         'Invoice',
         () =>
@@ -107,7 +174,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         warnings,
       );
       if (!invoices.length && !warnings.some((w) => w.startsWith('Invoice'))) {
-        // expand may have failed for another reason; try flat list once
         invoices = await tryList(
           'Invoice',
           () => bqeListAll<BqeInvoice>('/invoice', 500, { where: whereDate }),
@@ -125,21 +191,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
 
       const mapped = mapCoreProjects(projects);
-      const built = applyTimeAndInvoices(mapped, timeEntries, invoices);
+      const built = applyTimeAndInvoices(
+        mapped,
+        timeEntries,
+        invoices,
+        expenseEntries,
+      );
       const roster = mapEmployeesToRoster(employees);
-
-      // If no invoices, use earned time (billable × rate) as billed so Main Report isn't all zeros
-      if (!invoices.length) {
-        for (const p of built.projects) {
-          if (!p.billed && p.spent) {
-            p.billed = p.spent;
-            p.pct_billed = p.contract > 0 ? p.billed / p.contract : null;
-            p.profit = 0;
-            p.margin = null;
-          }
-        }
+      if (mapped.excludedCount) {
         warnings.push(
-          'Invoice module unavailable — billed set from billable time value (earned). A/R aging not updated.',
+          `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
+        );
+      }
+
+      if (!invoices.length) {
+        warnings.push(
+          'Invoice module unavailable — Billed from time/expense billStatus; Spent from billable WIP value. A/R aging not updated.',
         );
       }
 
@@ -171,10 +238,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await insertChunks(sb, 'pa_monthly_revenue', built.monthlyRevenue);
       }
 
+      // Persist the already-fetched CORE time entries for Staffing (no second BQE pull).
+      // Set includeTimeEntries:false to skip. Default: persist when entries were fetched.
+      let timeEntryPersist: Awaited<ReturnType<typeof persistFetchedTimeEntries>> | null = null;
+      const shouldPersistTe = body.includeTimeEntries !== false && timeEntries.length > 0;
+      if (shouldPersistTe) {
+        timeEntryPersist = await persistFetchedTimeEntries(sb, timeEntries, projects, {
+          initiatedBy: admin.userId,
+          since,
+        });
+        if (timeEntryPersist.error) {
+          warnings.push(`Time entry persist: ${timeEntryPersist.error}`);
+        } else {
+          warnings.push(
+            `Time entries persisted: +${timeEntryPersist.inserted} / ~${timeEntryPersist.updated}`,
+          );
+        }
+      }
+
       const msg =
         `Synced from BQE CORE since ${since}: ` +
         `${projects.length} projects → ${insertedProjects} rows · ` +
         `${built.stats.timeEntries} time entries (${built.stats.matchedTime} matched) · ` +
+        `${built.stats.expenseEntries} expenses (${built.stats.matchedExpenses} matched) · ` +
         `${built.stats.invoices} invoices (${built.stats.matchedInvoiceLines} project lines) · ` +
         `${roster.length} employees · ` +
         `${built.empTotals.length} employee hour totals` +
@@ -193,6 +279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       res.status(200).json({
         ok: true,
+        mode: 'aggregates',
         since,
         coreProjects: projects.length,
         timeEntries: built.stats.timeEntries,
@@ -201,6 +288,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         insertedProjects,
         warnings,
         message: msg,
+        timeEntrySync: timeEntryPersist
+          ? {
+              syncRunId: timeEntryPersist.syncRunId,
+              status: timeEntryPersist.status,
+              fetched: timeEntryPersist.fetched,
+              inserted: timeEntryPersist.inserted,
+              updated: timeEntryPersist.updated,
+              skipped: timeEntryPersist.skipped,
+              cursor: timeEntryPersist.cursor,
+              lastUpdatedCursor: timeEntryPersist.lastUpdatedCursor,
+              error: timeEntryPersist.error,
+            }
+          : null,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'sync failed';

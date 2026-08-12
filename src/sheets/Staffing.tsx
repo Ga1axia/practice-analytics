@@ -1,0 +1,966 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { HoursHBar } from '../components/Charts';
+import { KpiRow } from '../components/KpiRow';
+import { supabase } from '../lib/supabase';
+import { ymd, daysAgoYmd } from '../lib/staffingDelivery';
+import type { TimeEntryLite } from '../lib/staffingTypes';
+import {
+  loadHistoricalTimeEntries,
+  loadHistoricalTimeEntryStats,
+} from '../lib/staffingTimeEntries';
+import {
+  loadHistoryAnalytics,
+  type DimensionStat,
+  type EmployeeHistoryRow,
+  type FirmAverages,
+  type HistoryAnalyticsResult,
+  type HistoryWindowDays,
+  type HoursSlice,
+} from '../lib/staffingHistoryAnalytics';
+import { WORK_TYPES, type WorkType } from '../lib/workType';
+import { phaseAbbrev } from '../lib/phaseAbbrev';
+
+type StaffingView = 'analytics' | 'entries';
+
+function fmtWhen(iso: string | null | undefined): string {
+  if (!iso) return 'Never';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function shortLabel(label: string, max = 10): string {
+  const abbr = phaseAbbrev(label);
+  if (abbr && abbr !== '—') return abbr;
+  if (label.length <= max) return label;
+  return `${label.slice(0, max - 1)}…`;
+}
+
+function pct(share: number): string {
+  return `${Math.round(share * 100)}%`;
+}
+
+/** Compact labeled % bars for table cells / firm panels. */
+function ShareBars({
+  slices,
+  max = 3,
+  tone = 'teal',
+  showHours = false,
+}: {
+  slices: Array<Pick<HoursSlice, 'label' | 'share' | 'hours'>>;
+  max?: number;
+  tone?: 'teal' | 'gold' | 'navy';
+  showHours?: boolean;
+}) {
+  const shown = slices.slice(0, max);
+  if (!shown.length) return <span className="staff-share-empty">—</span>;
+  return (
+    <div className="staff-share" onClick={(e) => e.stopPropagation()}>
+      {shown.map((s) => (
+        <div key={s.label} className="staff-share-row" title={`${s.label}: ${s.hours.toFixed(1)}h (${pct(s.share)})`}>
+          <span className="staff-share-lab">{shortLabel(s.label)}</span>
+          <span className="staff-share-track">
+            <span
+              className={`staff-share-fill ${tone === 'teal' ? '' : tone}`}
+              style={{ width: `${Math.max(2, Math.min(100, s.share * 100))}%` }}
+            />
+          </span>
+          <span className="staff-share-pct">{pct(s.share)}</span>
+          {showHours ? <span className="staff-avg-h">{s.hours.toFixed(0)}h</span> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DimBars({
+  rows,
+  max = 6,
+  tone = 'teal',
+}: {
+  rows: DimensionStat[];
+  max?: number;
+  tone?: 'teal' | 'gold' | 'navy';
+}) {
+  return (
+    <ShareBars
+      slices={rows.slice(0, max).map((r) => ({
+        label: r.label,
+        share: r.share,
+        hours: r.hours,
+      }))}
+      max={max}
+      tone={tone}
+      showHours
+    />
+  );
+}
+
+function FirmAveragesPanel({ averages }: { averages: FirmAverages }) {
+  return (
+    <div className="panel" style={{ marginBottom: 12 }}>
+      <h3>
+        Firm averages <span className="tag">Observed in window</span>
+      </h3>
+      <KpiRow
+        items={[
+          {
+            k: 'Avg h / person',
+            v: averages.avgHoursPerEmployee.toFixed(0),
+            cls: 'accent-teal',
+          },
+          {
+            k: 'Avg billable / person',
+            v: averages.avgBillablePerEmployee.toFixed(0),
+            cls: 'accent-gold',
+          },
+          { k: 'Avg pace', v: `${averages.avgWeeklyPace.toFixed(1)} h/wk` },
+          { k: 'Avg projects / person', v: averages.avgProjectsPerEmployee.toFixed(1) },
+          { k: 'Avg h / project', v: averages.avgHoursPerProject.toFixed(0) },
+          {
+            k: 'Avg touch / person·project',
+            v: averages.avgPersonProjectTouch.toFixed(0),
+          },
+        ]}
+      />
+      <p className="pd-muted staff-kpi-note">
+        Bars = share of firm hours. Right column = total hours. Hover for avg h/person and
+        avg h/project on that slice.
+      </p>
+      <div className="staff-avg-grid">
+        <div className="staff-avg-card">
+          <h4>By phase</h4>
+          <div title={averages.byPhase
+            .slice(0, 8)
+            .map(
+              (p) =>
+                `${p.label}: ${p.hours.toFixed(0)}h · avg ${p.avgHoursPerPerson.toFixed(0)}h/person · ${p.avgHoursPerProject.toFixed(0)}h/project`,
+            )
+            .join('\n')}>
+            <DimBars rows={averages.byPhase} max={8} tone="teal" />
+          </div>
+          <p className="staff-avg-meta">
+            {averages.byPhase[0]
+              ? `Top: avg ${averages.byPhase[0].avgHoursPerPerson.toFixed(0)}h/person on ${shortLabel(averages.byPhase[0].label)}`
+              : 'No phase hours'}
+          </p>
+        </div>
+        <div className="staff-avg-card">
+          <h4>By project type</h4>
+          <DimBars rows={averages.byWorkType} max={8} tone="gold" />
+          <p className="staff-avg-meta">
+            {averages.byWorkType[0]
+              ? `Top type: ${averages.byWorkType[0].label} · avg ${averages.byWorkType[0].avgHoursPerPerson.toFixed(0)}h/person`
+              : 'No type hours'}
+          </p>
+        </div>
+        <div className="staff-avg-card">
+          <h4>By activity</h4>
+          <DimBars rows={averages.byActivity} max={8} tone="navy" />
+          <p className="staff-avg-meta">
+            {averages.byActivity[0]
+              ? `Top: ${averages.byActivity[0].label} · ${averages.byActivity[0].people} people`
+              : 'No activity hours'}
+          </p>
+        </div>
+        <div className="staff-avg-card">
+          <h4>Largest projects</h4>
+          <DimBars rows={averages.byProject} max={8} tone="teal" />
+          <p className="staff-avg-meta">
+            {averages.byProject[0]
+              ? `Largest: avg ${averages.byProject[0].avgHoursPerPerson.toFixed(0)}h across ${averages.byProject[0].people} people`
+              : 'No projects'}
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-2" style={{ marginTop: 8, gap: 12 }}>
+        {averages.byPhase.length ? (
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Phase</th>
+                  <th className="num">Hours</th>
+                  <th className="num">Share</th>
+                  <th className="num">People</th>
+                  <th className="num">Avg h/person</th>
+                  <th className="num">Avg h/project</th>
+                </tr>
+              </thead>
+              <tbody>
+                {averages.byPhase.map((p) => (
+                  <tr key={p.key}>
+                    <td>{p.label}</td>
+                    <td className="num">{p.hours.toFixed(0)}</td>
+                    <td className="num">{pct(p.share)}</td>
+                    <td className="num">{p.people}</td>
+                    <td className="num">{p.avgHoursPerPerson.toFixed(1)}</td>
+                    <td className="num">{p.avgHoursPerProject.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {averages.byWorkType.length ? (
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Project type</th>
+                  <th className="num">Hours</th>
+                  <th className="num">Share</th>
+                  <th className="num">People</th>
+                  <th className="num">Projects</th>
+                  <th className="num">Avg h/person</th>
+                  <th className="num">Avg h/project</th>
+                </tr>
+              </thead>
+              <tbody>
+                {averages.byWorkType.map((p) => (
+                  <tr key={p.key}>
+                    <td>{p.label}</td>
+                    <td className="num">{p.hours.toFixed(0)}</td>
+                    <td className="num">{pct(p.share)}</td>
+                    <td className="num">{p.people}</td>
+                    <td className="num">{p.projects}</td>
+                    <td className="num">{p.avgHoursPerPerson.toFixed(1)}</td>
+                    <td className="num">{p.avgHoursPerProject.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+async function authHeaders(): Promise<HeadersInit> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+export function Staffing() {
+  const [view, setView] = useState<StaffingView>('analytics');
+  const [windowDays, setWindowDays] = useState<HistoryWindowDays>(90);
+  const [employee, setEmployee] = useState('');
+  const [phase, setPhase] = useState('');
+  const [workType, setWorkType] = useState('');
+
+  const [data, setData] = useState<HistoryAnalyticsResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [histSince, setHistSince] = useState(() => {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() - 36);
+    return ymd(d);
+  });
+
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await loadHistoryAnalytics({
+        windowDays,
+        employee: employee || undefined,
+        phase: phase || undefined,
+        workType: (workType as WorkType) || undefined,
+      });
+      setData(result);
+      setSelected((prev) =>
+        prev && result.employees.some((e) => e.employeeName === prev) ? prev : null,
+      );
+    } catch (e) {
+      const message =
+        e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : e instanceof Error
+            ? e.message
+            : 'Failed to load staffing history';
+      setError(message);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [windowDays, employee, phase, workType]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  async function runTimeEntrySync(mode: 'historical' | 'incremental' | 'dry_run') {
+    setSyncBusy(true);
+    setMsg(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/bqe/sync', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          mode,
+          since: mode === 'historical' || mode === 'dry_run' ? histSince : undefined,
+        }),
+      });
+      const body = (await res.json()) as {
+        message?: string;
+        error?: string;
+        fetched?: number;
+        inserted?: number;
+        updated?: number;
+      };
+      if (!res.ok) throw new Error(body.error || 'Sync failed');
+      setMsg(
+        body.message ||
+          `Fetched ${body.fetched ?? 0}, inserted ${body.inserted ?? 0}, updated ${body.updated ?? 0}`,
+      );
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sync failed');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  const selectedRow = useMemo(
+    () => data?.employees.find((e) => e.employeeName === selected) || null,
+    [data, selected],
+  );
+
+  if (loading && !data) {
+    return (
+      <section className="sheet active">
+        <div className="panel">
+          <p className="pd-muted">Loading historical staffing…</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!data) {
+    return (
+      <section className="sheet active">
+        <div className="panel">
+          <h3>Staffing history</h3>
+          <p className="plist-upload-err">{error || 'No data'}</p>
+          <div className="plist-upload-row" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="plist-upload-btn"
+              disabled={syncBusy}
+              onClick={() => void runTimeEntrySync('historical')}
+            >
+              Import historical time entries
+            </button>
+            <button
+              type="button"
+              className="plist-upload-btn"
+              style={{ marginLeft: 8 }}
+              onClick={() => void reload()}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const summary = data.summary;
+  const opts = data.filterOptions;
+  const windowLabel =
+    windowDays === 0 ? 'All imported history' : `Trailing ${windowDays} days`;
+
+  return (
+    <section className="sheet active staffing-sheet">
+      <header className="emp-hero">
+        <div>
+          <p className="pd-kicker">Staffing</p>
+          <h1 className="display" style={{ fontSize: 28 }}>
+            Staffing history
+          </h1>
+          <p className="emp-lede">
+            Observed hours from imported BQE time entries — who works on what, which phases, and
+            typical activity mix.
+          </p>
+        </div>
+        <div className="staff-meta">
+          <div>
+            <span className="k">Last time-entry sync</span>
+            <div className="v">{fmtWhen(summary.lastSyncAt)}</div>
+          </div>
+          <div className="exec-toggle" role="group" aria-label="Staffing view">
+            <button
+              type="button"
+              className={view === 'analytics' ? 'on' : ''}
+              onClick={() => setView('analytics')}
+            >
+              People &amp; patterns
+            </button>
+            <button
+              type="button"
+              className={view === 'entries' ? 'on' : ''}
+              onClick={() => setView('entries')}
+            >
+              Raw time entries
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="panel staff-sync">
+        <h3>
+          Time entry import <span className="tag">Admin · BQE → Supabase</span>
+        </h3>
+        <div className="filters" style={{ marginBottom: 8 }}>
+          <span className="f-label">Historical since</span>
+          <input
+            type="date"
+            value={histSince}
+            onChange={(e) => setHistSince(e.target.value)}
+            className="staff-input"
+          />
+        </div>
+        <div className="plist-upload-row">
+          <button
+            type="button"
+            className="plist-upload-btn"
+            disabled={syncBusy}
+            onClick={() => void runTimeEntrySync('historical')}
+          >
+            {syncBusy ? 'Working…' : 'Import historical time entries'}
+          </button>
+          <button
+            type="button"
+            className="plist-upload-btn"
+            style={{ marginLeft: 8 }}
+            disabled={syncBusy}
+            onClick={() => void runTimeEntrySync('incremental')}
+          >
+            Incremental sync
+          </button>
+        </div>
+        {msg ? <p className="plist-upload-ok">{msg}</p> : null}
+        {error ? <p className="plist-upload-err">{error}</p> : null}
+      </div>
+
+      {view === 'entries' ? (
+        <HistoricalTimeEntriesPanel
+          employeeOptions={opts.employees}
+          onBack={() => setView('analytics')}
+        />
+      ) : (
+        <>
+          <div className="filters staff-filters">
+            <span className="f-label">Window</span>
+            <select
+              value={windowDays}
+              onChange={(e) => setWindowDays(Number(e.target.value) as HistoryWindowDays)}
+            >
+              <option value={30}>Trailing 30 days</option>
+              <option value={90}>Trailing 90 days</option>
+              <option value={180}>Trailing 180 days</option>
+              <option value={365}>Trailing 365 days</option>
+              <option value={0}>All imported history</option>
+            </select>
+            <span className="f-label">Employee</span>
+            <select value={employee} onChange={(e) => setEmployee(e.target.value)}>
+              <option value="">All</option>
+              {opts.employees.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span className="f-label">Phase</span>
+            <select value={phase} onChange={(e) => setPhase(e.target.value)}>
+              <option value="">All</option>
+              {opts.phases.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span className="f-label">Project type</span>
+            <select value={workType} onChange={(e) => setWorkType(e.target.value)}>
+              <option value="">All</option>
+              {WORK_TYPES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <KpiRow
+            items={[
+              {
+                k: 'Hours in window',
+                v: summary.totalHours.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+                cls: 'accent-teal',
+              },
+              {
+                k: 'Billable hours',
+                v: summary.billableHours.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+                cls: 'accent-gold',
+              },
+              { k: 'People with hours', v: String(summary.employees) },
+              { k: 'Projects touched', v: String(summary.projectCount) },
+              {
+                k: 'Avg h / person',
+                v: data.averages.avgHoursPerEmployee.toFixed(0),
+              },
+              {
+                k: 'Range',
+                v:
+                  summary.fromDate && summary.toDate
+                    ? `${summary.fromDate} → ${summary.toDate}`
+                    : windowLabel,
+              },
+            ]}
+          />
+          <p className="pd-muted staff-kpi-note">
+            All figures are <strong>observed</strong> from imported time entries ({windowLabel}).
+            Click a person for detail.
+          </p>
+
+          {summary.entriesLoaded === 0 ? (
+            <div className="panel staff-stale" style={{ maxWidth: 'none', marginBottom: 12 }}>
+              <p className="plist-empty" style={{ margin: 0 }}>
+                No time entries in this window. Import historical entries or widen the range. Use{' '}
+                <strong>Raw time entries</strong> to inspect the table directly.
+              </p>
+            </div>
+          ) : (
+            <FirmAveragesPanel averages={data.averages} />
+          )}
+
+          <div className="panel">
+            <h3>
+              Who is working <span className="tag">{data.employees.length}</span>
+            </h3>
+            <div className="table-scroll">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th className="num">Total h</th>
+                    <th className="num">Billable</th>
+                    <th className="num">Pace</th>
+                    <th className="num">Avg h/proj</th>
+                    <th>Phases</th>
+                    <th>Activity</th>
+                    <th>Projects</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.employees.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="plist-empty">
+                        No employees match these filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    data.employees.map((e) => (
+                      <tr
+                        key={e.employeeName}
+                        className={selected === e.employeeName ? 'staff-row-on' : undefined}
+                        onClick={() => setSelected(e.employeeName)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>{e.employeeName}</td>
+                        <td className="num">{e.totalHours.toFixed(0)}</td>
+                        <td className="num">{e.billableHours.toFixed(0)}</td>
+                        <td className="num">{e.weeklyPace.toFixed(1)}</td>
+                        <td className="num">{e.avgHoursPerProject.toFixed(0)}</td>
+                        <td>
+                          <ShareBars slices={e.topPhases} max={3} tone="teal" />
+                        </td>
+                        <td>
+                          <ShareBars slices={e.topActivities} max={3} tone="navy" />
+                        </td>
+                        <td>
+                          <ShareBars slices={e.topProjects} max={2} tone="gold" />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {selectedRow ? (
+            <EmployeeHistoryDetail row={selectedRow} onClose={() => setSelected(null)} />
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+function EmployeeHistoryDetail({
+  row,
+  onClose,
+}: {
+  row: EmployeeHistoryRow;
+  onClose: () => void;
+}) {
+  const phaseChart = {
+    labels: row.topPhases.map((p) => p.label),
+    values: row.topPhases.map((p) => p.hours),
+  };
+  const projectChart = {
+    labels: row.topProjects.map((p) =>
+      p.label.length > 28 ? `${p.label.slice(0, 27)}…` : p.label,
+    ),
+    values: row.topProjects.map((p) => p.hours),
+  };
+  return (
+    <div className="staff-drawer panel">
+      <div className="exec-load-head">
+        <h3>
+          {row.employeeName} <span className="tag">Observed history</span>
+        </h3>
+        <button type="button" className="signout-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+
+      <KpiRow
+        items={[
+          { k: 'Total hours', v: row.totalHours.toFixed(1), cls: 'accent-teal' },
+          { k: 'Billable', v: row.billableHours.toFixed(1), cls: 'accent-gold' },
+          { k: 'Pace', v: `${row.weeklyPace.toFixed(1)} h/wk` },
+          { k: 'Avg h / project', v: row.avgHoursPerProject.toFixed(0) },
+          { k: 'Avg h / phase', v: row.avgHoursPerPhase.toFixed(0) },
+          { k: 'Projects', v: String(row.projectCount) },
+          { k: 'Phases', v: String(row.phaseCount) },
+        ]}
+      />
+
+      <div className="staff-avg-grid" style={{ marginBottom: 12 }}>
+        <div className="staff-avg-card">
+          <h4>Phase mix</h4>
+          <ShareBars slices={row.topPhases} max={6} tone="teal" showHours />
+        </div>
+        <div className="staff-avg-card">
+          <h4>Activity mix</h4>
+          <ShareBars slices={row.topActivities} max={6} tone="navy" showHours />
+        </div>
+        <div className="staff-avg-card">
+          <h4>Project type</h4>
+          <ShareBars slices={row.workTypes} max={6} tone="gold" showHours />
+        </div>
+        <div className="staff-avg-card">
+          <h4>Top projects</h4>
+          <ShareBars slices={row.topProjects} max={6} tone="teal" showHours />
+        </div>
+      </div>
+
+      <div className="grid grid-2">
+        <div>
+          <h4 className="exec-load-sub">Hours by phase</h4>
+          <div className="chart-wrap tall">
+            {phaseChart.labels.length ? (
+              <HoursHBar labels={phaseChart.labels} values={phaseChart.values} />
+            ) : (
+              <div className="plist-empty">No phase hours</div>
+            )}
+          </div>
+        </div>
+        <div>
+          <h4 className="exec-load-sub">Hours by project</h4>
+          <div className="chart-wrap tall">
+            {projectChart.labels.length ? (
+              <HoursHBar labels={projectChart.labels} values={projectChart.values} />
+            ) : (
+              <div className="plist-empty">No project hours</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <h4 className="exec-load-sub">Activity / specialty mix</h4>
+      <div className="chart-wrap" style={{ height: 220 }}>
+        {row.topActivities.length ? (
+          <HoursHBar
+            labels={row.topActivities.map((a) => a.label)}
+            values={row.topActivities.map((a) => a.hours)}
+          />
+        ) : (
+          <div className="plist-empty">No activity breakdown</div>
+        )}
+      </div>
+
+      <h4 className="exec-load-sub">Project size &amp; phase detail</h4>
+      <div className="table-scroll staff-te-scroll">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Client</th>
+              <th>Phase</th>
+              <th>Type</th>
+              <th className="num">Hours</th>
+              <th className="num">Billable</th>
+              <th className="num">Entries</th>
+              <th>First</th>
+              <th>Last</th>
+            </tr>
+          </thead>
+          <tbody>
+            {row.projects.slice(0, 40).map((p) => (
+              <tr key={`${p.project}-${p.phase}`}>
+                <td>{p.project}</td>
+                <td>{p.client || '—'}</td>
+                <td>
+                  {p.phaseCode !== '—' ? `${p.phaseCode}` : ''}
+                  {p.phase && p.phase !== p.phaseCode ? ` · ${p.phase}` : p.phase || '—'}
+                </td>
+                <td>{p.workType}</td>
+                <td className="num">{p.hours.toFixed(1)}</td>
+                <td className="num">{p.billableHours.toFixed(1)}</td>
+                <td className="num">{p.entries}</td>
+                <td className="mono">{p.firstDate}</td>
+                <td className="mono">{p.lastDate}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function HistoricalTimeEntriesPanel({
+  employeeOptions,
+  onBack,
+}: {
+  employeeOptions: string[];
+  onBack: () => void;
+}) {
+  const [fromDate, setFromDate] = useState(() => daysAgoYmd(30));
+  const [toDate, setToDate] = useState(() => ymd(new Date()));
+  const [employee, setEmployee] = useState('');
+  const [projectQuery, setProjectQuery] = useState('');
+  const [billable, setBillable] = useState<'all' | 'billable' | 'non_billable'>('all');
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState<TimeEntryLite[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<{
+    entries: number;
+    hours: number;
+    billableHours: number;
+    employees: number;
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [pageRes, statsRes] = await Promise.all([
+        loadHistoricalTimeEntries({
+          fromDate,
+          toDate,
+          employee: employee || undefined,
+          projectQuery: projectQuery || undefined,
+          billable,
+          page,
+          pageSize: 50,
+        }),
+        loadHistoricalTimeEntryStats(fromDate, toDate),
+      ]);
+      if (pageRes.error) setError(pageRes.error);
+      if (statsRes.error) setError(statsRes.error);
+      setRows(pageRes.rows);
+      setTotal(pageRes.total);
+      setPageSize(pageRes.pageSize);
+      setStats({
+        entries: statsRes.entries,
+        hours: statsRes.hours,
+        billableHours: statsRes.billableHours,
+        employees: statsRes.employees,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load time entries');
+    } finally {
+      setLoading(false);
+    }
+  }, [fromDate, toDate, employee, projectQuery, billable, page]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="exec-load-head">
+        <h3>
+          Raw time entries <span className="tag">pa_time_entries</span>
+        </h3>
+        <button type="button" className="signout-btn" onClick={onBack}>
+          Back to analytics
+        </button>
+      </div>
+
+      <div className="filters staff-filters">
+        <span className="f-label">From</span>
+        <input
+          className="staff-input"
+          type="date"
+          value={fromDate}
+          onChange={(e) => {
+            setPage(0);
+            setFromDate(e.target.value);
+          }}
+        />
+        <span className="f-label">To</span>
+        <input
+          className="staff-input"
+          type="date"
+          value={toDate}
+          onChange={(e) => {
+            setPage(0);
+            setToDate(e.target.value);
+          }}
+        />
+        <span className="f-label">Employee</span>
+        <select
+          value={employee}
+          onChange={(e) => {
+            setPage(0);
+            setEmployee(e.target.value);
+          }}
+        >
+          <option value="">All</option>
+          {employeeOptions.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <span className="f-label">Billable</span>
+        <select
+          value={billable}
+          onChange={(e) => {
+            setPage(0);
+            setBillable(e.target.value as 'all' | 'billable' | 'non_billable');
+          }}
+        >
+          <option value="all">All</option>
+          <option value="billable">Billable</option>
+          <option value="non_billable">Non-billable</option>
+        </select>
+        <span className="f-label">Project / client</span>
+        <input
+          className="staff-input"
+          value={projectQuery}
+          placeholder="Search…"
+          onChange={(e) => {
+            setPage(0);
+            setProjectQuery(e.target.value);
+          }}
+        />
+        <button type="button" className="plist-upload-btn" onClick={() => void load()}>
+          Refresh
+        </button>
+      </div>
+
+      {stats ? (
+        <KpiRow
+          items={[
+            { k: 'Entries in range', v: String(stats.entries), cls: 'accent-teal' },
+            { k: 'Total hours', v: stats.hours.toFixed(1) },
+            { k: 'Billable hours', v: stats.billableHours.toFixed(1), cls: 'accent-gold' },
+            { k: 'Employees', v: String(stats.employees) },
+          ]}
+        />
+      ) : null}
+
+      {error ? <p className="plist-upload-err">{error}</p> : null}
+      {loading ? <p className="pd-muted">Loading time entries…</p> : null}
+
+      <div className="table-scroll staff-te-scroll" style={{ maxHeight: 480 }}>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employee</th>
+              <th>Client</th>
+              <th>Project</th>
+              <th>Phase</th>
+              <th>Activity</th>
+              <th className="num">Hours</th>
+              <th>Billable</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && rows.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="plist-empty">
+                  No time entries in this range.
+                </td>
+              </tr>
+            ) : (
+              rows.map((e) => (
+                <tr key={e.id}>
+                  <td className="mono">{e.work_date}</td>
+                  <td>{e.employee_name || '—'}</td>
+                  <td>{e.client || '—'}</td>
+                  <td>{e.parent_project_name || e.project_name || '—'}</td>
+                  <td>{e.phase_name || e.phase || '—'}</td>
+                  <td>{e.activity || '—'}</td>
+                  <td className="num">{Number(e.actual_hours).toFixed(2)}</td>
+                  <td>{e.is_billable ? 'Y' : 'N'}</td>
+                  <td className="staff-working">
+                    {(e.description || e.memo || '').slice(0, 100)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="plist-upload-row" style={{ marginTop: 10, gap: 8 }}>
+        <button
+          type="button"
+          className="plist-upload-btn"
+          disabled={page <= 0 || loading}
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+        >
+          Previous
+        </button>
+        <span className="pd-muted mono">
+          Page {page + 1} / {pageCount} · {total.toLocaleString()} rows
+        </span>
+        <button
+          type="button"
+          className="plist-upload-btn"
+          disabled={page + 1 >= pageCount || loading}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}

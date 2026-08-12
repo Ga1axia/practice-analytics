@@ -9,7 +9,10 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "seed": "tsx scripts/extract-and-seed.ts",
-    "dev:api": "tsx scripts/local-api.ts"
+    "dev:api": "tsx scripts/local-api.ts",
+    "test": "tsx --test src/lib/staffingDelivery.test.ts src/lib/scheduleEnsure.test.ts",
+    "import:time-entries": "tsx scripts/import-time-entries.ts",
+    "seed:time-entries-json": "tsx scripts/seed-time-entries-from-json.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",

@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   chatViewActionHasEffect,
   looksLikeViewCommand,
@@ -20,21 +25,59 @@ const SHEET_LABELS: Record<SheetId, string> = {
   s3: 'Financial & A/R',
   s4: 'Project Dashboard',
   s5: 'Project List',
+  s6: 'Staffing',
 };
+
+function defaultPanelPos() {
+  const w = 380;
+  const h = 520;
+  const top = 72;
+  return {
+    x: Math.max(16, window.innerWidth - w - 20),
+    y: Math.max(16, Math.min(top, window.innerHeight - h - 16)),
+  };
+}
 
 export function FloatingChat({
   sheet,
   data,
   filters,
   onViewAction,
+  open: openProp,
+  onOpenChange,
 }: {
   sheet: SheetId;
   data?: DashboardData | null;
   filters?: Record<string, string>;
   onViewAction?: (action: ChatViewAction) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const isDemo = useDemoMode();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function setOpen(next: boolean | ((prev: boolean) => boolean)) {
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const value = typeof next === 'function' ? next(openRef.current) : next;
+    if (!value) {
+      inputRef.current?.blur();
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    }
+    onOpenChange?.(value);
+    if (openProp === undefined) setUncontrolledOpen(value);
+    requestAnimationFrame(() => {
+      window.scrollTo(scrollX, scrollY);
+    });
+  }
+
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
@@ -51,21 +94,35 @@ export function FloatingChat({
     sx: number;
     sy: number;
   } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const w = 360;
-    const h = 480;
-    setPos({
-      x: Math.max(16, window.innerWidth - w - 24),
-      y: Math.max(16, window.innerHeight - h - 24),
-    });
+    setPos(defaultPanelPos());
   }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      e.preventDefault();
+      setOpen((prev) => !prev);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onOpenChange, openProp]);
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [msgs, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const t = window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: true });
+      window.scrollTo(scrollX, scrollY);
+    }, 40);
+    return () => window.clearTimeout(t);
+  }, [open]);
 
   function onPointerDown(e: ReactPointerEvent) {
     if ((e.target as HTMLElement).closest('button, input, textarea, a')) return;
@@ -171,11 +228,10 @@ export function FloatingChat({
           : 'The assistant is temporarily unavailable. Please try again later.');
 
       if (applied?.label) {
-        // Prefer a short filter confirmation; append AI summary when useful
-        const isStub = /ANTHROPIC_API_KEY|isn't configured|stub|Claude API error/i.test(answer);
-        answer = isStub
-          ? applied.label
-          : `${applied.label}\n\n${answer}`;
+        const isStub = /ANTHROPIC_API_KEY|isn't configured|stub|Claude API error/i.test(
+          answer,
+        );
+        answer = isStub ? applied.label : `${applied.label}\n\n${answer}`;
       }
 
       setMsgs((m) => [...m, { role: 'assistant', text: answer }]);
@@ -197,18 +253,7 @@ export function FloatingChat({
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="float-chat-launch"
-        onClick={() => setOpen(true)}
-        aria-label="Open AI chat"
-      >
-        Ask AI
-      </button>
-    );
-  }
+  if (!open) return null;
 
   return (
     <div
@@ -223,7 +268,9 @@ export function FloatingChat({
       <div className="float-chat-head">
         <div>
           <div className="float-chat-title">Ask the database</div>
-          <div className="float-chat-sub mono">{SHEET_LABELS[sheet]} · drag to move</div>
+          <div className="float-chat-sub mono">
+            {SHEET_LABELS[sheet]} · ⌘K to close · drag to move
+          </div>
         </div>
         <button type="button" className="float-chat-close" onClick={() => setOpen(false)}>
           ✕
@@ -241,7 +288,11 @@ export function FloatingChat({
             />
           </div>
         ))}
-        {busy ? <div className="float-chat-bubble assistant"><i>Searching…</i></div> : null}
+        {busy ? (
+          <div className="float-chat-bubble assistant">
+            <i>Searching…</i>
+          </div>
+        ) : null}
       </div>
       <div className="float-chat-chips">
         {[
@@ -258,6 +309,7 @@ export function FloatingChat({
       </div>
       <div className="float-chat-input">
         <input
+          ref={inputRef}
           type="text"
           value={q}
           disabled={busy}
@@ -272,5 +324,30 @@ export function FloatingChat({
         </button>
       </div>
     </div>
+  );
+}
+
+/** Navbar control — opens Ask AI (also ⌘K / Ctrl+K). */
+export function AskAiNavButton({
+  open,
+  onClick,
+}: {
+  open: boolean;
+  onClick: () => void;
+}) {
+  const isMac =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  return (
+    <button
+      type="button"
+      className={`ask-ai-nav-btn${open ? ' on' : ''}`}
+      onClick={onClick}
+      aria-label="Ask AI"
+      aria-pressed={open}
+      title={isMac ? 'Ask AI (⌘K)' : 'Ask AI (Ctrl+K)'}
+    >
+      <span>Ask AI</span>
+      <kbd className="ask-ai-kbd mono">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+    </button>
   );
 }

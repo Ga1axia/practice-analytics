@@ -1,7 +1,9 @@
 import {
+  isCoreBilledStatus,
   mapBqeContractType,
   mapBqeStatus,
   type BqeEmployee,
+  type BqeExpenseEntry,
   type BqeInvoice,
   type BqeProject,
   type BqeTimeEntry,
@@ -59,9 +61,36 @@ export type CompanyMonthlyInsert = {
   bill_hours: number;
   nb_hours: number;
   total_hours: number;
+  /** Network-days × 8 × employees that month (before PTO). */
+  capacity_hours: number;
+  /** Capacity minus PTO|Sick — efficiency denominator (matches firm Std Hrs). */
   standard_hours: number;
   efficiency: number;
+  client_nb_hours: number;
+  mbd_hours: number;
+  pto_sick_hours: number;
+  others_nb_hours: number;
+  probono_hours: number;
 };
+
+/** Classify non-billable time into Power BI–style buckets. */
+export function classifyNbHours(
+  projectLabel: string | null | undefined,
+  activityLabel?: string | null,
+): 'clientNb' | 'mbd' | 'ptoSick' | 'probono' | 'others' {
+  const text = `${projectLabel || ''} ${activityLabel || ''}`.toLowerCase();
+  if (/pro\s*bono|probono/.test(text)) return 'probono';
+  if (/pto|sick|vacation|holiday|time off/.test(text)) return 'ptoSick';
+  if (/potential client|client interaction|client hrs/.test(text)) return 'clientNb';
+  if (
+    /business development|\bmbd\b|marketing|sales & marketing|proposal|contracts/.test(
+      text,
+    )
+  ) {
+    return 'mbd';
+  }
+  return 'others';
+}
 
 export type ArClientInsert = {
   client: string;
@@ -108,9 +137,30 @@ export type RosterInsert = {
 type MoneyHours = {
   spentHours: number;
   billedHours: number;
-  earned: number;
+  /** CORE Spent: billable time/expense value (billed + unbilled WIP). */
+  spent: number;
+  /** CORE Billed: value already on invoices (from billStatus / invoice lines). */
+  billed: number;
   cost: number;
 };
+
+function timeBillValue(te: BqeTimeEntry): number {
+  const hours = Number(te.clientHours ?? te.actualHours) || 0;
+  if (!hours) return 0;
+  const rate = Number(te.billRate) || 0;
+  const wud = Number(te.wudMultiplier);
+  const mult = Number.isFinite(wud) && wud > 0 ? wud : 1;
+  return hours * rate * mult;
+}
+
+function expenseBillValue(e: BqeExpenseEntry): number {
+  const charge = Number(e.chargeAmount);
+  if (Number.isFinite(charge) && charge !== 0) return charge;
+  const units = Number(e.units) || 0;
+  const cost = Number(e.costRate) || 0;
+  const markup = Number(e.markup) || 0;
+  return units * cost * (1 + markup / 100);
+}
 
 function displayOf(p: BqeProject): string {
   return (p.displayName || p.name || p.code || 'Untitled').trim() || 'Untitled';
@@ -177,7 +227,7 @@ function ageBucket(invoiceDate: string | null | undefined, today: Date): keyof P
 }
 
 function emptyMoney(): MoneyHours {
-  return { spentHours: 0, billedHours: 0, earned: 0, cost: 0 };
+  return { spentHours: 0, billedHours: 0, spent: 0, billed: 0, cost: 0 };
 }
 
 export type MappedProjects = {
@@ -185,21 +235,84 @@ export type MappedProjects = {
   idToKey: Map<string, string>;
   /** CORE id → parent CORE id (for rolling phase → root when needed) */
   idToParentId: Map<string, string | null>;
+  /** CORE project/phase ids dropped entirely (no projects, hours, or money). */
+  excludedIds: Set<string>;
+  excludedCount: number;
 };
+
+/** Drop test + Internal Office from sync entirely (projects, hours, spent/billed). */
+export function isExcludedSyncProject(
+  p: Pick<BqeProject, 'name' | 'displayName' | 'code' | 'client' | 'phaseName' | 'phaseDescription'>,
+): boolean {
+  const client = (p.client || '').trim();
+  const blob = [
+    client,
+    p.name,
+    p.displayName,
+    p.code,
+    p.phaseName,
+    p.phaseDescription,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (/internal\s*office/.test(blob)) return true;
+  if (/^client\s*test$/i.test(client) || /\bclient\s*test\b/.test(blob)) return true;
+  if (/\b(project\s*test|mda\s*test|test\s*project)\b/.test(blob)) return true;
+  if (/\b00-?test\b|\b01-?test\b/.test(blob)) return true;
+  if (/template(\s|-)*(base|fixed)/.test(blob)) return true;
+  // Bare "test" in name/code (avoid matching words like "latest")
+  if (/(^|[\s\-_/])test([\s\-_/]|$)/.test(blob)) return true;
+  return false;
+}
+
+function isExcludedEntryLabel(
+  projectLabel: string | null | undefined,
+  clientLabel?: string | null,
+): boolean {
+  return isExcludedSyncProject({
+    name: projectLabel || '',
+    displayName: projectLabel || '',
+    client: clientLabel || '',
+    code: null,
+    phaseName: null,
+    phaseDescription: null,
+  });
+}
 
 export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
   const byId = new Map(projects.map((p) => [p.id, p]));
   const used = new Set<string>();
   const idToKey = new Map<string, string>();
   const idToParentId = new Map<string, string | null>();
+  const excludedIds = new Set<string>();
 
   const roots = projects.filter((p) => !p.parentId || !byId.has(p.parentId));
   const phases = projects.filter((p) => p.parentId && byId.has(p.parentId));
+
+  for (const p of roots) {
+    if (isExcludedSyncProject(p)) excludedIds.add(p.id);
+  }
+  // Walk until stable so nested phases under an excluded parent are dropped too.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const p of phases) {
+      if (excludedIds.has(p.id)) continue;
+      const parentExcluded = !!(p.parentId && excludedIds.has(p.parentId));
+      if (parentExcluded || isExcludedSyncProject(p)) {
+        excludedIds.add(p.id);
+        changed = true;
+      }
+    }
+  }
 
   const rows: ProjectInsert[] = [];
   let sort = 0;
 
   for (const p of roots) {
+    if (excludedIds.has(p.id)) continue;
     const key = allocateUnique(displayOf(p), p.id, used);
     idToKey.set(p.id, key);
     idToParentId.set(p.id, null);
@@ -233,8 +346,11 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
   }
 
   for (const p of phases) {
+    if (excludedIds.has(p.id)) continue;
     const parent = byId.get(p.parentId!)!;
-    const parentKey = idToKey.get(parent.id) || displayOf(parent);
+    if (excludedIds.has(parent.id)) continue;
+    const parentKey = idToKey.get(parent.id);
+    if (!parentKey) continue;
     const phaseName = (p.phaseDescription || p.phaseName || displayOf(p)).trim() || 'Phase';
     const base = `${parentKey} - ${phaseName}`;
     const key = allocateUnique(base, p.id, used);
@@ -273,7 +389,13 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     });
   }
 
-  return { rows, idToKey, idToParentId };
+  return {
+    rows,
+    idToKey,
+    idToParentId,
+    excludedIds,
+    excludedCount: excludedIds.size,
+  };
 }
 
 function resolveProjectKey(
@@ -288,6 +410,7 @@ export function applyTimeAndInvoices(
   mapped: MappedProjects,
   timeEntries: BqeTimeEntry[],
   invoices: BqeInvoice[],
+  expenseEntries: BqeExpenseEntry[] = [],
 ): {
   projects: ProjectInsert[];
   empMonthly: EmpMonthlyInsert[];
@@ -300,35 +423,73 @@ export function applyTimeAndInvoices(
   clientMonthlyBilled: ClientMonthlyBilledInsert[];
   stats: {
     timeEntries: number;
+    expenseEntries: number;
     invoices: number;
     matchedTime: number;
+    matchedExpenses: number;
     matchedInvoiceLines: number;
   };
 } {
-  const { rows, idToKey } = mapped;
+  const { rows, idToKey, excludedIds } = mapped;
   const byKey = new Map(rows.map((r) => [r.project, { ...r }]));
 
   const projMoney = new Map<string, MoneyHours>();
-  const empMonth = new Map<string, { bill: number; nb: number }>();
-  const companyMonth = new Map<string, { bill: number; nb: number }>();
+  const empMonth = new Map<string, { bill: number; nb: number; pto: number }>();
+  type MonthAgg = {
+    bill: number;
+    nb: number;
+    clientNb: number;
+    mbd: number;
+    ptoSick: number;
+    others: number;
+    probono: number;
+  };
+  const emptyMonth = (): MonthAgg => ({
+    bill: 0,
+    nb: 0,
+    clientNb: 0,
+    mbd: 0,
+    ptoSick: 0,
+    others: 0,
+    probono: 0,
+  });
+  const companyMonth = new Map<string, MonthAgg>();
+
+  function isExcludedEntry(
+    projectId: string | null | undefined,
+    projectLabel: string | null | undefined,
+    clientLabel?: string | null,
+  ): boolean {
+    if (projectId && excludedIds.has(projectId)) return true;
+    if (isExcludedEntryLabel(projectLabel, clientLabel)) return true;
+    return false;
+  }
 
   let matchedTime = 0;
+  let skippedExcludedTime = 0;
   for (const te of timeEntries) {
     const hours = Number(te.actualHours) || 0;
     if (!hours) continue;
+    if (isExcludedEntry(te.projectId, te.project, te.client)) {
+      skippedExcludedTime += 1;
+      continue;
+    }
     const key = resolveProjectKey(te.projectId, idToKey);
-    const billable = !!te.billable && !te.isWrittenOff;
-    const billRate = Number(te.billRate) || 0;
+    const billable = !!te.billable && !te.isWrittenOff && !te.extra;
     const costRate = Number(te.costRate) || 0;
-    const earned = billable ? hours * billRate : 0;
+    const billValue = billable ? timeBillValue(te) : 0;
     const cost = hours * costRate;
 
     if (key) {
       matchedTime += 1;
       const m = projMoney.get(key) || emptyMoney();
       m.spentHours += hours;
-      if (billable) m.billedHours += hours;
-      m.earned += earned;
+      if (billable) {
+        m.billedHours += Number(te.clientHours ?? te.actualHours) || hours;
+        // Spent = billed + unbilled WIP (CORE project list)
+        m.spent += billValue;
+        if (isCoreBilledStatus(te.billStatus)) m.billed += billValue;
+      }
       m.cost += cost;
       projMoney.set(key, m);
     }
@@ -337,16 +498,53 @@ export function applyTimeAndInvoices(
     const month = monthKey(te.date);
     if (month) {
       const ek = `${emp}||${month}`;
-      const cur = empMonth.get(ek) || { bill: 0, nb: 0 };
+      const cur = empMonth.get(ek) || { bill: 0, nb: 0, pto: 0 };
       if (billable) cur.bill += hours;
-      else cur.nb += hours;
+      else {
+        cur.nb += hours;
+        const label = key || te.project || '';
+        const bucket = classifyNbHours(label, te.activity);
+        if (bucket === 'ptoSick') cur.pto += hours;
+      }
       empMonth.set(ek, cur);
 
-      const cm = companyMonth.get(month) || { bill: 0, nb: 0 };
+      const cm = companyMonth.get(month) || emptyMonth();
       if (billable) cm.bill += hours;
-      else cm.nb += hours;
+      else {
+        cm.nb += hours;
+        const label = key || te.project || '';
+        const bucket = classifyNbHours(label, te.activity);
+        if (bucket === 'clientNb') cm.clientNb += hours;
+        else if (bucket === 'mbd') cm.mbd += hours;
+        else if (bucket === 'ptoSick') cm.ptoSick += hours;
+        else if (bucket === 'probono') cm.probono += hours;
+        else cm.others += hours;
+      }
       companyMonth.set(month, cm);
     }
+  }
+
+  let matchedExpenses = 0;
+  let skippedExcludedExpenses = 0;
+  for (const ee of expenseEntries) {
+    if (ee.isWrittenOff) continue;
+    if (isExcludedEntry(ee.projectId, ee.project)) {
+      skippedExcludedExpenses += 1;
+      continue;
+    }
+    const key = resolveProjectKey(ee.projectId, idToKey);
+    if (!key) continue;
+    matchedExpenses += 1;
+    const billable = !!ee.billable;
+    const value = billable ? expenseBillValue(ee) : 0;
+    const cost = (Number(ee.units) || 0) * (Number(ee.costRate) || 0);
+    const m = projMoney.get(key) || emptyMoney();
+    if (billable) {
+      m.spent += value;
+      if (isCoreBilledStatus(ee.billStatus)) m.billed += value;
+    }
+    m.cost += cost;
+    projMoney.set(key, m);
   }
 
   const projBilled = new Map<string, number>();
@@ -453,12 +651,15 @@ export function applyTimeAndInvoices(
   }
 
   // Apply money/hours onto project rows
+  // Spent = CORE spent (billable WIP value). Billed = invoice lines when available,
+  // otherwise time/expense entries with billStatus = Billed.
+  const useInvoiceBilled = invoices.length > 0;
   for (const [key, row] of byKey) {
     const mh = projMoney.get(key) || emptyMoney();
-    const billed = projBilled.get(key) || 0;
+    const invoiceBilled = projBilled.get(key) || 0;
     const ar = projAr.get(key) || 0;
-    // Spent ≈ earned fees from timecards (burn against contract); fall back to billed
-    const spent = mh.earned > 0 ? mh.earned : billed;
+    const spent = mh.spent;
+    const billed = useInvoiceBilled ? invoiceBilled : mh.billed;
     const cost = mh.cost;
     const profit = billed - cost;
     const contract = row.contract || 0;
@@ -520,7 +721,7 @@ export function applyTimeAndInvoices(
       nb_hours: v.nb,
       total_hours: total,
       efficiency,
-      pto_hours: 0,
+      pto_hours: v.pto,
       network_days,
       standard_hours,
     });
@@ -549,7 +750,9 @@ export function applyTimeAndInvoices(
       const network_days = networkDaysInMonth(month);
       // Approximate firm capacity from distinct employees that month
       const empCount = empMonthly.filter((e) => e.month === month).length || 1;
-      const standard_hours = network_days * 8 * empCount;
+      const capacity_hours = network_days * 8 * empCount;
+      // Firm Std Hrs (Power BI): capacity minus PTO|Sick
+      const standard_hours = Math.max(0, capacity_hours - v.ptoSick);
       const bill_hours = v.bill;
       const nb_hours = v.nb;
       return {
@@ -557,8 +760,14 @@ export function applyTimeAndInvoices(
         bill_hours,
         nb_hours,
         total_hours: bill_hours + nb_hours,
+        capacity_hours,
         standard_hours,
         efficiency: standard_hours > 0 ? bill_hours / standard_hours : 0,
+        client_nb_hours: v.clientNb,
+        mbd_hours: v.mbd,
+        pto_sick_hours: v.ptoSick,
+        others_nb_hours: v.others,
+        probono_hours: v.probono,
       };
     },
   );
@@ -592,8 +801,10 @@ export function applyTimeAndInvoices(
     clientMonthlyBilled,
     stats: {
       timeEntries: timeEntries.length,
+      expenseEntries: expenseEntries.length,
       invoices: invoices.length,
       matchedTime,
+      matchedExpenses,
       matchedInvoiceLines,
     },
   };

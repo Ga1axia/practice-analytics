@@ -1,3 +1,4 @@
+import { phaseDisplayName } from './phaseAbbrev';
 import { rowOutstanding } from './receivable';
 import type { ProjectRow } from './types';
 
@@ -31,7 +32,7 @@ export type ClientNode = {
 };
 
 function projectCode(name: string): string | null {
-  const m = name.match(/(\d{2}-\d{3})\s*$/);
+  const m = name.match(/\b(\d{2}-\d{3})\b/);
   return m ? m[1] : null;
 }
 
@@ -111,7 +112,7 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
     };
 
     for (const ph of phaseRows) {
-      const label = (ph.phase && ph.phase !== 'Other' ? ph.phase : null) || ph.project;
+      const label = phaseDisplayName(ph.phase, ph.project);
       const parentKey =
         ph.parent_project ||
         [...projectMap.keys()].find((k) => ph.project.startsWith(projectTitle(k))) ||
@@ -139,7 +140,7 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
     if (!projects.length && phaseRows.length) {
       const phases = phaseRows.map((ph) => ({
         row: ph,
-        label: (ph.phase && ph.phase !== 'Other' ? ph.phase : null) || ph.project,
+        label: phaseDisplayName(ph.phase, ph.project),
       }));
       projects.push({
         key: `${client}::__all`,

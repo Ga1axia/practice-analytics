@@ -97,7 +97,13 @@ create table if not exists public.pa_company_monthly (
   nb_hours double precision default 0,
   total_hours double precision default 0,
   standard_hours double precision default 0,
-  efficiency double precision default 0
+  efficiency double precision default 0,
+  capacity_hours double precision default 0,
+  client_nb_hours double precision default 0,
+  mbd_hours double precision default 0,
+  pto_sick_hours double precision default 0,
+  others_nb_hours double precision default 0,
+  probono_hours double precision default 0
 );
 
 create table if not exists public.pa_project_monthly_billed (
@@ -207,3 +213,15 @@ create index if not exists pa_schedule_rows_schedule_idx
 -- Demo employees (see migration pa_employee_demos_arnita_nini_zhengrui):
 --   arnita@ / nini@ / zhengrui@ mdesigns.test → DemoEmployee2026!
 --   RLS: employees see managed rows + parent project headers they work under
+
+-- ---------------------------------------------------------------------------
+-- Staffing & Active Workload (see migration 20260811_staffing_workload.sql)
+-- Admin-only via public.pa_is_admin() → pa_profiles.role = 'admin'
+-- ---------------------------------------------------------------------------
+-- pa_bqe_sync_runs — historical/incremental/dry_run audit
+-- pa_time_entries — persisted BQE CORE time entries (no billRate/costRate cols)
+-- pa_employee_capacity — weekly capacity / role / discipline / skills
+-- pa_project_staffing_profiles — planning project metadata
+-- pa_project_phase_staffing — planning phases
+-- pa_employee_phase_allocations — weekly planned hours (unique emp+phase+week)
+-- pa_employee_time_off — day-based PTO/holiday/training/other

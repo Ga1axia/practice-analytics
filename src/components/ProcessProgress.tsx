@@ -10,6 +10,10 @@ type PhaseState = 'done' | 'current' | 'upcoming';
 
 function stateFor(i: number, currentIdx: number): PhaseState {
   if (currentIdx < 0) return 'upcoming';
+  // Additional Services is a catchall, not the end of the main sequence
+  if (PROCESS_PHASES[currentIdx]?.id === 'additional') {
+    return PROCESS_PHASES[i]?.id === 'additional' ? 'current' : 'upcoming';
+  }
   if (i < currentIdx) return 'done';
   if (i === currentIdx) return 'current';
   return 'upcoming';
@@ -67,17 +71,23 @@ export function ProcessProgress({ projectPhase }: { projectPhase: string | null 
     if (currentIdx >= 0) setOpenId(PROCESS_PHASES[currentIdx].id);
   }, [currentIdx]);
 
+  const isAdditional = currentIdx >= 0 && PROCESS_PHASES[currentIdx]?.id === 'additional';
+  const coreCount = PROCESS_PHASES.filter((p) => p.id !== 'additional').length;
   const progressPct =
-    currentIdx < 0 ? 0 : Math.round(((currentIdx + 1) / PROCESS_PHASES.length) * 100);
+    currentIdx < 0 || isAdditional
+      ? 0
+      : Math.round(((currentIdx + 1) / coreCount) * 100);
 
   return (
     <div className="process-monitor">
       <div className="customer-progress-label">
         <span>Architectural process</span>
         <span className="mono">
-          {currentIdx >= 0
-            ? `Phase ${currentIdx + 1} of ${PROCESS_PHASES.length} · ${progressPct}%`
-            : 'Phase not mapped yet'}
+          {isAdditional
+            ? 'Additional Services'
+            : currentIdx >= 0
+              ? `Phase ${currentIdx + 1} of ${coreCount} · ${progressPct}%`
+              : 'Phase not mapped yet'}
         </span>
       </div>
 

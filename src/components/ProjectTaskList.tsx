@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AddScheduleTaskForm } from './AddScheduleTaskForm';
 import { ScheduleDateInput } from './ScheduleDateInput';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from '../lib/architecturalProcess';
 import {
+  lifecycleStatusLabel,
   setTaskComplete,
   sortEmployeeTasks,
+  taskLifecycleStatus,
   tasksFromScheduleRows,
   type EmployeeTask,
 } from '../lib/employeeTasks';
@@ -13,9 +15,30 @@ import {
   deleteScheduleRow,
   phaseTitlesFromRows,
   renameScheduleTask,
+  setScheduleAssignee,
   setScheduleRowDates,
 } from '../lib/scheduleMutations';
 import type { ScheduleRow } from '../lib/scheduleTypes';
+
+function statusClass(task: EmployeeTask) {
+  const s = taskLifecycleStatus(task);
+  if (s === 'not_started') return 'not-started';
+  return s;
+}
+
+function PencilIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function phaseStyle(phase: string): { background: string; color: string } {
   const idx = matchProcessPhaseIndex(phase);
@@ -33,7 +56,10 @@ export function ProjectTaskList({
   employeeName,
   rows,
   writable = true,
+  canAssign = false,
+  assigneeOptions = [],
   onRowsChange,
+  onStartSchedule,
 }: {
   projectKey: string;
   projectTitle: string;
@@ -41,19 +67,30 @@ export function ProjectTaskList({
   employeeName: string;
   rows: ScheduleRow[];
   writable?: boolean;
+  canAssign?: boolean;
+  assigneeOptions?: string[];
   onRowsChange?: (rows: ScheduleRow[]) => void;
+  /** Shown when there are zero checklist tasks. */
+  onStartSchedule?: () => void;
 }) {
-  const [view, setView] = useState<'open' | 'all' | 'done'>('open');
+  const [view, setView] = useState<'open' | 'all' | 'done'>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localRows, setLocalRows] = useState(rows);
   const [openPhases, setOpenPhases] = useState<Set<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
   const [addPhase, setAddPhase] = useState('');
+  const nameInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const expandedOnce = useRef(false);
 
   useEffect(() => {
     setLocalRows(rows);
   }, [rows]);
+
+  useEffect(() => {
+    expandedOnce.current = false;
+    setOpenPhases(new Set());
+  }, [projectKey]);
 
   const scheduleId = localRows[0]?.schedule_id || '';
   const phaseOptions = useMemo(() => phaseTitlesFromRows(localRows), [localRows]);
@@ -69,6 +106,12 @@ export function ProjectTaskList({
     [projectKey, projectTitle, clientName, localRows, employeeName, writable],
   );
 
+  const counts = useMemo(() => {
+    const open = tasks.filter((t) => !t.complete).length;
+    const done = tasks.filter((t) => t.complete).length;
+    return { open, done, all: tasks.length };
+  }, [tasks]);
+
   const filtered = useMemo(() => {
     let list = tasks;
     if (view === 'open') list = list.filter((t) => !t.complete);
@@ -77,20 +120,26 @@ export function ProjectTaskList({
   }, [tasks, view]);
 
   const byPhase = useMemo(() => {
-    const map = new Map<string, EmployeeTask[]>();
+    const map = new Map<string, { title: string; list: EmployeeTask[] }>();
     for (const t of filtered) {
-      const list = map.get(t.phase) || [];
-      list.push(t);
-      map.set(t.phase, list);
+      const id = t.phaseId || t.phase;
+      const entry = map.get(id) || { title: t.phase, list: [] };
+      entry.list.push(t);
+      map.set(id, entry);
     }
-    return [...map.entries()];
+    return [...map.entries()].map(([id, entry]) => ({
+      id,
+      phase: entry.title,
+      list: entry.list,
+    }));
   }, [filtered]);
 
-  const counts = useMemo(() => {
-    const open = tasks.filter((t) => !t.complete).length;
-    const done = tasks.filter((t) => t.complete).length;
-    return { open, done, all: tasks.length };
-  }, [tasks]);
+  // Expand all phases once per project so completed tasks are visible immediately.
+  useEffect(() => {
+    if (expandedOnce.current || !byPhase.length) return;
+    expandedOnce.current = true;
+    setOpenPhases(new Set(byPhase.map((g) => g.phase)));
+  }, [byPhase]);
 
   function togglePhase(phase: string) {
     setOpenPhases((prev) => {
@@ -102,7 +151,7 @@ export function ProjectTaskList({
   }
 
   function expandAll() {
-    setOpenPhases(new Set(byPhase.map(([phase]) => phase)));
+    setOpenPhases(new Set(byPhase.map((g) => g.phase)));
   }
 
   function collapseAll() {
@@ -167,15 +216,14 @@ export function ProjectTaskList({
       rowId: task.rowId,
       targetStart: field === 'target_start' ? value : undefined,
       targetEnd: field === 'target_end' ? value : undefined,
+      rows: localRows,
     });
     setBusyId(null);
     if (!res.ok) {
       setError(res.error);
       return;
     }
-    commitRows(
-      localRows.map((r) => (r.id === task.rowId ? { ...r, [field]: value } : r)),
-    );
+    commitRows(res.data.rows);
   }
 
   async function onDelete(task: EmployeeTask) {
@@ -190,6 +238,45 @@ export function ProjectTaskList({
     }
     commitRows(localRows.filter((r) => r.id !== task.rowId));
   }
+
+  function beginEdit(task: EmployeeTask) {
+    window.requestAnimationFrame(() => {
+      const el = nameInputRefs.current.get(task.id);
+      el?.focus();
+      el?.select();
+    });
+  }
+
+  async function onAssigneeChange(task: EmployeeTask, assigneeName: string) {
+    if (!canAssign || !task.writable || busyId) return;
+    if (assigneeName === task.assigneeName) return;
+    setBusyId(task.id);
+    setError(null);
+    const res = await setScheduleAssignee({
+      projectKey,
+      rowId: task.rowId,
+      assigneeName,
+    });
+    setBusyId(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    commitRows(
+      localRows.map((r) =>
+        r.id === task.rowId ? { ...r, assignee_name: assigneeName } : r,
+      ),
+    );
+  }
+
+  const assignNames = useMemo(() => {
+    const set = new Set(assigneeOptions);
+    if (employeeName) set.add(employeeName);
+    for (const t of tasks) {
+      if (t.assigneeName) set.add(t.assigneeName);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [assigneeOptions, employeeName, tasks]);
 
   return (
     <div className="emp-project-tasks">
@@ -251,6 +338,7 @@ export function ProjectTaskList({
             phaseOptions={phaseOptions}
             rows={localRows}
             defaultPhase={addPhase}
+            assigneeOptions={canAssign ? assignNames : undefined}
             onCancel={() => setAdding(false)}
             onCreated={(row) => {
               setAdding(false);
@@ -266,18 +354,35 @@ export function ProjectTaskList({
       {error ? <p className="plist-upload-err">{error}</p> : null}
 
       {!tasks.length && !adding ? (
-        <p className="pd-muted">No tasks on this project schedule yet.</p>
+        <div className="emp-task-empty-start">
+          <p className="pd-muted">No tasks on this project schedule yet.</p>
+          {onStartSchedule ? (
+            <button type="button" className="emp-primary-btn" onClick={onStartSchedule}>
+              Start schedule
+            </button>
+          ) : null}
+        </div>
       ) : !filtered.length && !adding ? (
-        <p className="pd-muted">No tasks in this view.</p>
+        <p className="pd-muted">
+          No tasks in this view.
+          {counts.all > 0 && view !== 'all' ? (
+            <>
+              {' '}
+              <button type="button" className="sched-text-btn" onClick={() => setView('all')}>
+                Show all ({counts.all})
+              </button>
+            </>
+          ) : null}
+        </p>
       ) : (
-        byPhase.map(([phase, list]) => {
+        byPhase.map(({ id, phase, list }) => {
           const style = phaseStyle(phase);
           const expanded = openPhases.has(phase);
           const openInPhase = list.filter((t) => !t.complete).length;
           const nextDue = list.find((t) => !t.complete && t.dueRaw)?.dueRaw;
           return (
             <div
-              key={phase}
+              key={id}
               className={`emp-project-task-phase${expanded ? ' open' : ' folded'}`}
             >
               <button
@@ -319,6 +424,10 @@ export function ProjectTaskList({
                               key={`${t.id}:${t.task}`}
                               disabled={busyId === t.id}
                               aria-label="Task name"
+                              ref={(el) => {
+                                if (el) nameInputRefs.current.set(t.id, el);
+                                else nameInputRefs.current.delete(t.id);
+                              }}
                               onBlur={(e) => void onRename(t, e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
@@ -337,10 +446,15 @@ export function ProjectTaskList({
                                   value={t.startRaw}
                                   disabled={busyId === t.id}
                                   ariaLabel={`Start for ${t.task}`}
+                                  autofilled={t.datesAutofilled && Boolean(t.startRaw)}
                                   onCommit={(v) => void onDateChange(t, 'target_start', v)}
                                 />
                               ) : (
-                                <span className="mono soft">{t.startRaw || '—'}</span>
+                                <span
+                                  className={`mono soft${t.datesAutofilled && t.startRaw ? ' emp-date-autofilled' : ''}`}
+                                >
+                                  {t.startRaw || '—'}
+                                </span>
                               )}
                             </label>
                             <label>
@@ -350,11 +464,41 @@ export function ProjectTaskList({
                                   value={t.dueRaw}
                                   disabled={busyId === t.id}
                                   ariaLabel={`Due for ${t.task}`}
+                                  autofilled={t.datesAutofilled && Boolean(t.dueRaw)}
                                   onCommit={(v) => void onDateChange(t, 'target_end', v)}
                                 />
                               ) : (
-                                <span className="mono soft">{t.dueRaw || '—'}</span>
+                                <span
+                                  className={`mono soft${t.datesAutofilled && t.dueRaw ? ' emp-date-autofilled' : ''}`}
+                                >
+                                  {t.dueRaw || '—'}
+                                </span>
                               )}
+                            </label>
+                            <label>
+                              <span>Assignee</span>
+                              {canAssign && t.writable ? (
+                                <select
+                                  className="emp-task-assignee-select"
+                                  value={t.assigneeName}
+                                  disabled={busyId === t.id}
+                                  aria-label={`Assignee for ${t.task}`}
+                                  onChange={(e) => void onAssigneeChange(t, e.target.value)}
+                                >
+                                  <option value="">Unassigned</option>
+                                  {assignNames.map((n) => (
+                                    <option key={n} value={n}>
+                                      {n}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="mono soft">{t.assigneeName || '—'}</span>
+                              )}
+                            </label>
+                            <label>
+                              <span>Phase PM</span>
+                              <span className="mono soft">{t.phaseManagerName || '—'}</span>
                             </label>
                             <span className="mono soft">
                               {t.kind === 'subtask' ? 'Subtask' : 'Task'}
@@ -364,23 +508,35 @@ export function ProjectTaskList({
                             </span>
                           </div>
                         </div>
-                        <span
-                          className={`emp-task-status ${t.complete ? 'complete' : 'incomplete'}`}
-                        >
-                          {t.status}
-                        </span>
-                        {t.writable ? (
-                          <button
-                            type="button"
-                            className="emp-task-delete"
-                            disabled={busyId === t.id}
-                            title="Delete task"
-                            aria-label={`Delete ${t.task}`}
-                            onClick={() => void onDelete(t)}
-                          >
-                            ×
-                          </button>
-                        ) : null}
+                        <div className="emp-project-task-side">
+                          <span className={`emp-task-status ${statusClass(t)}`}>
+                            {lifecycleStatusLabel(taskLifecycleStatus(t))}
+                          </span>
+                          {t.writable ? (
+                            <div className="emp-task-actions">
+                              <button
+                                type="button"
+                                className="emp-task-edit"
+                                disabled={busyId === t.id}
+                                title="Edit task name"
+                                aria-label={`Edit ${t.task}`}
+                                onClick={() => beginEdit(t)}
+                              >
+                                <PencilIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className="emp-task-delete"
+                                disabled={busyId === t.id}
+                                title="Delete task"
+                                aria-label={`Delete ${t.task}`}
+                                onClick={() => void onDelete(t)}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </li>
                   ))}

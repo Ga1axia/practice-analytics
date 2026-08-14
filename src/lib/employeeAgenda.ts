@@ -73,6 +73,8 @@ export async function loadEmployeeAgenda(
         projectKey: p.key,
         clientName: p.clientName,
         title: p.title,
+        autoSeed: false,
+        autoDate: false,
       });
       let dbRows = ensured.rows;
       if (!dbRows.length && !ensured.error) {

@@ -1,6 +1,8 @@
+import { matchProcessPhaseIndex } from './architecturalProcess';
 import { buildDemoProjectDetail } from './demoProjectDetail';
 import { loadProjectSchedule } from './loadProjectSchedule';
 import type { ProjectNode } from './projectListHierarchy';
+import { isAutofilledAction } from './scheduleAutofill';
 import { patchCachedScheduleRow } from './scheduleCache';
 import { parseScheduleDate, startOfDay } from './scheduleDates';
 import { ensureProjectSchedule } from './scheduleEnsure';
@@ -10,6 +12,9 @@ import { supabase } from './supabase';
 
 export type TaskPriority = 'Important' | 'Medium' | 'Low';
 
+/** Derived schedule status shown in employee task views. */
+export type TaskLifecycleStatus = 'complete' | 'overdue' | 'not_started' | 'incomplete';
+
 export type EmployeeTask = {
   id: string;
   rowId: string;
@@ -18,6 +23,8 @@ export type EmployeeTask = {
   projectTitle: string;
   clientName: string;
   phase: string;
+  /** Stable section id for UI grouping (avoids duplicate phase-title keys). */
+  phaseId: string;
   kind: 'task' | 'subtask';
   task: string;
   startRaw: string;
@@ -26,24 +33,119 @@ export type EmployeeTask = {
   start: Date | null;
   due: Date | null;
   end: Date | null;
-  status: string;
+  status: TaskLifecycleStatus;
   complete: boolean;
   priority: TaskPriority;
-  mentionsEmployee: boolean;
+  assigneeName: string;
+  /** Project List manager for this schedule phase (falls back to project PM). */
+  phaseManagerName: string;
   /** Demo rows can't be written back to Supabase. */
   writable: boolean;
+  /** Target dates came from a schedule preset autofill. */
+  datesAutofilled: boolean;
 };
+
+const LIFECYCLE_ORDER: Record<TaskLifecycleStatus, number> = {
+  overdue: 0,
+  incomplete: 1,
+  not_started: 2,
+  complete: 3,
+};
+
+export function taskLifecycleStatus(
+  task: Pick<EmployeeTask, 'complete' | 'start' | 'due'>,
+  today: Date = startOfDay(new Date()),
+): TaskLifecycleStatus {
+  if (task.complete) return 'complete';
+  const t = today.getTime();
+  if (task.start && startOfDay(task.start).getTime() > t) return 'not_started';
+  if (task.due && startOfDay(task.due).getTime() < t) return 'overdue';
+  return 'incomplete';
+}
+
+/** True when the task is available to work (start date reached, or no start set). */
+export function taskHasStarted(
+  task: Pick<EmployeeTask, 'start'>,
+  today: Date = startOfDay(new Date()),
+): boolean {
+  if (!task.start) return true;
+  return startOfDay(task.start).getTime() <= today.getTime();
+}
+
+/** Days of past schedule activity kept in the employee "Current" filter. */
+export const CURRENT_TASK_LOOKBACK_DAYS = 7;
+
+/**
+ * True when a task belongs in the Current filter: its latest start/due/end
+ * is not older than `lookbackDays` before today. Undated tasks stay visible.
+ */
+export function taskInCurrentWindow(
+  task: Pick<EmployeeTask, 'start' | 'due' | 'end'>,
+  today: Date = startOfDay(new Date()),
+  lookbackDays: number = CURRENT_TASK_LOOKBACK_DAYS,
+): boolean {
+  const cutoff = startOfDay(today);
+  cutoff.setDate(cutoff.getDate() - lookbackDays);
+  const cutoffTs = cutoff.getTime();
+  const dates = [task.end, task.due, task.start].filter((d): d is Date => !!d);
+  if (!dates.length) return true;
+  const latest = Math.max(...dates.map((d) => startOfDay(d).getTime()));
+  return latest >= cutoffTs;
+}
+
+export function lifecycleStatusLabel(status: TaskLifecycleStatus): string {
+  if (status === 'not_started') return 'Not started';
+  if (status === 'complete') return 'Complete';
+  if (status === 'overdue') return 'Overdue';
+  return 'Incomplete';
+}
 
 export type TaskSortKey =
   | 'project'
   | 'phase'
+  | 'phaseManager'
   | 'complete'
   | 'priority'
   | 'task'
+  | 'assignee'
   | 'start'
   | 'due'
   | 'end'
   | 'status';
+
+/** Resolve Project List phase manager for a schedule section title. */
+export function resolvePhaseManager(
+  project: {
+    row?: { manager?: string | null } | null;
+    phases?: { label: string; row: { manager?: string | null; phase?: string | null } }[];
+  },
+  schedulePhaseTitle: string,
+): string {
+  const header = (project.row?.manager || '').trim();
+  const phases = project.phases || [];
+  if (!phases.length) return header;
+
+  const sectionIdx = matchProcessPhaseIndex(schedulePhaseTitle);
+  if (sectionIdx >= 0) {
+    const hit = phases.find(
+      (ph) => matchProcessPhaseIndex(ph.label || ph.row.phase || '') === sectionIdx,
+    );
+    const name = (hit?.row.manager || '').trim();
+    if (name) return name;
+  }
+
+  const n = schedulePhaseTitle.toLowerCase().trim();
+  if (n) {
+    const fuzzy = phases.find((ph) => {
+      const label = (ph.label || ph.row.phase || '').toLowerCase().trim();
+      return Boolean(label && (n.includes(label) || label.includes(n)));
+    });
+    const name = (fuzzy?.row.manager || '').trim();
+    if (name) return name;
+  }
+
+  return header;
+}
 
 const PRIORITY_KEY = 'pa-emp-task-priority-v1';
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
@@ -120,13 +222,6 @@ export function projectPillColor(projectKey: string): string {
   return PROJECT_PILL_COLORS[h % PROJECT_PILL_COLORS.length]!;
 }
 
-function mentionsName(task: string, employeeName: string): boolean {
-  const first = employeeName.trim().split(/\s+/)[0] || '';
-  if (first.length < 2) return false;
-  const re = new RegExp(`(^|[^a-z])${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`, 'i');
-  return re.test(task);
-}
-
 function fmtDate(d: Date | null): string {
   if (!d) return '';
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
@@ -167,6 +262,8 @@ export async function loadEmployeeTasks(
         projectKey: p.key,
         clientName: p.clientName,
         title: p.title,
+        autoSeed: false,
+        autoDate: false,
       });
       let dbRows = ensured.rows;
       if (!dbRows.length && !ensured.error) {
@@ -188,9 +285,11 @@ export async function loadEmployeeTasks(
           if (!label) continue;
 
           const { start, due, end } = rowDates(row);
-          const status = statusLabel(row);
-          const complete = isCompleteStatus(status);
+          const rawStatus = statusLabel(row);
+          const complete = isCompleteStatus(rawStatus);
           const priority = priorities[row.id] || inferPriority(due, complete);
+          const draft = { complete, start, due };
+          const status = taskLifecycleStatus(draft);
 
           tasks.push({
             id: `${p.key}:${row.id}`,
@@ -200,6 +299,7 @@ export async function loadEmployeeTasks(
             projectTitle: p.title,
             clientName: p.clientName,
             phase: section.title,
+            phaseId: section.id,
             kind: row.row_kind,
             task: label,
             startRaw: start ? fmtDate(start) : (row.target_start || '').trim(),
@@ -208,11 +308,13 @@ export async function loadEmployeeTasks(
             start,
             due,
             end,
-            status: complete ? 'Complete' : status || 'Incomplete',
+            status,
             complete,
             priority,
-            mentionsEmployee: mentionsName(label, employeeName),
+            assigneeName: (row.assignee_name || '').trim(),
+            phaseManagerName: resolvePhaseManager(p, section.title),
             writable,
+            datesAutofilled: isAutofilledAction(row.action),
           });
         }
       }
@@ -239,6 +341,11 @@ export function sortEmployeeTasks(
       case 'phase':
         cmp = a.phase.localeCompare(b.phase, undefined, { sensitivity: 'base' });
         break;
+      case 'phaseManager':
+        cmp = (a.phaseManagerName || '—').localeCompare(b.phaseManagerName || '—', undefined, {
+          sensitivity: 'base',
+        });
+        break;
       case 'complete':
         cmp = Number(a.complete) - Number(b.complete);
         break;
@@ -247,6 +354,11 @@ export function sortEmployeeTasks(
         break;
       case 'task':
         cmp = a.task.localeCompare(b.task, undefined, { sensitivity: 'base' });
+        break;
+      case 'assignee':
+        cmp = (a.assigneeName || '—').localeCompare(b.assigneeName || '—', undefined, {
+          sensitivity: 'base',
+        });
         break;
       case 'start':
         cmp = dateVal(a.start) - dateVal(b.start);
@@ -258,7 +370,7 @@ export function sortEmployeeTasks(
         cmp = dateVal(a.end) - dateVal(b.end);
         break;
       case 'status':
-        cmp = a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+        cmp = LIFECYCLE_ORDER[a.status] - LIFECYCLE_ORDER[b.status];
         break;
       default:
         cmp = 0;
@@ -294,9 +406,15 @@ export async function setTaskComplete(
 
 /** Build EmployeeTask rows for a single project from schedule rows (already loaded). */
 export function tasksFromScheduleRows(
-  project: { key: string; title: string; clientName: string },
+  project: {
+    key: string;
+    title: string;
+    clientName: string;
+    row?: { manager?: string | null } | null;
+    phases?: { label: string; row: { manager?: string | null; phase?: string | null } }[];
+  },
   rows: ScheduleRow[],
-  employeeName: string,
+  _employeeName: string,
   writable = true,
 ): EmployeeTask[] {
   const priorities = loadPriorityMap();
@@ -308,9 +426,10 @@ export function tasksFromScheduleRows(
       const label = (row.task || '').trim();
       if (!label) continue;
       const { start, due, end } = rowDates(row);
-      const status = statusLabel(row);
-      const complete = isCompleteStatus(status);
+      const rawStatus = statusLabel(row);
+      const complete = isCompleteStatus(rawStatus);
       const priority = priorities[row.id] || inferPriority(due, complete);
+      const status = taskLifecycleStatus({ complete, start, due });
       tasks.push({
         id: `${project.key}:${row.id}`,
         rowId: row.id,
@@ -319,6 +438,7 @@ export function tasksFromScheduleRows(
         projectTitle: project.title,
         clientName: project.clientName,
         phase: section.title,
+        phaseId: section.id,
         kind: row.row_kind,
         task: label,
         startRaw: start ? fmtDate(start) : (row.target_start || '').trim(),
@@ -327,11 +447,13 @@ export function tasksFromScheduleRows(
         start,
         due,
         end,
-        status: complete ? 'Complete' : status || 'Incomplete',
+        status,
         complete,
         priority,
-        mentionsEmployee: mentionsName(label, employeeName),
+        assigneeName: (row.assignee_name || '').trim(),
+        phaseManagerName: resolvePhaseManager(project, section.title),
         writable,
+        datesAutofilled: isAutofilledAction(row.action),
       });
     }
   }

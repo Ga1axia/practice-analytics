@@ -1150,7 +1150,7 @@
   {
     "sort_order": 82,
     "row_kind": "phase",
-    "task": "Interior Design (Schedule more defined once scope and timing of when we are starting is defined)",
+    "task": "Interior Design",
     "budget_remaining": "Active",
     "target_start": "See Interior Design Schedule",
     "target_end": "",
@@ -1164,7 +1164,7 @@
   {
     "sort_order": 83,
     "row_kind": "task",
-    "task": "Interior design (Takes 2-3 months typically)",
+    "task": "Interior design",
     "budget_remaining": "2/23/2026",
     "target_start": "",
     "target_end": "",

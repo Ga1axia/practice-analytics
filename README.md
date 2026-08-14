@@ -29,10 +29,24 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Role | Email | Password | Bound to |
 |------|-------|----------|----------|
 | Admin | `admin@mdesigns.test` | `DemoAdmin2026!` | — |
-| Employee | `arnita@mdesigns.test` | `DemoEmployee2026!` | Arnita Serri (her managed projects) |
-| Employee | `nini@mdesigns.test` | `DemoEmployee2026!` | Ni Ni (her managed projects) |
-| Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He (his managed projects) |
+| Employee | `arnita@mdesigns.test` | `DemoEmployee2026!` | Arnita Serri |
+| Employee | `nini@mdesigns.test` | `DemoEmployee2026!` | Ni Ni |
+| Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He |
+| Employee | `avery.cobe@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
 | Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
+
+### Active employees (from time entries)
+
+Anyone with hours in the last 30 days is provisioned as an **employee** auth user (`pa_profiles.role = employee`, `employee_name` matched to BQE). Emails are `firstname.lastname@mdesigns.test` (password `DemoEmployee2026!`) unless listed above.
+
+Re-run after a TE sync:
+
+```bash
+npm run provision:employees
+# or: node --env-file=.env.local scripts/provision-employees-from-time.mjs --days=30
+```
+
+Sign in on `/` or `/demo` with those credentials to open the employee portal.
 
 ## Supabase project
 

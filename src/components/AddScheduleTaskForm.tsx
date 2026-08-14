@@ -9,6 +9,8 @@ export function AddScheduleTaskForm({
   rows,
   defaultPhase,
   defaultDueYmd,
+  assigneeOptions,
+  defaultAssignee,
   onCreated,
   onCancel,
 }: {
@@ -19,6 +21,8 @@ export function AddScheduleTaskForm({
   defaultPhase?: string;
   /** YYYY-MM-DD seed for due date (e.g. selected calendar day). */
   defaultDueYmd?: string;
+  assigneeOptions?: string[];
+  defaultAssignee?: string;
   onCreated: (row: ScheduleRow) => void;
   onCancel?: () => void;
 }) {
@@ -31,6 +35,7 @@ export function AddScheduleTaskForm({
   const [kind, setKind] = useState<'task' | 'subtask'>('task');
   const [dueYmd, setDueYmd] = useState(defaultDueYmd || '');
   const [startYmd, setStartYmd] = useState('');
+  const [assignee, setAssignee] = useState(defaultAssignee || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +52,7 @@ export function AddScheduleTaskForm({
       kind,
       targetStart: startYmd ? fromDateInputValue(startYmd) : '',
       targetEnd: dueYmd ? fromDateInputValue(dueYmd) : '',
+      assigneeName: assignee,
       rows,
     });
     setBusy(false);
@@ -89,6 +95,19 @@ export function AddScheduleTaskForm({
             <option value="subtask">Subtask</option>
           </select>
         </label>
+        {assigneeOptions?.length ? (
+          <label>
+            <span>Assignee</span>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">Unassigned</option>
+              {assigneeOptions.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label>
           <span>Start</span>
           <input

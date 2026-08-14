@@ -44,6 +44,10 @@ export function patchCachedScheduleRow(
       | 'target_end'
       | 'sort_order'
       | 'row_kind'
+      | 'assignee_name'
+      | 'action'
+      | 'mdesigns_comments'
+      | 'client_comments'
     >
   >,
 ): boolean {

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
 import { KpiRow } from '../components/KpiRow';
-import { PlanSetsPanel } from '../components/PlanSetsPanel';
+import { ProjectMembersPanel } from '../components/ProjectMembersPanel';
 import { ProjectTaskList } from '../components/ProjectTaskList';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
+import { ScheduleStartPrompt } from '../components/ScheduleStartPrompt';
 import { useAuth } from '../hooks/useAuth';
 import { useDemoMode } from '../hooks/useDemoMode';
 import {
@@ -15,16 +16,32 @@ import {
 import { buildDemoProjectDetail } from '../lib/demoProjectDetail';
 import { fmtUSD } from '../lib/format';
 import { scheduleDeliverables } from '../lib/loadProjectSchedule';
+import type { ProjectMember } from '../lib/projectMembers';
 import type { ProjectNode } from '../lib/projectListHierarchy';
 import {
   loadProjectLoggedHours,
   type ProjectLoggedHours,
 } from '../lib/projectLoggedHours';
 import { rowOutstanding } from '../lib/receivable';
+import {
+  clearScheduleStartDismiss,
+  dismissScheduleStartForever,
+  dismissScheduleStartLater,
+  getProjectStartDate,
+  inferSchedulePresetKind,
+  scheduleNeedsStartPrompt,
+  setProjectStartDate,
+  type SchedulePresetKind,
+} from '../lib/scheduleAutofill';
 import { buildDeadlineEvents } from '../lib/scheduleDates';
-import { ensureProjectSchedule } from '../lib/scheduleEnsure';
+import {
+  applyProjectSchedulePreset,
+  ensureProjectSchedule,
+  saveProjectScheduleStartDate,
+} from '../lib/scheduleEnsure';
+import { fromDateInputValue, toDateInputValue } from '../lib/scheduleMutations';
 import { groupScheduleSections, statusTone } from '../lib/scheduleSections';
-import type { ScheduleRow } from '../lib/scheduleTypes';
+import type { ScheduleMeta, ScheduleRow } from '../lib/scheduleTypes';
 
 const PHASE_FALLBACK_COLORS = [
   '#146C6B',
@@ -64,9 +81,9 @@ function PhaseHoursChart({
         role="img"
         aria-label={`Hours by phase totaling ${total.toFixed(0)}`}
       >
-        {slices.map((s) => (
+        {slices.map((s, i) => (
           <div
-            key={s.label}
+            key={`${s.label}-${i}`}
             className="emp-phase-stack-seg"
             style={{ width: `${Math.max(s.share * 100, 0.8)}%`, background: s.color }}
             title={`${s.label}: ${s.hours.toFixed(1)}h (${Math.round(s.share * 100)}%)`}
@@ -74,8 +91,8 @@ function PhaseHoursChart({
         ))}
       </div>
       <ul className="emp-phase-stack-legend">
-        {slices.map((s) => (
-          <li key={s.label}>
+        {slices.map((s, i) => (
+          <li key={`${s.label}-${i}`}>
             <i style={{ background: s.color }} />
             <span className="lab">{s.label}</span>
             <span className="mono">
@@ -91,15 +108,31 @@ function PhaseHoursChart({
 type Props = {
   project: ProjectNode & { clientName: string };
   employeeName: string;
+  isLead?: boolean;
+  rosterNames?: string[];
+  onMembershipChange?: () => void;
 };
 
-export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
+export function EmployeeProjectWorkspace({
+  project,
+  employeeName,
+  isLead = true,
+  rosterNames = [],
+  onMembershipChange,
+}: Props) {
   const isDemo = useDemoMode();
   const { profile } = useAuth();
   const [dbRows, setDbRows] = useState<ScheduleRow[]>([]);
+  const [scheduleMeta, setScheduleMeta] = useState<ScheduleMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [hours, setHours] = useState<ProjectLoggedHours | null>(null);
   const [hoursLoading, setHoursLoading] = useState(true);
+  const [showStartPrompt, setShowStartPrompt] = useState(false);
+  const [startBusy, setStartBusy] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [startDateText, setStartDateText] = useState('');
+  const [teamMembers, setTeamMembers] = useState<ProjectMember[]>([]);
+  const showPayments = isLead;
 
   const detailRows = useMemo(() => {
     if (project.phases.length) return project.phases.map((p) => p.row);
@@ -119,23 +152,134 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
     [isDemo, project.key, project.clientName, manager],
   );
 
+  const defaultPreset = useMemo(
+    () => inferSchedulePresetKind(project.title, project.row?.type),
+    [project.title, project.row?.type],
+  );
+
+  const leadNames = useMemo(
+    () =>
+      [
+        ...new Set(
+          [project.row?.manager, ...project.phases.map((ph) => ph.row.manager)]
+            .map((n) => (n || '').trim())
+            .filter(Boolean),
+        ),
+      ],
+    [project.row?.manager, project.phases],
+  );
+
   useEffect(() => {
     let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      // Don't leave the page stuck on "Checking…" if Supabase hangs.
+      setLoading((prev) => {
+        if (!prev) return prev;
+        setShowStartPrompt(true);
+        setStartError((e) => e || 'Schedule check timed out — you can still start a schedule.');
+        return false;
+      });
+    }, 8000);
+
     (async () => {
       setLoading(true);
-      const ensured = await ensureProjectSchedule({
-        projectKey: project.key,
-        clientName: project.clientName,
-        title: project.title,
-      });
-      if (cancelled) return;
-      setDbRows(ensured.rows);
-      setLoading(false);
+      setStartError(null);
+      setShowStartPrompt(false);
+      try {
+        const ensured = await ensureProjectSchedule({
+          projectKey: project.key,
+          clientName: project.clientName,
+          title: project.title,
+          autoSeed: false,
+          autoDate: false,
+          forceRefresh: true,
+        });
+        if (cancelled) return;
+        setDbRows(ensured.rows);
+        setScheduleMeta(ensured.meta);
+        const savedStart =
+          (ensured.meta?.start_date || '').trim() || getProjectStartDate(project.key);
+        setStartDateText(savedStart ? toDateInputValue(savedStart) : toDateInputValue(new Date()));
+        const needs = scheduleNeedsStartPrompt(ensured.rows);
+        if (needs) clearScheduleStartDismiss(project.key);
+        setShowStartPrompt(needs);
+        if (ensured.error) setStartError(ensured.error);
+      } catch (e) {
+        if (cancelled) return;
+        setDbRows([]);
+        setScheduleMeta(null);
+        setShowStartPrompt(true);
+        setStartError(e instanceof Error ? e.message : 'Could not load schedule');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [project.key, project.clientName, project.title]);
+
+  async function onStartSchedule(input: { kickoff: Date; preset: SchedulePresetKind }) {
+    setStartBusy(true);
+    setStartError(null);
+    setShowStartPrompt(true);
+    try {
+      const res = await applyProjectSchedulePreset({
+        projectKey: project.key,
+        clientName: project.clientName,
+        title: project.title,
+        kickoff: input.kickoff,
+        preset: input.preset,
+      });
+      const taskCount = res.rows.filter(
+        (r) =>
+          (r.row_kind === 'task' || r.row_kind === 'subtask') && Boolean((r.task || '').trim()),
+      ).length;
+      if (!taskCount) {
+        const msg =
+          res.error ||
+          'Schedule was not created (no checklist tasks). Try again or check staff schedule permissions.';
+        console.error('[schedule start]', msg, res);
+        setStartError(msg);
+        setShowStartPrompt(true);
+        setDbRows(res.rows);
+        setScheduleMeta(res.meta);
+        return;
+      }
+      if (res.error) {
+        console.warn('[schedule start partial]', res.error);
+        setStartError(res.error);
+      } else {
+        setStartError(null);
+      }
+      setDbRows(res.rows);
+      setScheduleMeta(res.meta);
+      const saved = (res.meta?.start_date || '').trim() || getProjectStartDate(project.key);
+      setStartDateText(saved ? toDateInputValue(saved) : toDateInputValue(input.kickoff));
+      setShowStartPrompt(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not start schedule';
+      console.error('[schedule start]', e);
+      setStartError(msg);
+      setShowStartPrompt(true);
+    } finally {
+      setStartBusy(false);
+    }
+  }
+
+  async function onCommitStartDate(ymd: string) {
+    const scheduleText = ymd ? fromDateInputValue(ymd) : '';
+    setStartDateText(ymd);
+    if (!scheduleText) return;
+    setProjectStartDate(project.key, scheduleText);
+    await saveProjectScheduleStartDate({
+      projectKey: project.key,
+      scheduleId: scheduleMeta?.id,
+      startDate: scheduleText,
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +301,9 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
     };
   }, [employeeName, project.title, project.row?.project, project.key, project.code, project.clientName]);
 
-  const usingDemo = Boolean(isDemo && demo && !loading && dbRows.length === 0);
+  // Never mask an empty/undated live schedule with demo rows — the start prompt must show.
+  const needsSchedule = !loading && scheduleNeedsStartPrompt(dbRows);
+  const usingDemo = Boolean(isDemo && demo && !loading && !needsSchedule && dbRows.length === 0);
   const rows = usingDemo && demo ? demo.rows : dbRows;
 
   const boardProject = {
@@ -281,16 +427,94 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
               </>
             ) : null}
           </p>
+          <label className="emp-project-start-date">
+            <span>Project start date</span>
+            <input
+              type="date"
+              className="emp-date-input"
+              value={startDateText}
+              disabled={loading || startBusy}
+              onChange={(e) => void onCommitStartDate(e.target.value)}
+              title="Autofilled deadlines cascade from this date"
+            />
+          </label>
         </div>
-        <div className="emp-project-stats mono">
-          <span>Contract {fmtUSD(project.contract)}</span>
-          <span>Outstanding {fmtUSD(Math.max(0, outstanding))}</span>
-          <span>
-            {events.length} dated
-            {overdue ? ` · ${overdue} past due` : ''}
-          </span>
-        </div>
+        <aside className="emp-project-hero-aside">
+          <div className="emp-project-stats mono">
+            {showPayments ? (
+              <>
+                <span>Contract {fmtUSD(project.contract)}</span>
+                <span>Outstanding {fmtUSD(Math.max(0, outstanding))}</span>
+              </>
+            ) : (
+              <span>Team member</span>
+            )}
+            <span>
+              {events.length} dated
+              {overdue ? ` · ${overdue} past due` : ''}
+            </span>
+          </div>
+          <ProjectMembersPanel
+            compact
+            projectKey={project.key}
+            projectTitle={project.title}
+            projectCode={project.code}
+            leadNames={leadNames}
+            employeeName={employeeName}
+            canManage={isLead && !usingDemo}
+            rosterNames={rosterNames}
+            onMembersChange={(members) => {
+              setTeamMembers(members);
+              onMembershipChange?.();
+            }}
+          />
+        </aside>
       </header>
+
+      {loading ? (
+        <section className="panel emp-sched-start emp-sched-start-compact">
+          <h3>Checking project schedule…</h3>
+          <p className="pd-muted">Looking for an assigned checklist and deadlines.</p>
+        </section>
+      ) : needsSchedule && showStartPrompt ? (
+        <ScheduleStartPrompt
+          key={`${project.key}-start`}
+          projectKey={project.key}
+          projectTitle={project.title}
+          defaultPreset={defaultPreset}
+          busy={startBusy}
+          error={startError}
+          onYes={(input) => void onStartSchedule(input)}
+          onMaybeLater={() => {
+            dismissScheduleStartLater(project.key);
+            setShowStartPrompt(false);
+          }}
+          onDontShowAgain={() => {
+            dismissScheduleStartForever(project.key);
+            setShowStartPrompt(false);
+          }}
+        />
+      ) : needsSchedule ? (
+        <section className="panel emp-sched-start emp-sched-start-compact">
+          <h3>No project schedule assigned</h3>
+          <p className="pd-muted">
+            This project has no checklist tasks yet.
+            {startError ? ` (${startError})` : ''}
+          </p>
+          <div className="emp-sched-start-actions">
+            <button
+              type="button"
+              className="emp-primary-btn"
+              onClick={() => {
+                clearScheduleStartDismiss(project.key);
+                setShowStartPrompt(true);
+              }}
+            >
+              Start schedule
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <KpiRow
         items={[
@@ -320,10 +544,19 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
             k: 'Your entries',
             v: hoursLoading ? '…' : String(hours?.entries ?? 0),
           },
-          {
-            k: 'Contract',
-            v: fmtUSD(project.contract),
-          },
+          ...(showPayments
+            ? [
+                {
+                  k: 'Contract',
+                  v: fmtUSD(project.contract),
+                },
+              ]
+            : [
+                {
+                  k: 'Role',
+                  v: 'Member',
+                },
+              ]),
         ]}
       />
       {hours?.error ? (
@@ -377,7 +610,20 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
               employeeName={employeeName}
               rows={rows}
               writable={!usingDemo}
+              canAssign={isLead && !usingDemo}
+              assigneeOptions={teamMembers.map((m) => m.employee_name)}
               onRowsChange={setDbRows}
+              onStartSchedule={
+                needsSchedule
+                  ? () => {
+                      clearScheduleStartDismiss(project.key);
+                      setShowStartPrompt(true);
+                      document
+                        .getElementById('emp-sched-start-title')
+                        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  : undefined
+              }
             />
           )}
         </aside>
@@ -385,8 +631,7 @@ export function EmployeeProjectWorkspace({ project, employeeName }: Props) {
 
       <div className="emp-detail-pair">
         <section className="panel">
-          <PlanSetsPanel projectKey={project.key} projectTitle={project.title} compact />
-          <h3 style={{ marginTop: 18 }}>
+          <h3>
             Schedule deliverables <span className="tag">{deliverables.length}</span>
           </h3>
           {!deliverables.length ? (

@@ -236,7 +236,18 @@ function EmployeeShell() {
               {profile?.email}
             </div>
           </div>
-          <div className="tb-cell">
+          <div className="tb-cell tb-cell-actions">
+            <button
+              type="button"
+              className="signout-btn emp-cal-nav-btn"
+              title="Open calendar (C)"
+              aria-keyshortcuts="c"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('pa-emp-open-calendar'));
+              }}
+            >
+              Calendar <kbd className="emp-nav-kbd">C</kbd>
+            </button>
             <button type="button" className="signout-btn" onClick={() => void signOut()}>
               Sign out
             </button>

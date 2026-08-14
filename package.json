@@ -10,9 +10,11 @@
     "preview": "vite preview",
     "seed": "tsx scripts/extract-and-seed.ts",
     "dev:api": "tsx scripts/local-api.ts",
-    "test": "tsx --test src/lib/staffingDelivery.test.ts src/lib/scheduleEnsure.test.ts",
+    "test": "tsx --test src/lib/staffingDelivery.test.ts src/lib/scheduleEnsure.test.ts src/lib/scheduleSections.test.ts",
     "import:time-entries": "tsx scripts/import-time-entries.ts",
-    "seed:time-entries-json": "tsx scripts/seed-time-entries-from-json.ts"
+    "seed:time-entries-json": "tsx scripts/seed-time-entries-from-json.ts",
+    "provision:employees": "node --env-file=.env.local scripts/provision-employees-from-time.mjs",
+    "sync:project-members": "node --env-file=.env.local scripts/sync-project-members-from-time.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",

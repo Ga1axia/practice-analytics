@@ -6,17 +6,21 @@ export function ScheduleDateInput({
   disabled,
   ariaLabel,
   onCommit,
+  autofilled,
 }: {
   value: string;
   disabled?: boolean;
   ariaLabel: string;
   onCommit: (scheduleText: string) => void | Promise<void>;
+  /** True when the date came from a schedule preset autofill. */
+  autofilled?: boolean;
 }) {
   return (
     <input
       type="date"
-      className="emp-date-input"
-      aria-label={ariaLabel}
+      className={`emp-date-input${autofilled ? ' autofilled' : ''}`}
+      aria-label={autofilled ? `${ariaLabel} (autofilled)` : ariaLabel}
+      title={autofilled ? 'Autofilled from schedule preset' : undefined}
       disabled={disabled}
       value={toDateInputValue(value)}
       onChange={(e) => {

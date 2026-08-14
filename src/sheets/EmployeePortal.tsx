@@ -1,10 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { EfficiencyLineChart, StackedHoursChart } from '../components/Charts';
 import { EmployeeTimecard } from '../components/EmployeeTimecard';
 import { KpiRow } from '../components/KpiRow';
 import { ProjectSchedulePulse } from '../components/ProjectSchedulePulse';
 import { processPhaseLabel } from '../lib/architecturalProcess';
 import { fmtPct, fmtUSD, monthLabel } from '../lib/format';
+import {
+  ensureMyMembershipsFromTimeEntries,
+  isProjectLead,
+  isProjectListManager,
+  loadMembershipsForEmployee,
+  staffNameOptions,
+  type ProjectMemberRole,
+} from '../lib/projectMembers';
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
@@ -43,6 +51,9 @@ export function EmployeePortal({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [memberRoles, setMemberRoles] = useState<Map<string, ProjectMemberRole>>(
+    () => new Map(),
+  );
 
   function go(next: PageId) {
     setVisited((prev) => {
@@ -70,19 +81,45 @@ export function EmployeePortal({
   const trailing = monthly.slice(-12);
   const hierarchy = useMemo(() => buildClientHierarchy(data.projects), [data.projects]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const projects = hierarchy.flatMap((c) =>
+      c.projects.map((p) => ({ key: p.key, title: p.title, code: p.code })),
+    );
+    void (async () => {
+      // Claim projects this employee has logged hours on, then refresh memberships.
+      await ensureMyMembershipsFromTimeEntries({ employeeName, projects });
+      if (cancelled) return;
+      const res = await loadMembershipsForEmployee(employeeName);
+      if (cancelled) return;
+      setMemberRoles(res.byKey);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeName, hierarchy]);
+
+  const rosterNames = useMemo(
+    () =>
+      staffNameOptions({
+        managers: data.managers,
+        employeeRoster: data.employee_roster,
+        extras: [employeeName],
+      }),
+    [data.managers, data.employee_roster, employeeName],
+  );
+
   const allProjects = useMemo(() => {
     return hierarchy
       .flatMap((c) =>
         c.projects
           .filter(
-            (p) =>
-              p.row?.manager === employeeName ||
-              p.phases.some((ph) => ph.row.manager === employeeName),
+            (p) => isProjectListManager(p, employeeName) || memberRoles.has(p.key),
           )
           .map((p) => ({ ...p, clientName: c.client })),
       )
       .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
-  }, [hierarchy, employeeName]);
+  }, [hierarchy, employeeName, memberRoles]);
 
   const activeProjects = useMemo(
     () => allProjects.filter(projectIsActive),
@@ -107,10 +144,18 @@ export function EmployeePortal({
   }, [allProjects, selectedKey]);
 
   const bookSource = statusFilter === 'active' ? activeProjects : allProjects;
-  const bookContract = bookSource.reduce((a, p) => a + p.contract, 0);
-  const bookBilled = bookSource.reduce((a, p) => a + p.billed, 0);
-  const bookOut = bookSource.reduce((a, p) => a + Math.max(0, p.outstanding), 0);
+  const leadBookSource = useMemo(
+    () =>
+      bookSource.filter((p) =>
+        isProjectLead(p, employeeName, memberRoles.get(p.key) || null),
+      ),
+    [bookSource, employeeName, memberRoles],
+  );
+  const bookContract = leadBookSource.reduce((a, p) => a + p.contract, 0);
+  const bookBilled = leadBookSource.reduce((a, p) => a + p.billed, 0);
+  const bookOut = leadBookSource.reduce((a, p) => a + Math.max(0, p.outstanding), 0);
   const clientCount = new Set(bookSource.map((p) => p.clientName)).size;
+  const showPaymentBook = leadBookSource.length > 0;
 
   function goProjects() {
     go('projects');
@@ -129,6 +174,35 @@ export function EmployeePortal({
     if (!key) return;
     selectProject(key);
   }
+
+  useEffect(() => {
+    function openCalendar() {
+      go('calendar');
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        openCalendar();
+      }
+    }
+    window.addEventListener('pa-emp-open-calendar', openCalendar);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pa-emp-open-calendar', openCalendar);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   return (
     <div className="emp-portal">
@@ -325,20 +399,25 @@ export function EmployeePortal({
                 v: String(filteredProjects.length),
               },
               { k: 'Clients', v: String(clientCount) },
-              { k: 'Contract book', v: fmtUSD(bookContract) },
-              { k: 'Billed', v: fmtUSD(bookBilled) },
-              {
-                k: 'Outstanding',
-                v: fmtUSD(bookOut),
-                cls: 'accent-rust',
-              },
+              ...(showPaymentBook
+                ? [
+                    { k: 'Contract book', v: fmtUSD(bookContract) },
+                    { k: 'Billed', v: fmtUSD(bookBilled) },
+                    {
+                      k: 'Outstanding',
+                      v: fmtUSD(bookOut),
+                      cls: 'accent-rust' as const,
+                    },
+                  ]
+                : [{ k: 'Team role', v: 'Member' }]),
             ]}
           />
 
           {!allProjects.length ? (
             <div className="panel">
               <p className="pd-muted">
-                No projects are assigned to you as manager in the Project List.
+                No projects yet. You appear here when you manage a project in the Project List,
+                or a project lead adds you as a member.
               </p>
             </div>
           ) : !filteredProjects.length ? (
@@ -361,6 +440,7 @@ export function EmployeePortal({
                   ? myPhases.reduce((a, x) => a + rowOutstanding(x.row), 0)
                   : p.outstanding;
                 const selected = selectedKey === p.key;
+                const lead = isProjectLead(p, employeeName, memberRoles.get(p.key) || null);
                 return (
                   <button
                     key={p.key}
@@ -385,16 +465,29 @@ export function EmployeePortal({
                           <span>{city}</span>
                         </>
                       ) : null}
+                      <>
+                        <span className="dot">·</span>
+                        <span>{lead ? 'Lead' : 'Member'}</span>
+                      </>
                     </p>
                     <div className="emp-gallery-stats">
-                      <div>
-                        <span className="k">Contract</span>
-                        <span className="v">{fmtUSD(p.contract)}</span>
-                      </div>
-                      <div>
-                        <span className="k">Outstanding</span>
-                        <span className="v">{fmtUSD(Math.max(0, out))}</span>
-                      </div>
+                      {lead ? (
+                        <>
+                          <div>
+                            <span className="k">Contract</span>
+                            <span className="v">{fmtUSD(p.contract)}</span>
+                          </div>
+                          <div>
+                            <span className="k">Outstanding</span>
+                            <span className="v">{fmtUSD(Math.max(0, out))}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div>
+                          <span className="k">Access</span>
+                          <span className="v">Team member</span>
+                        </div>
+                      )}
                       <div>
                         <span className="k">Phases</span>
                         <span className="v">{myPhases.length || p.phases.length}</span>
@@ -476,7 +569,21 @@ export function EmployeePortal({
           </div>
 
           {selectedProject ? (
-            <EmployeeProjectWorkspace project={selectedProject} employeeName={employeeName} />
+            <EmployeeProjectWorkspace
+              project={selectedProject}
+              employeeName={employeeName}
+              isLead={isProjectLead(
+                selectedProject,
+                employeeName,
+                memberRoles.get(selectedProject.key) || null,
+              )}
+              rosterNames={rosterNames}
+              onMembershipChange={() => {
+                void loadMembershipsForEmployee(employeeName).then((res) => {
+                  setMemberRoles(res.byKey);
+                });
+              }}
+            />
           ) : (
             <div className="panel">
               <p className="pd-muted">

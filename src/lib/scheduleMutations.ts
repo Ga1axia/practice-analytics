@@ -1,3 +1,8 @@
+import { clearScheduleDateSourceMarker } from './scheduleAutofill';
+import {
+  cascadeRowsAfterEndEdit,
+  formatScheduleDate,
+} from './scheduleCascade';
 import {
   invalidateScheduleCache,
   patchCachedScheduleRow,
@@ -11,10 +16,7 @@ import { supabase } from './supabase';
 
 export type MutationResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
 
-/** Store dates as M/D/YYYY to match firm schedule cells. */
-export function formatScheduleDate(d: Date): string {
-  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-}
+export { cascadeRowsAfterEndEdit, formatScheduleDate } from './scheduleCascade';
 
 /** `<input type="date">` value (YYYY-MM-DD) ↔ schedule cell text. */
 export function toDateInputValue(raw: string | Date | null | undefined): string {
@@ -57,6 +59,7 @@ export async function updateScheduleRowFields(
       | 'estimate_time'
       | 'mdesigns_comments'
       | 'client_comments'
+      | 'assignee_name'
     >
   >,
 ): Promise<MutationResult> {
@@ -66,22 +69,136 @@ export async function updateScheduleRowFields(
   return { ok: true, data: undefined };
 }
 
+async function loadRowsForProject(projectKey: string, scheduleIdHint?: string): Promise<ScheduleRow[]> {
+  const cached = getCachedSchedule(projectKey)?.rows;
+  if (cached?.length) return cached;
+
+  let scheduleId = scheduleIdHint || '';
+  if (!scheduleId) {
+    const { data: meta } = await supabase
+      .from('pa_schedules')
+      .select('id')
+      .eq('project_key', projectKey)
+      .maybeSingle();
+    scheduleId = (meta?.id as string) || '';
+  }
+  if (!scheduleId) return [];
+
+  const { data } = await supabase
+    .from('pa_schedule_rows')
+    .select('*')
+    .eq('schedule_id', scheduleId)
+    .order('sort_order');
+  return (data || []) as ScheduleRow[];
+}
+
 export async function setScheduleRowDates(input: {
   projectKey: string;
   rowId: string;
   targetStart?: string;
   targetEnd?: string;
-}): Promise<MutationResult<{ target_start: string; target_end: string }>> {
-  const fields: { target_start?: string; target_end?: string } = {};
+  /** Current action cell — used to clear autofill marker after a manual edit. */
+  action?: string;
+  /** Optional in-memory rows (avoids a reload; cascade uses these). */
+  rows?: ScheduleRow[];
+}): Promise<
+  MutationResult<{
+    target_start: string;
+    target_end: string;
+    action: string;
+    /** Full row list after cascade (when end date shifted followers). */
+    rows: ScheduleRow[];
+  }>
+> {
+  const baseRows =
+    input.rows ||
+    (await loadRowsForProject(
+      input.projectKey,
+      getCachedSchedule(input.projectKey)?.meta?.id,
+    ));
+
+  // End-date edits cascade later deadlines; start-only edits stay local.
+  if (input.targetEnd !== undefined) {
+    const nextRows = cascadeRowsAfterEndEdit(baseRows, input.rowId, input.targetEnd);
+    // If start was also provided on the edited row, apply it after cascade.
+    const withStart =
+      input.targetStart !== undefined
+        ? nextRows.map((r) =>
+            r.id === input.rowId
+              ? {
+                  ...r,
+                  target_start: input.targetStart!,
+                  action: clearScheduleDateSourceMarker(r.action),
+                }
+              : r,
+          )
+        : nextRows;
+
+    const changed = withStart.filter((r) => {
+      const prev = baseRows.find((b) => b.id === r.id);
+      if (!prev) return true;
+      return (
+        prev.target_start !== r.target_start ||
+        prev.target_end !== r.target_end ||
+        prev.action !== r.action
+      );
+    });
+
+    for (const r of changed) {
+      const { error } = await supabase
+        .from('pa_schedule_rows')
+        .update({
+          target_start: r.target_start,
+          target_end: r.target_end,
+          action: r.action,
+        })
+        .eq('id', r.id);
+      if (error) return { ok: false, error: error.message };
+    }
+
+    const cached = getCachedSchedule(input.projectKey);
+    if (cached) {
+      setCachedSchedule({ ...cached, rows: withStart });
+    } else {
+      invalidateScheduleCache(input.projectKey);
+    }
+
+    const edited = withStart.find((r) => r.id === input.rowId);
+    return {
+      ok: true,
+      data: {
+        target_start: edited?.target_start ?? input.targetStart ?? '',
+        target_end: edited?.target_end ?? input.targetEnd ?? '',
+        action: edited?.action ?? '',
+        rows: withStart,
+      },
+    };
+  }
+
+  const fields: { target_start?: string; target_end?: string; action?: string } = {};
   if (input.targetStart !== undefined) fields.target_start = input.targetStart;
-  if (input.targetEnd !== undefined) fields.target_end = input.targetEnd;
+  if (input.action !== undefined) {
+    fields.action = clearScheduleDateSourceMarker(input.action);
+  } else {
+    const cached = baseRows.find((r) => r.id === input.rowId);
+    if (cached) fields.action = clearScheduleDateSourceMarker(cached.action);
+  }
   const res = await updateScheduleRowFields(input.projectKey, input.rowId, fields);
   if (!res.ok) return res;
+
+  const nextRows = baseRows.map((r) =>
+    r.id === input.rowId ? { ...r, ...fields } : r,
+  );
+  const cached = getCachedSchedule(input.projectKey);
+  if (cached) setCachedSchedule({ ...cached, rows: nextRows });
+
   return {
     ok: true,
     data: {
       target_start: fields.target_start ?? '',
-      target_end: fields.target_end ?? '',
+      target_end: '',
+      action: fields.action ?? '',
+      rows: nextRows,
     },
   };
 }
@@ -96,6 +213,16 @@ export async function renameScheduleTask(input: {
   return updateScheduleRowFields(input.projectKey, input.rowId, { task });
 }
 
+export async function setScheduleAssignee(input: {
+  projectKey: string;
+  rowId: string;
+  assigneeName: string;
+}): Promise<MutationResult> {
+  return updateScheduleRowFields(input.projectKey, input.rowId, {
+    assignee_name: input.assigneeName.trim(),
+  });
+}
+
 export async function createScheduleTask(input: {
   projectKey: string;
   scheduleId: string;
@@ -105,6 +232,9 @@ export async function createScheduleTask(input: {
   kind?: 'task' | 'subtask';
   targetStart?: string;
   targetEnd?: string;
+  assigneeName?: string;
+  /** Place the new row immediately after this row (clone). */
+  afterRowId?: string;
   /** Existing rows for sort_order placement (optional — reads cache if omitted). */
   rows?: ScheduleRow[];
 }): Promise<MutationResult<ScheduleRow>> {
@@ -130,8 +260,14 @@ export async function createScheduleTask(input: {
     sections.find((s) => s.title.toLowerCase() === input.phaseTitle.toLowerCase()) ||
     null;
 
+  const afterRow = input.afterRowId
+    ? (rows as ScheduleRow[]).find((r) => r.id === input.afterRowId)
+    : null;
+
   let sortOrder: number;
-  if (section) {
+  if (afterRow) {
+    sortOrder = (afterRow.sort_order || 0) + 1;
+  } else if (section) {
     const last = section.items[section.items.length - 1];
     const after = last?.sort_order ?? section.phaseRow?.sort_order ?? 0;
     sortOrder = after + 1;
@@ -168,6 +304,7 @@ export async function createScheduleTask(input: {
     estimate_time: '',
     mdesigns_comments: '',
     client_comments: '',
+    assignee_name: (input.assigneeName || '').trim(),
   };
 
   const { data, error } = await supabase
@@ -195,6 +332,41 @@ export async function createScheduleTask(input: {
   }
 
   return { ok: true, data: created };
+}
+
+function cloneTaskName(name: string): string {
+  const trimmed = name.trim();
+  const m = trimmed.match(/^(.*) \(copy(?: (\d+))?\)$/i);
+  if (m) {
+    const n = m[2] ? Number(m[2]) + 1 : 2;
+    return `${m[1]} (copy ${n})`;
+  }
+  return `${trimmed} (copy)`;
+}
+
+/** Clone a task into the same phase, immediately after the source row. */
+export async function duplicateScheduleTask(input: {
+  projectKey: string;
+  scheduleId: string;
+  rowId: string;
+  phaseTitle: string;
+  task: string;
+  kind?: 'task' | 'subtask';
+  targetStart?: string;
+  targetEnd?: string;
+  assigneeName?: string;
+}): Promise<MutationResult<ScheduleRow>> {
+  return createScheduleTask({
+    projectKey: input.projectKey,
+    scheduleId: input.scheduleId,
+    phaseTitle: input.phaseTitle,
+    task: cloneTaskName(input.task),
+    kind: input.kind,
+    targetStart: input.targetStart,
+    targetEnd: input.targetEnd,
+    assigneeName: input.assigneeName,
+    afterRowId: input.rowId,
+  });
 }
 
 export async function deleteScheduleRow(input: {

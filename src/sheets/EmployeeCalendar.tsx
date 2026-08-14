@@ -107,6 +107,8 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
       projectKey: project.key,
       clientName: project.clientName,
       title: project.title,
+      autoSeed: false,
+      autoDate: false,
     }).then((ensured) => {
       if (cancelled) return;
       setAddMeta({
@@ -134,6 +136,11 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
     setBusyId(null);
     if (!res.ok) {
       setError(res.error);
+      return;
+    }
+    // Cascade may move many deadlines — reload agenda.
+    if (field === 'target_end') {
+      void reload();
       return;
     }
     const nextDate = parseScheduleDate(scheduleText);

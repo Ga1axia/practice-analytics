@@ -2,23 +2,54 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScheduleDateInput } from './ScheduleDateInput';
 import {
   filterEmployeeGanttBars,
+  groupEmployeeGanttByPhase,
   loadEmployeeGantt,
+  rangeIntersects,
   type EmployeeGanttBar,
 } from '../lib/employeeGantt';
 import {
   barLeftPct,
   barWidthPct,
+  currentMonthBounds,
   daysBetween,
   ganttTicks,
-  ganttTimelineBounds,
+  upcomingWeekBounds,
   type GanttFilter,
+  type GanttTickScale,
 } from '../lib/scheduleGantt';
-import { formatScheduleDate, setScheduleRowDates } from '../lib/scheduleMutations';
-import { startOfDay } from '../lib/scheduleDates';
+import {
+  formatScheduleDate,
+  fromDateInputValue,
+  setScheduleRowDates,
+  toDateInputValue,
+} from '../lib/scheduleMutations';
+import { parseScheduleDate, startOfDay } from '../lib/scheduleDates';
 import type { ProjectNode } from '../lib/projectListHierarchy';
+
+type RangeMode = 'week' | 'month' | 'custom';
 
 function fmtShort(d: Date) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** Clamp a bar into the visible window; null if fully outside. */
+function visibleSpan(
+  start: Date,
+  end: Date,
+  winStart: Date,
+  winEnd: Date,
+): { start: Date; end: Date } | null {
+  if (!rangeIntersects(start, end, winStart, winEnd)) return null;
+  const s = start.getTime() < winStart.getTime() ? winStart : start;
+  const e = end.getTime() > winEnd.getTime() ? winEnd : end;
+  return { start: s, end: e };
+}
+
+function normalizeRange(start: Date, end: Date): { start: Date; end: Date } {
+  const a = startOfDay(start);
+  const b = startOfDay(end);
+  if (a.getTime() <= b.getTime()) return { start: a, end: b };
+  return { start: b, end: a };
 }
 
 export function EmployeeGantt({
@@ -38,7 +69,14 @@ export function EmployeeGantt({
 }) {
   const [kindFilter, setKindFilter] = useState<GanttFilter>('all');
   const [projectKey, setProjectKey] = useState(initialProjectKey);
-  const [scale, setScale] = useState<'week' | 'month'>('month');
+  const [rangeMode, setRangeMode] = useState<RangeMode>('week');
+  const today = useMemo(() => startOfDay(new Date()), []);
+  const weekDefault = useMemo(() => upcomingWeekBounds(today), [today]);
+  const monthDefault = useMemo(() => currentMonthBounds(today), [today]);
+  const [customStartYmd, setCustomStartYmd] = useState(() =>
+    toDateInputValue(weekDefault.start),
+  );
+  const [customEndYmd, setCustomEndYmd] = useState(() => toDateInputValue(weekDefault.end));
   const [allBars, setAllBars] = useState<EmployeeGanttBar[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,20 +114,60 @@ export function EmployeeGantt({
     [allBars, kindFilter, projectKey],
   );
 
-  const bounds = useMemo(() => ganttTimelineBounds(bars), [bars]);
+  const phaseRows = useMemo(() => groupEmployeeGanttByPhase(bars), [bars]);
+
+  const bounds = useMemo(() => {
+    if (rangeMode === 'week') return weekDefault;
+    if (rangeMode === 'month') return monthDefault;
+    const startRaw = parseScheduleDate(fromDateInputValue(customStartYmd));
+    const endRaw = parseScheduleDate(fromDateInputValue(customEndYmd));
+    if (!startRaw || !endRaw) return weekDefault;
+    return normalizeRange(startRaw, endRaw);
+  }, [rangeMode, weekDefault, monthDefault, customStartYmd, customEndYmd]);
+
+  const visibleRows = useMemo(() => {
+    if (!bounds) return [];
+    return phaseRows.filter((row) =>
+      rangeIntersects(row.start, row.end, bounds.start, bounds.end),
+    );
+  }, [phaseRows, bounds]);
+
+  const projectsInView = useMemo(() => {
+    const keys = new Set(visibleRows.map((r) => r.projectKey));
+    return projects.filter((p) => keys.has(p.key) || p.key === projectKey);
+  }, [projects, visibleRows, projectKey]);
+
   const totalDays = bounds ? Math.max(daysBetween(bounds.start, bounds.end), 1) : 1;
+  const tickScale: GanttTickScale =
+    rangeMode === 'custom' ? 'custom' : rangeMode === 'month' ? 'month' : 'week';
   const ticks = useMemo(
-    () => (bounds ? ganttTicks(bounds.start, bounds.end, scale) : []),
-    [bounds, scale],
+    () => (bounds ? ganttTicks(bounds.start, bounds.end, tickScale) : []),
+    [bounds, tickScale],
   );
-  const today = startOfDay(new Date());
   const todayPct =
     bounds && today.getTime() >= bounds.start.getTime() && today.getTime() <= bounds.end.getTime()
       ? barLeftPct(today, bounds.start, totalDays)
       : null;
 
-  const pxPerDay = scale === 'week' ? 14 : 6;
-  const timelineWidth = bounds ? Math.max(totalDays * pxPerDay, 720) : 720;
+  const pxPerDay = totalDays <= 10 ? 96 : totalDays <= 40 ? 28 : 8;
+  const timelineWidth = bounds ? Math.max(totalDays * pxPerDay, 560) : 720;
+
+  function setPreset(mode: 'week' | 'month') {
+    setRangeMode(mode);
+    const win = mode === 'week' ? weekDefault : monthDefault;
+    setCustomStartYmd(toDateInputValue(win.start));
+    setCustomEndYmd(toDateInputValue(win.end));
+  }
+
+  function onCustomStart(ymd: string) {
+    setCustomStartYmd(ymd);
+    setRangeMode('custom');
+  }
+
+  function onCustomEnd(ymd: string) {
+    setCustomEndYmd(ymd);
+    setRangeMode('custom');
+  }
 
   async function saveSelectedDates(startText: string, endText: string) {
     if (!selected || selected.kind === 'phase') return;
@@ -108,7 +186,6 @@ export function EmployeeGantt({
     }
     setSelected(null);
     onDatesChanged?.();
-    // Local refresh
     const res2 = await loadEmployeeGantt(projects);
     setAllBars(res2.bars);
   }
@@ -166,8 +243,8 @@ export function EmployeeGantt({
             onChange={(e) => setProjectKey(e.target.value)}
             aria-label="Filter Gantt by project"
           >
-            <option value="">All projects</option>
-            {projects.map((p) => (
+            <option value="">Projects in range ({projectsInView.length})</option>
+            {projectsInView.map((p) => (
               <option key={p.key} value={p.key}>
                 {p.title}
               </option>
@@ -193,21 +270,46 @@ export function EmployeeGantt({
             </button>
           ))}
         </div>
-        <div className="exec-toggle" role="group" aria-label="Gantt scale">
+        <div className="exec-toggle" role="group" aria-label="Gantt time window">
           <button
             type="button"
-            className={scale === 'month' ? 'on' : ''}
-            onClick={() => setScale('month')}
+            className={rangeMode === 'week' ? 'on' : ''}
+            onClick={() => setPreset('week')}
           >
-            Month
+            This week
           </button>
           <button
             type="button"
-            className={scale === 'week' ? 'on' : ''}
-            onClick={() => setScale('week')}
+            className={rangeMode === 'month' ? 'on' : ''}
+            onClick={() => setPreset('month')}
           >
-            Week
+            This month
           </button>
+          <button
+            type="button"
+            className={rangeMode === 'custom' ? 'on' : ''}
+            onClick={() => setRangeMode('custom')}
+          >
+            Custom
+          </button>
+        </div>
+        <div className="emp-gantt-range" role="group" aria-label="Custom date range">
+          <label>
+            <span className="f-label">From</span>
+            <input
+              type="date"
+              value={customStartYmd}
+              onChange={(e) => onCustomStart(e.target.value)}
+            />
+          </label>
+          <label>
+            <span className="f-label">To</span>
+            <input
+              type="date"
+              value={customEndYmd}
+              onChange={(e) => onCustomEnd(e.target.value)}
+            />
+          </label>
         </div>
       </div>
 
@@ -217,17 +319,17 @@ export function EmployeeGantt({
           Some schedules could not be updated: {error}
         </p>
       ) : null}
-      {!loading && !bars.length ? (
+      {!loading && !visibleRows.length ? (
         <div className="plist-empty">
-          No dated work for this filter. Try another project or widen the kind filter.
+          No dated phases overlap this range. Widen the dates or clear the project filter.
         </div>
       ) : null}
 
-      {!loading && bars.length && bounds ? (
+      {!loading && visibleRows.length && bounds ? (
         <div className="gantt-scroll" ref={scrollerRef}>
           <div className="gantt-frame" style={{ minWidth: 260 + timelineWidth }}>
             <div className="gantt-head">
-              <div className="gantt-label-col mono">Work</div>
+              <div className="gantt-label-col mono">Phase</div>
               <div className="gantt-timeline" style={{ width: timelineWidth }}>
                 <div className="gantt-ticks">
                   {ticks.map((t) => {
@@ -250,58 +352,67 @@ export function EmployeeGantt({
             </div>
 
             <div className="gantt-body">
-              {bars.map((bar) => {
-                const left = barLeftPct(bar.start, bounds.start, totalDays);
-                const width = Math.max(barWidthPct(bar.start, bar.end, totalDays), 0.5);
-                return (
+              {visibleRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="gantt-row depth-0 kind-phase emp-gantt-row emp-gantt-project-row"
+                >
                   <button
-                    key={bar.id}
                     type="button"
-                    className={`gantt-row depth-${bar.depth} kind-${bar.kind} emp-gantt-row${selected?.id === bar.id ? ' selected' : ''}`}
-                    onClick={() => {
-                      if (bar.kind === 'phase') {
-                        onOpenProject(bar.projectKey);
-                        return;
-                      }
-                      setSelected(bar);
-                    }}
-                    title={`${bar.projectTitle}\n${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}\nClick to edit dates`}
+                    className="gantt-label-col emp-gantt-project-label"
+                    onClick={() => onOpenProject(row.projectKey)}
+                    title={`${row.projectTitle}\n${row.phaseTitle}\n${fmtShort(row.start)} → ${fmtShort(row.end)}`}
                   >
-                    <div className="gantt-label-col">
-                      <span className={`gantt-kind-tag ${bar.kind}`}>
-                        {bar.kind === 'phase' ? 'Ph' : bar.kind === 'task' ? 'Tk' : 'Sub'}
+                    <span className="gantt-kind-tag phase">Ph</span>
+                    <span className="gantt-label-text">
+                      {row.phaseTitle}
+                      <span className="emp-gantt-seg-count mono">
+                        {row.projectTitle}
+                        {row.segments.length ? ` · ${row.segments.length} dated` : ''}
                       </span>
-                      <span className="gantt-label-text">
-                        {projectKey
-                          ? bar.label.replace(`${bar.projectTitle} · `, '')
-                          : bar.kind === 'phase'
-                            ? bar.label
-                            : `${bar.projectTitle} · ${bar.label}`}
-                      </span>
-                    </div>
-                    <div className="gantt-timeline" style={{ width: timelineWidth }}>
-                      {todayPct != null ? (
-                        <div className="gantt-today-line" style={{ left: `${todayPct}%` }} />
-                      ) : null}
-                      {bar.milestone ? (
-                        <div
-                          className={`gantt-milestone tone-${bar.tone}`}
-                          style={{ left: `${left}%` }}
-                        />
-                      ) : (
-                        <div
-                          className={`gantt-bar tone-${bar.tone}`}
-                          style={{ left: `${left}%`, width: `${width}%` }}
-                        >
-                          <span className="gantt-bar-label">
-                            {bar.kind === 'phase' && !projectKey ? bar.projectTitle : ''}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                    </span>
                   </button>
-                );
-              })}
+                  <div className="gantt-timeline" style={{ width: timelineWidth }}>
+                    {todayPct != null ? (
+                      <div className="gantt-today-line" style={{ left: `${todayPct}%` }} />
+                    ) : null}
+                    {row.segments.map((bar) => {
+                      const clipped = visibleSpan(bar.start, bar.end, bounds.start, bounds.end);
+                      if (!clipped) return null;
+                      const left = barLeftPct(clipped.start, bounds.start, totalDays);
+                      const width = Math.max(
+                        barWidthPct(clipped.start, clipped.end, totalDays),
+                        0.5,
+                      );
+                      const hi = selected?.id === bar.id;
+                      if (bar.milestone) {
+                        return (
+                          <button
+                            key={bar.id}
+                            type="button"
+                            className={`gantt-milestone tone-${bar.tone} emp-gantt-seg${hi ? ' selected' : ''}`}
+                            style={{ left: `${left}%` }}
+                            title={`${bar.label}\n${fmtShort(bar.start)}\nClick to edit dates`}
+                            onClick={() => setSelected(bar)}
+                          />
+                        );
+                      }
+                      return (
+                        <button
+                          key={bar.id}
+                          type="button"
+                          className={`gantt-bar tone-${bar.tone} emp-gantt-seg${hi ? ' selected' : ''}`}
+                          style={{ left: `${left}%`, width: `${width}%` }}
+                          title={`${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}\nClick to edit dates`}
+                          onClick={() => setSelected(bar)}
+                        >
+                          <span className="gantt-bar-label">{bar.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

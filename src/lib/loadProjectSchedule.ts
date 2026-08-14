@@ -1,3 +1,4 @@
+import { displayPhaseTitle, isSchedulePhaseRow } from './scheduleSections';
 import { supabase } from './supabase';
 import type { ScheduleMeta, ScheduleRow } from './scheduleTypes';
 
@@ -52,8 +53,8 @@ export function scheduleDeliverables(rows: ScheduleRow[]) {
   }[] = [];
 
   for (const row of rows) {
-    if (row.row_kind === 'phase') {
-      section = row.task || 'Phase';
+    if (isSchedulePhaseRow(row)) {
+      section = displayPhaseTitle(row.task || 'Phase');
       continue;
     }
     if (row.row_kind !== 'task' && row.row_kind !== 'subtask') continue;

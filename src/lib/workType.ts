@@ -62,5 +62,7 @@ export function classifyWorkType(
   ) {
     return 'New';
   }
+  // Firm Project List often uses "X Residence" without "New" — treat as new residence.
+  if (/\bresidence\b|\bhouse\b|\bhome\b/.test(n)) return 'New';
   return 'Other';
 }

@@ -152,14 +152,70 @@ export function ganttTimelineBounds(bars: GanttBar[]): { start: Date; end: Date 
   return { start, end };
 }
 
+/** Today through the next 6 days (7-day current/upcoming week window). */
+export function upcomingWeekBounds(from: Date = new Date()): { start: Date; end: Date } {
+  const start = startOfDay(from);
+  const end = startOfDay(from);
+  end.setDate(end.getDate() + 6);
+  return { start, end };
+}
+
+/** First through last day of the calendar month containing `from`. */
+export function currentMonthBounds(from: Date = new Date()): { start: Date; end: Date } {
+  const start = startOfDay(new Date(from.getFullYear(), from.getMonth(), 1));
+  const end = startOfDay(new Date(from.getFullYear(), from.getMonth() + 1, 0));
+  return { start, end };
+}
+
+export type GanttTickScale = 'week' | 'month' | 'custom';
+
 export type GanttTick = { date: Date; label: string; major: boolean };
 
-/** Month ticks (major) with optional week ticks. */
+/** Month ticks (major) with optional week/day ticks. */
 export function ganttTicks(
   start: Date,
   end: Date,
-  scale: 'week' | 'month',
+  scale: GanttTickScale,
 ): GanttTick[] {
+  const spanDays = Math.max(daysBetween(start, end), 0) + 1;
+
+  // Short windows → one tick per day
+  if (spanDays <= 16) {
+    const ticks: GanttTick[] = [];
+    const cursor = new Date(start);
+    while (cursor.getTime() <= end.getTime()) {
+      ticks.push({
+        date: new Date(cursor),
+        label: cursor.toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'numeric',
+          day: 'numeric',
+        }),
+        major: true,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return ticks;
+  }
+
+  // Medium custom / month windows → week ticks
+  if (scale === 'custom' || scale === 'month' || (scale === 'week' && spanDays <= 45)) {
+    if (spanDays <= 45) {
+      const ticks: GanttTick[] = [];
+      const cursor = new Date(start);
+      // Align to Monday-ish: step by 7 from start
+      while (cursor.getTime() <= end.getTime()) {
+        ticks.push({
+          date: new Date(cursor),
+          label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          major: true,
+        });
+        cursor.setDate(cursor.getDate() + 7);
+      }
+      return ticks;
+    }
+  }
+
   const ticks: GanttTick[] = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
 
@@ -169,18 +225,6 @@ export function ganttTicks(
       label: cursor.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
       major: true,
     });
-    if (scale === 'week') {
-      const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-      for (let d = 8; d <= monthEnd.getDate(); d += 7) {
-        const week = new Date(cursor.getFullYear(), cursor.getMonth(), d);
-        if (week.getTime() < start.getTime() || week.getTime() > end.getTime()) continue;
-        ticks.push({
-          date: week,
-          label: String(d),
-          major: false,
-        });
-      }
-    }
     cursor.setMonth(cursor.getMonth() + 1);
   }
   return ticks;

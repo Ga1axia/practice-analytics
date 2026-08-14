@@ -1,7 +1,18 @@
+import {
+  AUTOFILL_MARKER,
+  PRESET_PHASE_DAYS,
+  PRESET_STRUCTURE_MARKER,
+  presetIncludesDates,
+  type SchedulePresetKind,
+  withAutofillMarker,
+  withPresetStructureMarker,
+} from './scheduleAutofill';
 import skeleton from './data/firmScheduleSkeleton.json';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from './architecturalProcess';
+import { isSchedulePhaseRow } from './scheduleSections';
 import { parseScheduleDate } from './scheduleDates';
 import type { ScheduleRow, ScheduleRowKind } from './scheduleTypes';
+
 type SkeletonRow = {
   sort_order: number;
   row_kind: ScheduleRowKind;
@@ -9,7 +20,7 @@ type SkeletonRow = {
   na: boolean;
 };
 
-/** Typical phase length in calendar days (firm averages). */
+/** Fallback phase lengths when no preset is supplied (legacy / admin auto-seed). */
 const PHASE_DAYS: Record<string, number> = {
   'pre-design': 28,
   schematic: 56,
@@ -22,11 +33,15 @@ const PHASE_DAYS: Record<string, number> = {
   additional: 60,
 };
 
-function phaseDaysForTitle(title: string): number {
+function phaseDaysForTitle(title: string, preset?: SchedulePresetKind): number {
   const idx = matchProcessPhaseIndex(title);
-  if (idx >= 0 && PROCESS_PHASES[idx]) {
-    return PHASE_DAYS[PROCESS_PHASES[idx]!.id] || 28;
+  const phaseId = idx >= 0 ? PROCESS_PHASES[idx]?.id : undefined;
+  if (preset && phaseId) {
+    const fromPreset = PRESET_PHASE_DAYS[preset][phaseId];
+    if (fromPreset) return fromPreset;
   }
+  if (phaseId && PHASE_DAYS[phaseId]) return PHASE_DAYS[phaseId]!;
+
   const t = title.toLowerCase();
   if (t.includes('value')) return 14;
   if (t.includes('interior')) return 70;
@@ -65,7 +80,7 @@ function hasDate(row: Pick<ScheduleRow, 'target_start' | 'target_end' | 'budget_
   );
 }
 
-type DatedDraft = {
+export type DatedDraft = {
   sort_order: number;
   row_kind: ScheduleRowKind;
   task: string;
@@ -78,13 +93,30 @@ type DatedDraft = {
   estimate_time: string;
   mdesigns_comments: string;
   client_comments: string;
+  assignee_name: string;
+};
+
+export type BuildScheduleOptions = {
+  /** Project kind — drives phase gap table. */
+  preset?: SchedulePresetKind;
+  /**
+   * When false, seed checklist rows with empty target dates (Interior).
+   * Defaults to true unless preset is Interior.
+   */
+  includeDates?: boolean;
 };
 
 /**
  * Build firm checklist rows with cascading target dates from kickoff.
  * Phases get rollup start/end; tasks/subtasks are spaced inside each phase.
  */
-export function buildDatedScheduleRows(kickoff: Date = new Date()): DatedDraft[] {
+export function buildDatedScheduleRows(
+  kickoff: Date = new Date(),
+  options?: BuildScheduleOptions,
+): DatedDraft[] {
+  const preset = options?.preset;
+  const includeDates =
+    options?.includeDates ?? (preset ? presetIncludesDates(preset) : true);
   const rows = skeleton as SkeletonRow[];
   const out: DatedDraft[] = [];
 
@@ -113,13 +145,13 @@ export function buildDatedScheduleRows(kickoff: Date = new Date()): DatedDraft[]
   for (const item of kickoffItems) {
     const start = cursor;
     const end = addDays(start, item.na ? 0 : 2);
-    out.push(draftFromSkeleton(item, start, end, item.na ? 'N/A' : 'Active'));
+    out.push(draftFromSkeleton(item, start, end, item.na ? 'N/A' : 'Active', includeDates));
     if (!item.na) cursor = addDays(end, 1);
   }
 
   for (const block of blocks) {
     const phaseTitle = block.phase?.task || 'Phase';
-    const days = phaseDaysForTitle(phaseTitle);
+    const days = phaseDaysForTitle(phaseTitle, preset);
     const phaseStart = cursor;
     const phaseEnd = addDays(phaseStart, Math.max(days, 7));
 
@@ -128,20 +160,18 @@ export function buildDatedScheduleRows(kickoff: Date = new Date()): DatedDraft[]
       activeItems.length > 0 ? Math.max(2, Math.floor(days / Math.max(activeItems.length, 1))) : 7;
 
     if (block.phase) {
-      out.push(
-        draftFromSkeleton(block.phase, phaseStart, phaseEnd, 'Active'),
-      );
+      out.push(draftFromSkeleton(block.phase, phaseStart, phaseEnd, 'Active', includeDates));
     }
 
     let itemCursor = phaseStart;
     for (const item of block.items) {
       if (item.na) {
-        out.push(draftFromSkeleton(item, phaseStart, phaseStart, 'N/A'));
+        out.push(draftFromSkeleton(item, phaseStart, phaseStart, 'N/A', includeDates));
         continue;
       }
       const start = itemCursor;
       const end = addDays(start, Math.max(1, Math.floor(step * 0.7)));
-      out.push(draftFromSkeleton(item, start, end, 'Active'));
+      out.push(draftFromSkeleton(item, start, end, 'Active', includeDates));
       itemCursor = addDays(itemCursor, step);
       if (itemCursor.getTime() > phaseEnd.getTime()) itemCursor = phaseEnd;
     }
@@ -157,20 +187,27 @@ function draftFromSkeleton(
   start: Date,
   end: Date,
   status: string,
+  includeDates: boolean,
 ): DatedDraft {
+  const dated = includeDates && status !== 'N/A';
   return {
     sort_order: item.sort_order,
     row_kind: item.row_kind,
     task: item.task,
     budget_remaining: status,
-    target_start: status === 'N/A' ? '' : fmtUS(start),
-    target_end: status === 'N/A' ? '' : fmtUS(end),
+    target_start: dated ? fmtUS(start) : '',
+    target_end: dated ? fmtUS(end) : '',
     actual_start: '',
     actual_end: '',
-    action: '',
+    action: dated
+      ? withAutofillMarker()
+      : status === 'N/A'
+        ? ''
+        : withPresetStructureMarker(),
     estimate_time: '',
     mdesigns_comments: '',
     client_comments: '',
+    assignee_name: '',
   };
 }
 
@@ -180,12 +217,20 @@ function draftFromSkeleton(
 export function proposeMissingDates(
   rows: ScheduleRow[],
   kickoff: Date = new Date(),
-): { id: string; target_start: string; target_end: string; budget_remaining: string }[] {
+  options?: { preset?: SchedulePresetKind },
+): {
+  id: string;
+  target_start: string;
+  target_end: string;
+  budget_remaining: string;
+  action: string;
+}[] {
   const updates: {
     id: string;
     target_start: string;
     target_end: string;
     budget_remaining: string;
+    action: string;
   }[] = [];
 
   let cursor = kickoff;
@@ -199,7 +244,7 @@ export function proposeMissingDates(
   const phaseItemCounts = new Map<number, number>();
   let phaseIdx = -1;
   for (const row of rows) {
-    if (row.row_kind === 'phase') {
+    if (isSchedulePhaseRow(row)) {
       phaseIdx += 1;
       phaseItemCounts.set(phaseIdx, 0);
       continue;
@@ -212,9 +257,9 @@ export function proposeMissingDates(
 
   phaseIdx = -1;
   for (const row of rows) {
-    if (row.row_kind === 'phase') {
+    if (isSchedulePhaseRow(row)) {
       phaseIdx += 1;
-      phaseDays = phaseDaysForTitle(row.task);
+      phaseDays = phaseDaysForTitle(row.task, options?.preset);
       phaseEnd = addDays(cursor, phaseDays);
       itemsInPhase = phaseItemCounts.get(phaseIdx) || 1;
       step = Math.max(2, Math.floor(phaseDays / Math.max(itemsInPhase, 1)));
@@ -226,6 +271,7 @@ export function proposeMissingDates(
           target_start: fmtUS(cursor),
           target_end: fmtUS(phaseEnd),
           budget_remaining: row.budget_remaining?.trim() || 'Active',
+          action: withAutofillMarker(row.action),
         });
       }
       cursor = addDays(phaseEnd, 1);
@@ -246,6 +292,7 @@ export function proposeMissingDates(
       target_start: fmtUS(start),
       target_end: fmtUS(end),
       budget_remaining: row.budget_remaining?.trim() || 'Active',
+      action: withAutofillMarker(row.action),
     });
     itemCursor = addDays(itemCursor, step);
   }
@@ -253,3 +300,5 @@ export function proposeMissingDates(
   return updates;
 }
 
+/** Re-export markers for callers that only import dating. */
+export { AUTOFILL_MARKER, PRESET_STRUCTURE_MARKER };

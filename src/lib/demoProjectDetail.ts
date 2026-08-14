@@ -46,6 +46,7 @@ function row(
     estimate_time: '',
     mdesigns_comments: firm,
     client_comments: client,
+    assignee_name: '',
   };
 }
 

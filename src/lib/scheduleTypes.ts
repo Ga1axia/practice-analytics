@@ -5,6 +5,8 @@ export type ScheduleMeta = {
   project_key: string;
   client_name: string;
   title: string;
+  /** Project start / kickoff as M/D/YYYY (optional until column is migrated). */
+  start_date?: string;
 };
 
 export type ScheduleRow = {
@@ -22,6 +24,8 @@ export type ScheduleRow = {
   estimate_time: string;
   mdesigns_comments: string;
   client_comments: string;
+  /** Employee assigned to this task (empty = unassigned). */
+  assignee_name: string;
 };
 
 export type ScheduleField = keyof Pick<
@@ -36,4 +40,5 @@ export type ScheduleField = keyof Pick<
   | 'estimate_time'
   | 'mdesigns_comments'
   | 'client_comments'
+  | 'assignee_name'
 >;

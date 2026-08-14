@@ -170,6 +170,7 @@ create table if not exists public.pa_schedules (
   project_key text not null unique,
   client_name text,
   title text,
+  start_date text not null default '',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -189,7 +190,18 @@ create table if not exists public.pa_schedule_rows (
   estimate_time text not null default '',
   mdesigns_comments text not null default '',
   client_comments text not null default '',
+  assignee_name text not null default '',
   updated_at timestamptz default now()
+);
+
+-- Project team membership (see migration 20260813_project_members_assignee.sql)
+create table if not exists public.pa_project_members (
+  id uuid primary key default gen_random_uuid(),
+  project_key text not null,
+  employee_name text not null,
+  role text not null default 'member' check (role in ('lead', 'member')),
+  created_at timestamptz not null default now(),
+  unique (project_key, employee_name)
 );
 
 create index if not exists pa_schedule_rows_schedule_idx

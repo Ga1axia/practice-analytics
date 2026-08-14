@@ -29,6 +29,8 @@ export async function loadEmployeeGantt(
         projectKey: p.key,
         clientName: p.clientName,
         title: p.title,
+        autoSeed: false,
+        autoDate: false,
       });
       if (res.error) errors.push(`${p.title}: ${res.error}`);
       if (!res.rows.length) return;
@@ -69,6 +71,83 @@ export function filterEmployeeGanttBars(
   else if (kind === 'subtasks') list = list.filter((b) => b.kind === 'subtask');
   else if (kind === 'deadlines') list = list.filter((b) => b.milestone);
   return list;
+}
+
+/** One swimlane per phase — segments are dated tasks/subtasks (phase rollup if nothing else). */
+export type EmployeeGanttPhaseRow = {
+  id: string;
+  projectKey: string;
+  projectTitle: string;
+  clientName: string;
+  phaseTitle: string;
+  start: Date;
+  end: Date;
+  segments: EmployeeGanttBar[];
+};
+
+function phaseTitleOf(bar: EmployeeGanttBar): string {
+  const prefix = `${bar.projectTitle} · `;
+  if (bar.section.startsWith(prefix)) return bar.section.slice(prefix.length);
+  if (bar.kind === 'phase') {
+    if (bar.label.startsWith(prefix)) return bar.label.slice(prefix.length);
+    return bar.label;
+  }
+  return bar.section || 'Phase';
+}
+
+export function groupEmployeeGanttByPhase(
+  bars: EmployeeGanttBar[],
+): EmployeeGanttPhaseRow[] {
+  const map = new Map<string, EmployeeGanttBar[]>();
+  for (const b of bars) {
+    const key = `${b.projectKey}::${phaseTitleOf(b)}`;
+    const list = map.get(key) || [];
+    list.push(b);
+    map.set(key, list);
+  }
+
+  const rows: EmployeeGanttPhaseRow[] = [];
+  for (const [id, list] of map) {
+    const first = list[0]!;
+    const hasWork = list.some((b) => b.kind !== 'phase');
+    const segments = (hasWork ? list.filter((b) => b.kind !== 'phase') : list)
+      .slice()
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+    if (!segments.length) continue;
+    let start = segments[0]!.start;
+    let end = segments[0]!.end;
+    for (const s of segments) {
+      if (s.start.getTime() < start.getTime()) start = s.start;
+      if (s.end.getTime() > end.getTime()) end = s.end;
+    }
+    rows.push({
+      id,
+      projectKey: first.projectKey,
+      projectTitle: first.projectTitle,
+      clientName: first.clientName,
+      phaseTitle: phaseTitleOf(first),
+      start,
+      end,
+      segments,
+    });
+  }
+
+  rows.sort((a, b) => {
+    const pc = a.projectTitle.localeCompare(b.projectTitle, undefined, { sensitivity: 'base' });
+    if (pc !== 0) return pc;
+    return a.start.getTime() - b.start.getTime();
+  });
+  return rows;
+}
+
+/** True when a span overlaps [rangeStart, rangeEnd] (inclusive days). */
+export function rangeIntersects(
+  start: Date,
+  end: Date,
+  rangeStart: Date,
+  rangeEnd: Date,
+): boolean {
+  return start.getTime() <= rangeEnd.getTime() && end.getTime() >= rangeStart.getTime();
 }
 
 export { ganttTimelineBounds };

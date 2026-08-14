@@ -7,6 +7,31 @@ export type ScheduleSection = {
   items: ScheduleRow[];
 };
 
+/**
+ * Spreadsheet headers that were stored as `phase` but belong under a parent
+ * process phase (Value Engineering sits inside Contractor Selection).
+ */
+export function isScheduleSubphaseTitle(title: string): boolean {
+  return /^value engineering\b/i.test((title || '').trim());
+}
+
+export function isSchedulePhaseRow(row: Pick<ScheduleRow, 'row_kind' | 'task'>): boolean {
+  return row.row_kind === 'phase' && !isScheduleSubphaseTitle(row.task);
+}
+
+const INTERIOR_PHASE_NOTE =
+  /\s*\(\s*Schedule more defined once scope and timing of when we are starting is defined\s*\)\s*/i;
+
+/** Phase labels shown in the UI (drops leftover spreadsheet notes). */
+export function displayPhaseTitle(title: string): string {
+  const cleaned = (title || '').replace(INTERIOR_PHASE_NOTE, '').trim();
+  return cleaned || title || 'Untitled phase';
+}
+
+function asSectionTask(row: ScheduleRow): ScheduleRow {
+  return row.row_kind === 'task' ? row : { ...row, row_kind: 'task' };
+}
+
 /** Group flat schedule rows into phase sections (plus a kickoff block before the first phase). */
 export function groupScheduleSections(rows: ScheduleRow[]): ScheduleSection[] {
   const sections: ScheduleSection[] = [];
@@ -18,7 +43,11 @@ export function groupScheduleSections(rows: ScheduleRow[]): ScheduleSection[] {
   };
 
   for (const row of rows) {
-    if (row.row_kind === 'phase') {
+    if (row.row_kind === 'phase' && isScheduleSubphaseTitle(row.task) && (current.phaseRow || current.items.length)) {
+      current.items.push(asSectionTask(row));
+      continue;
+    }
+    if (isSchedulePhaseRow(row)) {
       if (current.items.length > 0 || current.phaseRow) {
         sections.push(current);
       } else if (sections.length === 0 && current.items.length === 0) {
@@ -26,7 +55,7 @@ export function groupScheduleSections(rows: ScheduleRow[]): ScheduleSection[] {
       }
       current = {
         id: row.id,
-        title: row.task || 'Untitled phase',
+        title: displayPhaseTitle(row.task),
         phaseRow: row,
         items: [],
       };

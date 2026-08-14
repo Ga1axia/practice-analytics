@@ -25,7 +25,7 @@ insert into public.pa_schedule_rows (
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',79,'task','Building Comments second round','8/21/2026','8/21/2026','3 weeks','','','','','',''),
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',80,'task','Construction Document Re-Submittal','','','','','','','','',''),
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',81,'task','Permit Approval tentative','8/28/2026','8/28/2026','','','','','','',''),
-('5108f498-e9e9-42cc-b893-ecf79c8dbc30',82,'phase','Interior Design (Schedule more defined once scope and timing of when we are starting is defined)','Active','See Interior Design Schedule','','','','','','',''),
+('5108f498-e9e9-42cc-b893-ecf79c8dbc30',82,'phase','Interior Design','Active','See Interior Design Schedule','','','','','','',''),
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',83,'task','Interior design (Takes 2-3 months typically)','2/23/2026','','','','','','','',''),
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',84,'phase','Other items for clients to think about','Not Active','','','','','','','',''),
 ('5108f498-e9e9-42cc-b893-ecf79c8dbc30',85,'task','Moving and storage','','','','','','','','',''),

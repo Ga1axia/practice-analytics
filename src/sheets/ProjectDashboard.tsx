@@ -3,7 +3,6 @@ import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientProjectBoard } from '../components/ClientProjectBoard';
 import { DoughnutChart, GaugeRing, VBarChart } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
-import { PlanSetsPanel } from '../components/PlanSetsPanel';
 import { ProjectHoursBreakdown } from '../components/ProjectHoursBreakdown';
 import { ScheduleDeadlineCalendar } from '../components/ScheduleDeadlineCalendar';
 import { useAuth } from '../hooks/useAuth';
@@ -634,10 +633,6 @@ export function ProjectDashboard({
             projectFullName={project.key || project.row?.project || project.title}
             projectCode={project.code}
           />
-
-          <div className="panel">
-            <PlanSetsPanel projectKey={project.key} projectTitle={project.title} />
-          </div>
 
           <div className="panel">
             <h3>

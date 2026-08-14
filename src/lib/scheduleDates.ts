@@ -1,3 +1,4 @@
+import { displayPhaseTitle, isSchedulePhaseRow } from './scheduleSections';
 import type { ScheduleRow } from './scheduleTypes';
 
 const STATUS_WORDS =
@@ -71,8 +72,8 @@ export function buildDeadlineEvents(
 
   let section = 'Project';
   for (const row of rows) {
-    if (row.row_kind === 'phase') {
-      section = row.task || 'Phase';
+    if (isSchedulePhaseRow(row)) {
+      section = displayPhaseTitle(row.task || 'Phase');
       continue; // calendar focuses on tasks/subtasks
     }
     if (row.row_kind !== 'task' && row.row_kind !== 'subtask') continue;

@@ -26,6 +26,7 @@ export type ScheduleRow = {
   client_comments: string;
   /** Employee assigned to this task (empty = unassigned). */
   assignee_name: string;
+  updated_at?: string | null;
 };
 
 export type ScheduleField = keyof Pick<

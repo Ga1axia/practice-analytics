@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { displayPhaseTitleClient, displayTaskTitle } from '../lib/clientCopy';
+import { downloadDeadlineIcs, urgencyClass } from '../lib/clientPortal';
 import {
   buildDeadlineEvents,
   monthMatrix,
@@ -40,8 +42,8 @@ function EventList({ events, empty }: { events: DeadlineEvent[]; empty: string }
     <ul className="cp-cal-event-list">
       {events.map((e) => (
         <li key={e.id} className={`kind-${e.kind}`}>
-          <span className="sec mono">{e.section}</span>
-          <strong>{e.task}</strong>
+          <span className="sec mono">{displayPhaseTitleClient(e.section)}</span>
+          <strong>{displayTaskTitle(e.task)}</strong>
           <span className="meta">
             {e.dateKey} · {e.kind}
             {e.status ? ` · ${e.status}` : ''}
@@ -54,18 +56,25 @@ function EventList({ events, empty }: { events: DeadlineEvent[]; empty: string }
 
 export function ScheduleDeadlineCalendar({
   projectKey,
+  projectTitle = 'Project',
   corner = true,
+  variant,
   rowsOverride = null,
   layout = 'split',
 }: {
   projectKey: string;
+  projectTitle?: string;
   /** Compact corner widget that expands for detail (default). */
   corner?: boolean;
+  /** sidebar = in-flow list (client portal); corner = floating; page = full calendar. */
+  variant?: 'sidebar' | 'corner' | 'page';
   /** When set, skip Supabase and render these rows (demo / seeded data). */
   rowsOverride?: ScheduleRow[] | null;
   /** Embedded full calendar: split (grid + side lists) or calendar-only. */
   layout?: 'split' | 'calendar';
 }) {
+  const mode: 'sidebar' | 'corner' | 'page' =
+    variant || (corner ? 'corner' : 'page');
   const [rows, setRows] = useState<ScheduleRow[]>(rowsOverride || []);
   const [loading, setLoading] = useState(!rowsOverride);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +137,10 @@ export function ScheduleDeadlineCalendar({
   }, [load]);
 
   useEffect(() => {
+    if (rowsOverride) setRows(rowsOverride);
+  }, [rowsOverride]);
+
+  useEffect(() => {
     if (!expanded) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setExpanded(false);
@@ -188,7 +201,7 @@ export function ScheduleDeadlineCalendar({
 
   function openDay(day: Date) {
     setSelected(startOfDay(day));
-    if (corner && !expanded) setExpanded(true);
+    if (mode !== 'page' && !expanded) setExpanded(true);
   }
 
   function renderGrid(compact: boolean) {
@@ -219,6 +232,7 @@ export function ScheduleDeadlineCalendar({
               );
               const shown = list.slice(0, compact ? 2 : 3);
               const extra = list.length - shown.length;
+              const urg = (e: DeadlineEvent) => urgencyClass(e.date, today);
               return (
                 <button
                   key={key}
@@ -232,7 +246,7 @@ export function ScheduleDeadlineCalendar({
                   {list.length && compact ? (
                     <span className="cp-cal-dots" aria-hidden="true">
                       {shown.map((e) => (
-                        <i key={e.id} className={`dot ${statusTone(e.status)}`} />
+                        <i key={e.id} className={`dot urg-${urg(e)}`} />
                       ))}
                       {extra > 0 ? <span className="more">+{extra}</span> : null}
                     </span>
@@ -318,27 +332,54 @@ export function ScheduleDeadlineCalendar({
     </div>
   );
 
+  const upcomingShort = upcoming.slice(0, 5);
+
+  const overlay = expanded ? (
+    <div
+      className="cp-cal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Deadline calendar detail"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setExpanded(false);
+      }}
+    >
+      <div className="cp-cal-overlay-panel">
+        <div className="cp-cal-overlay-bar">
+          <div>
+            <p className="customer-kicker">Task &amp; subtask calendar</p>
+            <strong>Deadlines for this project</strong>
+          </div>
+          <button type="button" className="cp-cal-expand-btn" onClick={() => setExpanded(false)}>
+            Close
+          </button>
+        </div>
+        <div className="cp-cal-overlay-body">{detailBody}</div>
+      </div>
+    </div>
+  ) : null;
+
   if (loading && !rows.length) {
-    return corner ? (
-      <aside className="cp-cal-corner" aria-busy="true">
+    return mode === 'page' ? (
+      <p className="cp-status">Loading deadline calendar…</p>
+    ) : (
+      <aside className={mode === 'sidebar' ? 'cp-cal-sidewidget' : 'cp-cal-corner'} aria-busy="true">
         <p className="cp-cal-corner-status">Loading…</p>
       </aside>
-    ) : (
-      <p className="cp-status">Loading deadline calendar…</p>
     );
   }
 
   if (error) {
-    return corner ? (
-      <aside className="cp-cal-corner">
+    return mode === 'page' ? (
+      <p className="cp-status err">{error}</p>
+    ) : (
+      <aside className={mode === 'sidebar' ? 'cp-cal-sidewidget' : 'cp-cal-corner'}>
         <p className="cp-cal-corner-status err">{error}</p>
       </aside>
-    ) : (
-      <p className="cp-status err">{error}</p>
     );
   }
 
-  if (!corner) {
+  if (mode === 'page') {
     if (!rows.length) {
       return (
         <p className="cp-comms-hint">
@@ -347,6 +388,55 @@ export function ScheduleDeadlineCalendar({
       );
     }
     return <div className="cp-cal">{detailBody}</div>;
+  }
+
+  if (mode === 'sidebar') {
+    return (
+      <>
+        <aside className="cp-cal-sidewidget" aria-label="Upcoming deadlines">
+          <div className="cp-cal-corner-head">
+            <div>
+              <p className="customer-kicker">Deadlines</p>
+              <strong>Next up</strong>
+            </div>
+            <div className="cp-cal-corner-actions">
+              {upcomingShort.length ? (
+                <button
+                  type="button"
+                  className="cp-text-btn"
+                  onClick={() => downloadDeadlineIcs(upcomingShort, projectTitle)}
+                >
+                  Add to calendar
+                </button>
+              ) : null}
+              <button type="button" className="cp-cal-expand-btn" onClick={() => setExpanded(true)}>
+                Expand
+              </button>
+            </div>
+          </div>
+          {!rows.length ? (
+            <p className="cp-cal-corner-status">No dated tasks yet. Deadlines appear once the schedule has target dates.</p>
+          ) : upcomingShort.length ? (
+            <ul className="cp-cal-upcoming">
+              {upcomingShort.map((e) => (
+                <li key={e.id} className={`urg-${urgencyClass(e.date, today)}`}>
+                  <span className="when mono">
+                    {e.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </span>
+                  <span className="what">
+                    <strong>{displayTaskTitle(e.task)}</strong>
+                    <span className="sec">{displayPhaseTitleClient(e.section)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="cp-cal-corner-status">No upcoming dated tasks on the schedule.</p>
+          )}
+        </aside>
+        {overlay}
+      </>
+    );
   }
 
   // Corner widget
@@ -386,7 +476,7 @@ export function ScheduleDeadlineCalendar({
               </span>
               {nextUp ? (
                 <button type="button" className="cp-cal-next" onClick={() => setExpanded(true)}>
-                  Next: {nextUp.task}
+                  Next: {displayTaskTitle(nextUp.task)}
                 </button>
               ) : (
                 <button type="button" className="cp-cal-next" onClick={() => setExpanded(true)}>
@@ -397,31 +487,7 @@ export function ScheduleDeadlineCalendar({
           </>
         )}
       </aside>
-
-      {expanded ? (
-        <div
-          className="cp-cal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Deadline calendar detail"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setExpanded(false);
-          }}
-        >
-          <div className="cp-cal-overlay-panel">
-            <div className="cp-cal-overlay-bar">
-              <div>
-                <p className="customer-kicker">Task &amp; subtask calendar</p>
-                <strong>Deadlines for this project</strong>
-              </div>
-              <button type="button" className="cp-cal-expand-btn" onClick={() => setExpanded(false)}>
-                Close
-              </button>
-            </div>
-            <div className="cp-cal-overlay-body">{detailBody}</div>
-          </div>
-        </div>
-      ) : null}
+      {overlay}
     </>
   );
 }

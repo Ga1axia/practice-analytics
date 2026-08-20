@@ -763,6 +763,10 @@ export function ProjectDashboard({
                       status,
                       city,
                       phase: phaseRaw,
+                      contract,
+                      billed,
+                      spent,
+                      ar: outstanding,
                     }}
                   />
                 </div>

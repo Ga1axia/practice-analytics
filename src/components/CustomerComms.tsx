@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { displayPhaseTitleClient, displayTaskTitle, glossaryTitle } from '../lib/clientCopy';
+import { needsClientReply, portalSeenAt } from '../lib/clientPortal';
 import {
   defaultExpandedSectionIds,
   groupScheduleSections,
@@ -16,42 +18,60 @@ function StatusPill({ value }: { value: string }) {
 }
 
 function needsAttention(row: ScheduleRow): boolean {
-  const tone = statusTone(row.budget_remaining);
-  if (tone === 'active') return true;
-  const firm = row.mdesigns_comments.trim();
-  const client = row.client_comments.trim();
-  if (firm && !client) return true;
-  return false;
+  return needsClientReply(row);
 }
 
-function hasConversation(row: ScheduleRow): boolean {
-  return !!(row.mdesigns_comments.trim() || row.client_comments.trim() || needsAttention(row));
+function hasNotes(row: ScheduleRow): boolean {
+  return !!(row.mdesigns_comments.trim() || row.client_comments.trim());
+}
+
+function formatStamp(iso: string | null | undefined) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 export function CustomerComms({
   projectKey,
   highlightPhase,
   managerName,
+  rowsOverride = null,
+  onNeedsCount,
 }: {
   projectKey: string;
   highlightPhase?: string | null;
   managerName?: string | null;
+  rowsOverride?: ScheduleRow[] | null;
+  onNeedsCount?: (n: number) => void;
 }) {
   const [schedule, setSchedule] = useState<ScheduleMeta | null>(null);
-  const [rows, setRows] = useState<ScheduleRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<ScheduleRow[]>(rowsOverride || []);
+  const [loading, setLoading] = useState(!rowsOverride);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('needs_you');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [phaseId, setPhaseId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const sections = useMemo(() => groupScheduleSections(rows), [rows]);
+  const seen = portalSeenAt(projectKey);
 
   const load = useCallback(async () => {
+    if (rowsOverride) {
+      setRows(rowsOverride);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
-    // RLS already scopes to this client — prefer exact project match, else first schedule.
     const { data: scheds, error: sErr } = await supabase
       .from('pa_schedules')
       .select('id, project_key, client_name, title')
@@ -64,9 +84,10 @@ export function CustomerComms({
     const list = (scheds || []) as ScheduleMeta[];
     const meta =
       list.find((s) => s.project_key === projectKey) ||
-      list.find((s) =>
-        projectKey.toLowerCase().includes(s.project_key.toLowerCase()) ||
-        s.project_key.toLowerCase().includes(projectKey.toLowerCase()),
+      list.find(
+        (s) =>
+          projectKey.toLowerCase().includes(s.project_key.toLowerCase()) ||
+          s.project_key.toLowerCase().includes(projectKey.toLowerCase()),
       ) ||
       list[0] ||
       null;
@@ -88,11 +109,15 @@ export function CustomerComms({
     }
     setRows((rowData || []) as ScheduleRow[]);
     setLoading(false);
-  }, [projectKey]);
+  }, [projectKey, rowsOverride]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (rowsOverride) setRows(rowsOverride);
+  }, [rowsOverride]);
 
   useEffect(() => {
     if (!sections.length) {
@@ -105,42 +130,37 @@ export function CustomerComms({
 
   const activeSection = sections.find((s) => s.id === phaseId) || null;
 
+  const needsItems = useMemo(() => {
+    const out: { row: ScheduleRow; sectionTitle: string }[] = [];
+    for (const s of sections) {
+      for (const row of s.items) {
+        if (needsAttention(row)) out.push({ row, sectionTitle: s.title });
+      }
+    }
+    return out;
+  }, [sections]);
+
+  useEffect(() => {
+    onNeedsCount?.(needsItems.length);
+  }, [needsItems.length, onNeedsCount]);
+
   const visibleItems = useMemo(() => {
     if (filter === 'all') {
       return sections.flatMap((s) =>
-        s.items.filter(hasConversation).map((row) => ({ row, sectionTitle: s.title })),
+        s.items.filter((row) => hasNotes(row) || needsAttention(row)).map((row) => ({
+          row,
+          sectionTitle: s.title,
+        })),
       );
     }
     if (filter === 'this_phase') {
       if (!activeSection) return [];
-      return activeSection.items.map((row) => ({ row, sectionTitle: activeSection.title }));
+      return activeSection.items
+        .filter((row) => hasNotes(row) || needsAttention(row))
+        .map((row) => ({ row, sectionTitle: activeSection.title }));
     }
-    // needs_you: prefer current phase actives / unanswered, then elsewhere
-    const scored: { row: ScheduleRow; sectionTitle: string; rank: number }[] = [];
-    for (const s of sections) {
-      const inPhase = s.id === phaseId;
-      for (const row of s.items) {
-        if (!needsAttention(row) && !row.mdesigns_comments.trim()) continue;
-        if (!needsAttention(row) && !hasConversation(row)) continue;
-        if (!needsAttention(row)) continue;
-        scored.push({
-          row,
-          sectionTitle: s.title,
-          rank: (inPhase ? 0 : 10) + (statusTone(row.budget_remaining) === 'active' ? 0 : 1),
-        });
-      }
-    }
-    scored.sort((a, b) => a.rank - b.rank);
-    if (scored.length) return scored.map(({ row, sectionTitle }) => ({ row, sectionTitle }));
-    // Fallback: current phase items so the client always has somewhere to write
-    if (activeSection) {
-      return activeSection.items.slice(0, 8).map((row) => ({
-        row,
-        sectionTitle: activeSection.title,
-      }));
-    }
-    return [];
-  }, [filter, sections, activeSection, phaseId]);
+    return needsItems;
+  }, [filter, sections, activeSection, needsItems]);
 
   async function persistComment(rowId: string, value: string) {
     setSavingId(rowId);
@@ -163,12 +183,12 @@ export function CustomerComms({
   }
 
   if (loading) {
-    return <p className="cp-status">Loading messages…</p>;
+    return <p className="cp-status">Loading notes that need your input…</p>;
   }
   if (error) {
     return <p className="cp-status err">{error}</p>;
   }
-  if (!schedule) {
+  if (!rowsOverride && !schedule && !rows.length) {
     return (
       <p className="cp-status">
         Your project schedule isn’t linked yet. Your project manager can still email you — check
@@ -182,10 +202,10 @@ export function CustomerComms({
   return (
     <div className="cp-comms">
       <div className="cp-comms-toolbar">
-        <div className="cp-filter-tabs" role="tablist" aria-label="Message filters">
+        <div className="cp-filter-tabs" role="tablist" aria-label="Schedule note filters">
           {(
             [
-              ['needs_you', 'Needs you'],
+              ['needs_you', `Needs you${needsItems.length ? ` (${needsItems.length})` : ''}`],
               ['this_phase', 'This phase'],
               ['all', 'All notes'],
             ] as const
@@ -194,7 +214,9 @@ export function CustomerComms({
               key={id}
               type="button"
               role="tab"
+              id={`cp-notes-tab-${id}`}
               aria-selected={filter === id}
+              aria-controls="cp-notes-panel"
               className={filter === id ? 'active' : ''}
               onClick={() => setFilter(id)}
             >
@@ -204,9 +226,10 @@ export function CustomerComms({
         </div>
         {sections.length > 1 ? (
           <label className="cp-phase-pick">
-            <span>Phase</span>
+            <span id="cp-phase-label">Phase</span>
             <select
               value={phaseId || ''}
+              aria-labelledby="cp-phase-label"
               onChange={(e) => {
                 setPhaseId(e.target.value);
                 if (filter === 'needs_you') setFilter('this_phase');
@@ -214,7 +237,7 @@ export function CustomerComms({
             >
               {sections.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.title}
+                  {displayPhaseTitleClient(s.title)}
                   {sectionStatus(s) ? ` · ${sectionStatus(s)}` : ''}
                 </option>
               ))}
@@ -227,67 +250,98 @@ export function CustomerComms({
       </div>
 
       <p className="cp-comms-hint">
-        Reply on any item below — {pm} sees your notes on the same schedule.
+        {needsItems.length
+          ? `${needsItems.length} item${needsItems.length === 1 ? '' : 's'} need your input. Click a row to reply.`
+          : `Nothing waiting on you. ${pm} will see any reply you leave on a note.`}
       </p>
 
-      {!visibleItems.length ? (
-        <div className="cp-empty-card">
-          <p>Nothing needs your reply right now.</p>
-          <button type="button" className="cp-text-btn" onClick={() => setFilter('this_phase')}>
-            Browse this phase
-          </button>
-        </div>
-      ) : (
-        <ul className="cp-thread">
-          {visibleItems.map(({ row, sectionTitle }) => {
-            const firm = row.mdesigns_comments.trim();
-            const urgent = needsAttention(row);
-            return (
-              <li key={row.id} className={`cp-msg-card${urgent ? ' urgent' : ''}`}>
-                <div className="cp-msg-head">
-                  <div>
-                    <span className="cp-msg-phase mono">{sectionTitle}</span>
-                    <h4 className="cp-msg-title">{row.task || 'Untitled'}</h4>
-                  </div>
-                  <StatusPill value={row.budget_remaining} />
-                </div>
+      <div id="cp-notes-panel" role="tabpanel" aria-labelledby={`cp-notes-tab-${filter}`}>
+        {!visibleItems.length ? (
+          <div className="cp-empty-card">
+            <p>
+              {filter === 'needs_you'
+                ? 'Nothing needs your reply right now.'
+                : 'No notes in this view yet.'}
+            </p>
+            {filter === 'needs_you' ? (
+              <button type="button" className="cp-text-btn" onClick={() => setFilter('all')}>
+                Browse all notes
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <ul className="cp-thread">
+            {visibleItems.map(({ row, sectionTitle }) => {
+              const firm = row.mdesigns_comments.trim();
+              const urgent = needsAttention(row);
+              const title = displayTaskTitle(row.task || 'Untitled');
+              const stamp = formatStamp(row.updated_at);
+              const unread =
+                !!(firm && row.updated_at && (!seen || new Date(row.updated_at) > seen));
+              const open = openId === row.id;
+              return (
+                <li key={row.id} className={`cp-msg-card${urgent ? ' urgent' : ''}${unread ? ' unread' : ''}`}>
+                  <button
+                    type="button"
+                    className="cp-msg-toggle"
+                    aria-expanded={open}
+                    onClick={() => setOpenId(open ? null : row.id)}
+                  >
+                    <div className="cp-msg-head">
+                      <div>
+                        <span className="cp-msg-phase mono">
+                          {displayPhaseTitleClient(sectionTitle)}
+                        </span>
+                        <h4 className="cp-msg-title" title={glossaryTitle(title)}>
+                          {title}
+                        </h4>
+                      </div>
+                      <div className="cp-msg-flags">
+                        {unread ? <span className="cp-unread-dot" aria-label="Unread PM note" /> : null}
+                        {urgent ? <span className="cp-need-badge">Needs you</span> : null}
+                        <StatusPill value={row.budget_remaining} />
+                      </div>
+                    </div>
+                    {(row.target_start.trim() || row.target_end.trim() || stamp) && (
+                      <p className="cp-msg-dates mono">
+                        {row.target_start.trim() ? `Start ${row.target_start}` : ''}
+                        {row.target_start.trim() && row.target_end.trim() ? ' · ' : ''}
+                        {row.target_end.trim() ? `Target ${row.target_end}` : ''}
+                        {stamp ? ` · Updated ${stamp}` : ''}
+                      </p>
+                    )}
+                  </button>
 
-                {(row.target_start.trim() || row.target_end.trim()) && (
-                  <p className="cp-msg-dates mono">
-                    {row.target_start.trim() ? `Start ${row.target_start}` : ''}
-                    {row.target_start.trim() && row.target_end.trim() ? ' · ' : ''}
-                    {row.target_end.trim() ? `Target ${row.target_end}` : ''}
-                  </p>
-                )}
+                  {open ? (
+                    <div className="cp-msg-body">
+                      {firm ? (
+                        <div className="cp-bubble firm">
+                          <span className="cp-bubble-label">
+                            From M. Designs{unread ? ' · unread' : ''}
+                          </span>
+                          <p>{firm}</p>
+                        </div>
+                      ) : null}
 
-                {firm ? (
-                  <div className="cp-bubble firm">
-                    <span className="cp-bubble-label">From M. Designs</span>
-                    <p>{firm}</p>
-                  </div>
-                ) : (
-                  <div className="cp-bubble firm quiet">
-                    <span className="cp-bubble-label">From M. Designs</span>
-                    <p>No note on this item yet.</p>
-                  </div>
-                )}
-
-                <label className="cp-bubble you">
-                  <span className="cp-bubble-label">Your reply</span>
-                  <textarea
-                    rows={3}
-                    value={row.client_comments}
-                    placeholder={`Write a note for ${pm}…`}
-                    onChange={(e) => onCommentChange(row.id, e.target.value)}
-                    onBlur={(e) => void persistComment(row.id, e.target.value)}
-                    aria-label={`Your reply on ${row.task || 'item'}`}
-                  />
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                      <label className="cp-bubble you">
+                        <span className="cp-bubble-label">Your reply</span>
+                        <textarea
+                          rows={3}
+                          value={row.client_comments}
+                          placeholder={`Write a note for ${pm}…`}
+                          onChange={(e) => onCommentChange(row.id, e.target.value)}
+                          onBlur={(e) => void persistComment(row.id, e.target.value)}
+                          aria-label={`Your reply on ${title}`}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

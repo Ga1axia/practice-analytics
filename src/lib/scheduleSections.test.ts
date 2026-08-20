@@ -89,5 +89,9 @@ describe('displayPhaseTitle', () => {
     );
     assert.equal(displayPhaseTitle('Interior Design'), 'Interior Design');
     assert.equal(displayPhaseTitle('Pre-Design'), 'Pre-Design');
+    assert.equal(
+      displayPhaseTitle('Other items for clients to think about'),
+      'Client decisions needed',
+    );
   });
 });

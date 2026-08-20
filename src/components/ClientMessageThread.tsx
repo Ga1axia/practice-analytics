@@ -4,6 +4,7 @@ import type {
   ClientBoardProject,
   ClientMessage,
 } from '../lib/clientBoardTypes';
+import { portalSeenAt } from '../lib/clientPortal';
 import { supabase } from '../lib/supabase';
 
 export function ClientMessageThread({
@@ -107,10 +108,16 @@ export function ClientMessageThread({
         <p className="cp-comms-hint">No messages yet — start the thread above.</p>
       ) : (
         <ul className="cp-msg-timeline">
-          {messages.map((m) => (
+          {messages.map((m) => {
+            const seen = portalSeenAt(project.projectKey);
+            const unread =
+              mode === 'customer' &&
+              m.author_role === 'staff' &&
+              (!seen || new Date(m.created_at) > seen);
+            return (
             <li
               key={m.id}
-              className={`cp-msg-bubble ${m.author_role === 'staff' ? 'staff' : 'customer'}`}
+              className={`cp-msg-bubble ${m.author_role === 'staff' ? 'staff' : 'customer'}${unread ? ' unread' : ''}`}
             >
               <div className="cp-msg-meta">
                 <strong>
@@ -125,11 +132,13 @@ export function ClientMessageThread({
                     hour: 'numeric',
                     minute: '2-digit',
                   })}
+                  {unread ? ' · unread' : ''}
                 </span>
               </div>
               <p>{m.body}</p>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

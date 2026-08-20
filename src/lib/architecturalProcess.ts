@@ -176,7 +176,7 @@ export const PROCESS_PHASES: ProcessPhase[] = [
     colorSoft: '#E3E7EC',
     milestone: 'Scope Additions',
     summary:
-      'Work outside the core design phases — added scope, special studies, and other services as agreed.',
+      'Work outside the core design phases — added scope, special studies, and other services as agreed. Additional Services runs in parallel with base contract phases (Planning, Contractor Selection, Design Development, CDs, and Interior).',
     architect: [
       'Define and track additional-service scope separately from the base contract phases.',
       'Coordinate deliverables and fees for approved additions with the client.',

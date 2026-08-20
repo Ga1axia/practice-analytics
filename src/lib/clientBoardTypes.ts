@@ -17,6 +17,19 @@ export type ClientBoardProject = {
   status: string | null;
   city: string | null;
   phase: string | null;
+  contract?: number;
+  billed?: number;
+  spent?: number;
+  ar?: number;
+  retainerPaid?: number;
+  retainerBalance?: number;
+  additionalFee?: number;
+};
+
+export type ClientBoardOption = {
+  projectKey: string;
+  title: string;
+  status: string | null;
 };
 
 export type ClientBoardMode = 'customer' | 'pm';

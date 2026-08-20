@@ -80,7 +80,7 @@
   {
     "sort_order": 13,
     "row_kind": "subtask",
-    "task": "Surveyor- Cad and PDF recieved",
+    "task": "Surveyor- Cad and PDF received",
     "na": false
   },
   {
@@ -98,7 +98,7 @@
   {
     "sort_order": 16,
     "row_kind": "subtask",
-    "task": "Soils Engineer - Soils report recieved",
+    "task": "Soils Engineer - Soils report received",
     "na": false
   },
   {
@@ -362,7 +362,7 @@
   {
     "sort_order": 60,
     "row_kind": "task",
-    "task": "Contractor finalzied for bidding by the Clients",
+    "task": "Contractor finalized for bidding by the Clients",
     "na": false
   },
   {
@@ -374,7 +374,7 @@
   {
     "sort_order": 62,
     "row_kind": "task",
-    "task": "Contractor pre-bid proposals recieved",
+    "task": "Contractor pre-bid proposals received",
     "na": false
   },
   {
@@ -506,7 +506,7 @@
   {
     "sort_order": 84,
     "row_kind": "phase",
-    "task": "Other items for clients to think about",
+    "task": "Client decisions needed",
     "na": false
   },
   {

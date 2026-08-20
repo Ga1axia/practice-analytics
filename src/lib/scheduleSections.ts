@@ -25,6 +25,9 @@ const INTERIOR_PHASE_NOTE =
 /** Phase labels shown in the UI (drops leftover spreadsheet notes). */
 export function displayPhaseTitle(title: string): string {
   const cleaned = (title || '').replace(INTERIOR_PHASE_NOTE, '').trim();
+  if (/^other items for clients to think about$/i.test(cleaned)) {
+    return 'Client decisions needed';
+  }
   return cleaned || title || 'Untitled phase';
 }
 

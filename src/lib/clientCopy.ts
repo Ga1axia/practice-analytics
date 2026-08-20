@@ -105,3 +105,97 @@ export function staffContact(name: string | null | undefined): StaffContact | nu
   if (!first) return null;
   return { email: `${first}@mdesignsarchitects.com`, phone: null };
 }
+
+/** Shared Box / Box Cloud HTTPS links only. */
+export function isBoxShareUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return (
+      host === 'box.com' ||
+      host.endsWith('.box.com') ||
+      host === 'boxcloud.com' ||
+      host.endsWith('.boxcloud.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Client-facing file groups — design documents only, not process stages. */
+export const CLIENT_FILE_CATEGORIES = [
+  { id: 'drawings', label: 'Drawings & plans' },
+  { id: 'renderings', label: 'Renderings & 3D' },
+  { id: 'packages', label: 'Design packages' },
+] as const;
+
+export type ClientFileCategoryId = (typeof CLIENT_FILE_CATEGORIES)[number]['id'];
+
+const FILE_EXCLUDE =
+  /feedback|review cycle|start of|\bstarted\b|request for proposal|\brfp\b|\breceived\b|comments?\b|surveyor|soils|arborist|shop drawing|punch list|contractor bid|value engineering|\bve\b|coordination|consultant|story pole|hearing|commissioner|as-built survey|title report|invoice|\brfi\b|shop drawing/i;
+
+const FILE_EXCLUDE_OVERRIDE =
+  /planning package|permit set|cd set|construction documents|presentation (finished|to client)|sign off on plans|package finish|design package|color board|material board/i;
+
+export function isClientFileCategoryId(value: string): value is ClientFileCategoryId {
+  return CLIENT_FILE_CATEGORIES.some((c) => c.id === value);
+}
+
+/** Infer a design category from a title, or null if it is not a client-facing design file. */
+export function categorizeClientFile(title: string): ClientFileCategoryId | null {
+  const t = (title || '').trim();
+  if (!t) return null;
+  if (/feedback|comments?\b/i.test(t)) return null;
+  if (
+    /\b(start|started|kickoff|kick-off)\b/i.test(t) &&
+    !/\b(finish|finished|completion)\b/i.test(t)
+  ) {
+    return null;
+  }
+  if (FILE_EXCLUDE.test(t) && !FILE_EXCLUDE_OVERRIDE.test(t)) return null;
+  if (
+    /render|3-?d|visualization|material board|color board|finish board|mood board/i.test(t)
+  ) {
+    return 'renderings';
+  }
+  if (
+    /planning package|permit (set|package)|cd set|construction documents|design package|presentation package|outline spec/i.test(
+      t,
+    )
+  ) {
+    return 'packages';
+  }
+  if (
+    /floor plan|site plan|elevation|drawing|schematic|plan set|existing condition|as-built drawing/i.test(
+      t,
+    )
+  ) {
+    return 'drawings';
+  }
+  return null;
+}
+
+/**
+ * Map a stored Box `section` (category id, old process stage, or free text) plus title
+ * onto one of the client file categories. Staff-shared links always land in a group.
+ */
+export function normalizeClientFileCategory(
+  section: string,
+  title = '',
+): ClientFileCategoryId {
+  const raw = (section || '').trim();
+  const lower = raw.toLowerCase();
+  if (isClientFileCategoryId(lower)) return lower;
+  const byLabel = CLIENT_FILE_CATEGORIES.find((c) => c.label.toLowerCase() === lower);
+  if (byLabel) return byLabel.id;
+  const fromTitle = categorizeClientFile(title);
+  if (fromTitle) return fromTitle;
+  if (/planning|package|permit|cd|construction document/.test(lower)) return 'packages';
+  if (/render|3-?d|board/.test(lower)) return 'renderings';
+  return 'drawings';
+}
+
+export function clientFileCategoryLabel(id: ClientFileCategoryId): string {
+  return CLIENT_FILE_CATEGORIES.find((c) => c.id === id)?.label || 'Drawings & plans';
+}

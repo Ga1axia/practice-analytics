@@ -288,6 +288,7 @@ export async function ensureMyMembershipsFromTimeEntries(input: {
       .from('pa_time_entries')
       .select('project_name, parent_project_name')
       .eq('employee_name', emp)
+      .order('work_date', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) return { added: 0, error: error.message };
     const chunk = data || [];

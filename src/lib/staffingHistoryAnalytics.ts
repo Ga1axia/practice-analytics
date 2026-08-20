@@ -527,27 +527,6 @@ export async function loadHistoryAnalytics(input: {
     fromDate = windowDays === 0 ? null : daysAgoYmd(windowDays, now);
   }
 
-  let probeQ = supabase
-    .from('pa_time_entries')
-    .select('id', { count: 'exact', head: true })
-    .lte('work_date', toDate);
-  if (fromDate) probeQ = probeQ.gte('work_date', fromDate);
-  if (input.employee) probeQ = probeQ.eq('employee_name', input.employee);
-  const probe = await probeQ;
-  if (probe.error) {
-    throw new Error(
-      probe.error.message ||
-        'Cannot read pa_time_entries. Confirm staffing migration and admin role.',
-    );
-  }
-  if ((probe.count || 0) === 0) {
-    return aggregateEmployeeHistory([], {
-      employee: input.employee,
-      phase: input.phase,
-      workType: input.workType,
-    });
-  }
-
   const [entries, syncRun] = await Promise.all([
     fetchEntriesInRange(fromDate, toDate, input.employee),
     supabase

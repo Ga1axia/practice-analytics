@@ -855,8 +855,10 @@ footer{
 }
 .cp-bell{
   position:relative; border:1px solid var(--border); background:#fff;
-  width:34px; height:34px; cursor:pointer;
+  width:34px; height:34px; cursor:pointer; color:var(--navy);
+  display:inline-flex; align-items:center; justify-content:center;
 }
+.cp-bell svg{ display:block; }
 .cp-bell.has-unread{ border-color:var(--gold); }
 .cp-bell-count{
   position:absolute; top:-6px; right:-6px; min-width:16px; height:16px; padding:0 4px;
@@ -931,6 +933,27 @@ footer{
 }
 .cp-doc-list .meta, .cp-cal-upcoming .sec{ display:block; font-size:11px; color:#3D4A5C; }
 .cp-doc-actions{ display:flex; flex-direction:column; gap:6px; flex-shrink:0; }
+.cp-box-heading{ margin:0 0 6px; font-size:18px; color:var(--navy); }
+.cp-file-cat{ margin-top:18px; }
+.cp-file-cat:first-of-type{ margin-top:12px; }
+.cp-file-cat-heading{
+  margin:0 0 8px; font-size:15px; color:var(--navy); font-weight:600;
+}
+.cp-box-form{
+  display:grid; grid-template-columns:1fr 1.2fr minmax(140px,0.6fr) auto;
+  gap:10px; align-items:end; margin:12px 0 16px;
+}
+.cp-box-form label{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cp-box-form label span{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.06em;
+  text-transform:uppercase; color:#3D4A5C;
+}
+.cp-box-form input, .cp-box-form select{
+  border:1px solid var(--border); background:#fff; padding:8px 10px;
+  font:inherit; font-size:13.5px; color:var(--ink); width:100%;
+}
+.cp-box-links.compact .cp-box-form{ grid-template-columns:1fr; }
+.cp-box-links.compact .cp-empty-card{ padding:14px; }
 .cp-budget-kpis{
   display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:14px 0;
 }
@@ -1522,6 +1545,7 @@ footer{
   .cp-save-note{ margin-left:0; width:100%; }
   .cp-msg-compose{ grid-template-columns:1fr; }
   .cp-cal-overlay{ padding:8px; align-items:stretch; }
+  .cp-box-form{ grid-template-columns:1fr; }
   .cp-cal-overlay-panel{
     max-height:none; height:100%; width:100%;
   }

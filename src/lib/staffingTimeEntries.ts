@@ -34,7 +34,7 @@ function mapErr(error: { message?: string; code?: string } | null): string | nul
   return msg;
 }
 
-/** Count + page historical time entries for the Staffing sheet browser. */
+/** Page historical time entries for the Staffing sheet browser. */
 export async function loadHistoricalTimeEntries(
   filters: HistoricalTimeEntryFilters,
 ): Promise<HistoricalTimeEntriesResult> {
@@ -45,7 +45,7 @@ export async function loadHistoricalTimeEntries(
 
   let q = supabase
     .from('pa_time_entries')
-    .select(TE_SELECT, { count: 'exact' })
+    .select(TE_SELECT)
     .gte('work_date', filters.fromDate)
     .lte('work_date', filters.toDate)
     .order('work_date', { ascending: false })
@@ -62,10 +62,11 @@ export async function loadHistoricalTimeEntries(
     );
   }
 
-  const { data, error, count } = await q;
+  const { data, error } = await q;
+  const rows = (data || []) as TimeEntryLite[];
   return {
-    rows: (data || []) as TimeEntryLite[],
-    total: count ?? 0,
+    rows,
+    total: from + rows.length + (rows.length === pageSize ? 1 : 0),
     page,
     pageSize,
     error: mapErr(error),
@@ -80,21 +81,6 @@ export async function loadHistoricalTimeEntryStats(fromDate: string, toDate: str
   employees: number;
   error: string | null;
 }> {
-  const head = await supabase
-    .from('pa_time_entries')
-    .select('id', { count: 'exact', head: true })
-    .gte('work_date', fromDate)
-    .lte('work_date', toDate);
-  if (head.error) {
-    return {
-      entries: 0,
-      hours: 0,
-      billableHours: 0,
-      employees: 0,
-      error: mapErr(head.error),
-    };
-  }
-
   const employees = new Set<string>();
   let hours = 0;
   let billableHours = 0;
@@ -106,6 +92,8 @@ export async function loadHistoricalTimeEntryStats(fromDate: string, toDate: str
       .select('actual_hours,is_billable,employee_name')
       .gte('work_date', fromDate)
       .lte('work_date', toDate)
+      .order('work_date', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) {
       return { entries: 0, hours: 0, billableHours: 0, employees: 0, error: mapErr(error) };
@@ -117,12 +105,15 @@ export async function loadHistoricalTimeEntryStats(fromDate: string, toDate: str
       if (r.is_billable) billableHours += h;
       if (r.employee_name) employees.add(r.employee_name as string);
     }
-    if (rows.length < pageSize) break;
+    if (rows.length < pageSize) {
+      from += rows.length;
+      break;
+    }
     from += pageSize;
     if (from > 200_000) break;
   }
   return {
-    entries: head.count ?? from,
+    entries: from,
     hours,
     billableHours,
     employees: employees.size,

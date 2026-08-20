@@ -33,3 +33,15 @@ export type ClientBoardOption = {
 };
 
 export type ClientBoardMode = 'customer' | 'pm';
+
+export type ClientBoxLink = {
+  id: string;
+  project_key: string;
+  client_name: string;
+  title: string;
+  box_url: string;
+  section: string;
+  created_at: string;
+  created_by: string | null;
+  created_by_name: string | null;
+};

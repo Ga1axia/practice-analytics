@@ -217,6 +217,7 @@ create index if not exists pa_schedule_rows_schedule_idx
 --   pa_process_checks  — checklist done state per project/phase/side/item
 --   pa_client_messages — direct PM ↔ client messages
 --   pa_staff_or_client_project(project, client) — RLS helper
+--   pa_client_box_links — staff-posted Box share URLs on the client Documents tab
 --
 -- Meeting history (see migration pa_client_meetings):
 --   pa_client_meetings — dated meetings + notes per client (PM/admin only)

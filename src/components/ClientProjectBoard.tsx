@@ -19,13 +19,10 @@ import {
   staffContact,
 } from '../lib/clientCopy';
 import {
-  clientDeliverables,
   dismissAlert,
-  documentReviews,
   inferCurrentPhase,
   isAlertDismissed,
   mainStageCount,
-  markDocumentReviewed,
   markPortalSeen,
   milestoneHealth,
   needsClientReply,
@@ -34,12 +31,13 @@ import {
   stageProgressPct,
   type ClientAlert,
 } from '../lib/clientPortal';
-import { downloadKvPdf, downloadTablePdf } from '../lib/downloadPdf';
+import { downloadKvPdf } from '../lib/downloadPdf';
 import { fmtUSD } from '../lib/format';
 import { buildDeadlineEvents, startOfDay } from '../lib/scheduleDates';
 import { groupScheduleSections, sectionStatus } from '../lib/scheduleSections';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { supabase } from '../lib/supabase';
+import { ClientBoxLinks } from './ClientBoxLinks';
 import { ClientMeetingsPanel } from './ClientMeetingsPanel';
 import { ClientMessageThread } from './ClientMessageThread';
 import { CustomerComms } from './CustomerComms';
@@ -55,6 +53,27 @@ function stageState(i: number, currentIdx: number): 'done' | 'current' | 'upcomi
   if (i < currentIdx) return 'done';
   if (i === currentIdx) return 'current';
   return 'upcoming';
+}
+
+function BellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.73 21a2 2 0 0 1-3.46 0"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function Glossed({ text }: { text: string }) {
@@ -99,7 +118,6 @@ export function ClientProjectBoard({
   const [tab, setTab] = useState<CenterTab>('overview');
   const [bellOpen, setBellOpen] = useState(false);
   const [alertTick, setAlertTick] = useState(0);
-  const [reviews, setReviews] = useState(() => documentReviews(project.projectKey));
   const [openDone, setOpenDone] = useState<Record<string, boolean>>({});
 
   const loadSchedule = useCallback(async () => {
@@ -162,10 +180,6 @@ export function ClientProjectBoard({
       cancelled = true;
     };
   }, [project.clientName]);
-
-  useEffect(() => {
-    setReviews(documentReviews(project.projectKey));
-  }, [project.projectKey]);
 
   const sections = useMemo(() => groupScheduleSections(rows), [rows]);
   const needsCount = useMemo(() => {
@@ -259,7 +273,6 @@ export function ClientProjectBoard({
   const bellCount = alerts.length;
   const health = milestoneHealth(overdue.length, needsCount);
   const targetDate = phaseEndFromRows(rows, viewedPhase.id) || 'Date TBD';
-  const docs = useMemo(() => clientDeliverables(rows), [rows]);
   const contract = project.contract || 0;
   const billed = project.billed || 0;
   const outstanding = Math.max(contract - billed, project.ar || 0);
@@ -306,15 +319,6 @@ export function ClientProjectBoard({
         ['Past-due deadlines', String(overdue.length)],
       ],
     });
-    if (docs.length) {
-      downloadTablePdf({
-        filename: `${displayTitle.replace(/[^\w]+/g, '-')}-deliverables.pdf`,
-        title: 'Deliverables',
-        subtitle: displayTitle,
-        headers: ['Phase', 'Item', 'Status', 'Date'],
-        rows: docs.map((d) => [d.section, d.task, d.status, d.date]),
-      });
-    }
   }
 
   const switcher = projects.filter((p) => p.projectKey !== project.projectKey).length > 0;
@@ -381,7 +385,7 @@ export function ClientProjectBoard({
                 setAlertTick((n) => n + 1);
               }}
             >
-              <span aria-hidden="true">🔔</span>
+              <BellIcon />
               {bellCount ? <span className="cp-bell-count">{bellCount > 9 ? '9+' : bellCount}</span> : null}
             </button>
             {bellOpen ? (
@@ -521,7 +525,7 @@ export function ClientProjectBoard({
             {(
               [
                 ['overview', 'Overview'],
-                ['documents', 'Documents'],
+                ['documents', 'Files'],
                 ['budget', 'Budget'],
                 ['notes', mode === 'customer' ? 'Schedule notes' : 'Notes'],
               ] as const
@@ -629,7 +633,7 @@ export function ClientProjectBoard({
                         <span className="mono cp-est-chip">Expected {targetDate}</span>
                         {/drawing|spec|document|package|board|plan/i.test(item) ? (
                           <button type="button" className="cp-text-btn" onClick={() => goTab('documents')}>
-                            View deliverable
+                            View files
                           </button>
                         ) : null}
                       </li>
@@ -647,69 +651,19 @@ export function ClientProjectBoard({
               role="tabpanel"
               aria-labelledby="cp-tab-documents"
             >
-              <p className="customer-kicker">Documents &amp; deliverables</p>
-              <h2 className="display">Files by stage</h2>
+              <p className="customer-kicker">Shared with you</p>
+              <h2 className="display">Files</h2>
               <p className="cp-phase-summary">
-                Grouped from the project schedule. Marking reviewed records the date on this device
-                for you and the firm.
+                Design drawings, renderings, and packages from your project team. Open a file in
+                Box to view or download.
               </p>
-              {!docs.length ? (
-                <div className="cp-empty-card">
-                  <p>No deliverable titles are on the schedule yet. Your PM can attach sets here as they are issued.</p>
-                </div>
-              ) : (
-                <ul className="cp-doc-list">
-                  {docs.map((d) => {
-                    const rec = reviews[d.id];
-                    return (
-                      <li key={d.id}>
-                        <div>
-                          <span className="cp-msg-phase mono">{d.section}</span>
-                          <strong title={glossaryTitle(d.task)}>
-                            <Glossed text={d.task} />
-                          </strong>
-                          <span className="meta mono">
-                            {d.status && d.status !== '—' ? `${d.status} · ` : ''}
-                            {d.date
-                              ? `Rev — uploaded ${d.date}`
-                              : 'Version pending'}
-                          </span>
-                          {rec ? (
-                            <span className="meta mono">
-                              Reviewed {new Date(rec.at).toLocaleString()} by {rec.by}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="cp-doc-actions">
-                          {contact?.email ? (
-                            <a
-                              className="cp-text-btn"
-                              href={`mailto:${contact.email}?subject=${encodeURIComponent(`Please send: ${d.task}`)}`}
-                            >
-                              Download / request
-                            </a>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="cp-text-btn"
-                            disabled={!!rec}
-                            onClick={() => {
-                              const next = markDocumentReviewed(
-                                project.projectKey,
-                                d.id,
-                                authorName,
-                              );
-                              setReviews((prev) => ({ ...prev, [d.id]: next }));
-                            }}
-                          >
-                            {rec ? 'Reviewed' : 'Mark as reviewed'}
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <ClientBoxLinks
+                projectKey={project.projectKey}
+                clientName={project.clientName}
+                authorName={authorName}
+                mode={mode}
+                embedded
+              />
             </section>
           ) : null}
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ClientBoxLinks } from '../components/ClientBoxLinks';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
 import { KpiRow } from '../components/KpiRow';
@@ -630,6 +631,19 @@ export function EmployeeProjectWorkspace({
       </div>
 
       <div className="emp-detail-pair">
+        <section className="panel">
+          <h3>
+            Client Box files <span className="tag">Files tab</span>
+          </h3>
+          <ClientBoxLinks
+            projectKey={project.key}
+            clientName={project.clientName}
+            authorName={authorName}
+            mode="pm"
+            compact
+          />
+        </section>
+
         <section className="panel">
           <h3>
             Schedule deliverables <span className="tag">{deliverables.length}</span>

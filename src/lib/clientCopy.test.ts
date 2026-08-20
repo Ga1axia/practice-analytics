@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  categorizeClientFile,
   displayPersonName,
   displayPhaseTitleClient,
   displayTaskTitle,
   glossaryTitle,
+  isBoxShareUrl,
+  normalizeClientFileCategory,
 } from './clientCopy';
 import { inferCurrentPhase, milestoneHealth, stageProgressPct } from './clientPortal';
 
@@ -39,6 +42,39 @@ describe('client copy', () => {
   it('explains Vastu and CDs', () => {
     assert.match(glossaryTitle('Vastu dates for demolition') || '', /Vastu/);
     assert.match(glossaryTitle('CDs') || '', /Construction Documents/);
+  });
+
+  it('accepts Box share URLs only', () => {
+    assert.equal(isBoxShareUrl('https://app.box.com/s/abc123'), true);
+    assert.equal(isBoxShareUrl('https://mdesigns.app.box.com/file/1'), true);
+    assert.equal(isBoxShareUrl('https://company.boxcloud.com/v/file'), true);
+    assert.equal(isBoxShareUrl('http://app.box.com/s/abc'), false);
+    assert.equal(isBoxShareUrl('https://dropbox.com/s/x'), false);
+  });
+
+  it('keeps only client-facing design files and groups them by kind', () => {
+    assert.equal(categorizeClientFile('First Floor Plan presentation'), 'drawings');
+    assert.equal(categorizeClientFile('Existing Condition Drawings - Completion'), 'drawings');
+    assert.equal(categorizeClientFile('Elevations / 3-D presentation to Client'), 'renderings');
+    assert.equal(categorizeClientFile('Material / color board'), 'renderings');
+    assert.equal(categorizeClientFile('Planning Package finish'), 'packages');
+    assert.equal(categorizeClientFile('Construction Documents Finished'), 'packages');
+    assert.equal(categorizeClientFile('Soils report received'), null);
+    assert.equal(categorizeClientFile('Surveyor CAD file'), null);
+    assert.equal(categorizeClientFile('Shop drawings / submittals'), null);
+    assert.equal(categorizeClientFile('Request for proposal — structural'), null);
+    assert.equal(categorizeClientFile('Contractor bidding'), null);
+    assert.equal(categorizeClientFile('Planning package start'), null);
+    assert.equal(categorizeClientFile('Elevations / 3-D presentation Client feedback'), null);
+  });
+
+  it('maps stored Box sections onto file categories', () => {
+    assert.equal(normalizeClientFileCategory('drawings', 'Anything'), 'drawings');
+    assert.equal(normalizeClientFileCategory('CDs', 'Permit set Rev 2'), 'packages');
+    assert.equal(normalizeClientFileCategory('Planning', 'Planning Package'), 'packages');
+    assert.equal(normalizeClientFileCategory('Schematic', 'Floor plans'), 'drawings');
+    assert.equal(normalizeClientFileCategory('', 'Front elevation rendering'), 'renderings');
+    assert.equal(normalizeClientFileCategory('', 'Untitled share'), 'drawings');
   });
 });
 

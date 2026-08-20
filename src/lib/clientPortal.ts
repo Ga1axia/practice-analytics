@@ -6,7 +6,7 @@ import {
 import { displayPhaseTitleClient, displayTaskTitle } from './clientCopy';
 import type { DeadlineEvent } from './scheduleDates';
 import { parseScheduleDate, startOfDay } from './scheduleDates';
-import { groupScheduleSections, isSchedulePhaseRow, statusTone } from './scheduleSections';
+import { groupScheduleSections, statusTone } from './scheduleSections';
 import type { ScheduleRow } from './scheduleTypes';
 
 const ALERT_DISMISS_KEY = 'pa-cp-alert-dismiss-v1';
@@ -195,34 +195,3 @@ export function milestoneHealth(
   return 'On Track';
 }
 
-export function clientDeliverables(rows: ScheduleRow[]) {
-  let section = 'Project';
-  const out: {
-    id: string;
-    section: string;
-    task: string;
-    status: string;
-    date: string;
-    kind: string;
-  }[] = [];
-  const hint =
-    /document|package|deliverable|drawing|plan|elevation|submittal|report|permit|spec|board|set\b|render/i;
-  for (const row of rows) {
-    if (isSchedulePhaseRow(row)) {
-      section = displayPhaseTitleClient(row.task || 'Phase');
-      continue;
-    }
-    if (row.row_kind !== 'task' && row.row_kind !== 'subtask') continue;
-    const task = displayTaskTitle(row.task || '');
-    if (!task || !hint.test(task)) continue;
-    out.push({
-      id: row.id,
-      section,
-      task,
-      status: row.budget_remaining || '—',
-      date: (row.target_end || row.target_start || row.actual_end || '').trim(),
-      kind: row.row_kind,
-    });
-  }
-  return out;
-}

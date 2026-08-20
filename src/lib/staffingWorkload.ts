@@ -66,19 +66,6 @@ export async function loadStaffingBoard(
   const teSelect =
     'id,bqe_time_entry_id,employee_id,employee_name,project_id,project_name,parent_project_name,phase,phase_name,client,activity_id,activity,work_date,actual_hours,is_billable,is_written_off,is_extra,description,memo';
 
-  // Probe count first so RLS / missing-table failures surface clearly.
-  const probe = await supabase
-    .from('pa_time_entries')
-    .select('id', { count: 'exact', head: true })
-    .gte('work_date', trailStart)
-    .lte('work_date', trailEnd);
-  if (probe.error) {
-    throw new Error(
-      probe.error.message ||
-        'Cannot read pa_time_entries. Confirm staffing migration and admin role.',
-    );
-  }
-
   const [
     capacitiesRaw,
     roster,
@@ -152,13 +139,6 @@ export async function loadStaffingBoard(
     now,
     lastTimeEntrySyncAt: (syncRun.data?.completed_at as string) || null,
   });
-
-  // If PostgREST count says rows exist but we loaded none, pagination/RLS failed.
-  if ((probe.count || 0) > 0 && entries.length === 0) {
-    throw new Error(
-      `Supabase reports ${probe.count} time entries in the trailing window but none loaded. Try refreshing; if it persists, check admin RLS on pa_time_entries.`,
-    );
-  }
 
   return board;
 }

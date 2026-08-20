@@ -236,6 +236,7 @@ export async function loadProjectHoursBreakdown(input: {
         'employee_name,actual_hours,is_billable,project_name,parent_project_name,phase,phase_name,work_date',
       )
       .order('work_date', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (codeOk) {

@@ -62,6 +62,8 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selected, setSelected] = useState(() => startOfDay(new Date()));
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set());
+  const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | AgendaKind>('all');
   const [view, setView] = useState<CalView>('gantt');
   const [reloadTick, setReloadTick] = useState(0);
@@ -78,6 +80,21 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
   async function reload() {
     setReloadTick((n) => n + 1);
   }
+
+  function jumpToToday() {
+    const n = new Date();
+    setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
+    setSelected(startOfDay(n));
+    setView('month');
+  }
+
+  useEffect(() => {
+    function onToday() {
+      jumpToToday();
+    }
+    window.addEventListener('pa-emp-calendar-today', onToday);
+    return () => window.removeEventListener('pa-emp-calendar-today', onToday);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,8 +242,9 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
           <h1 className="display">Upcoming work</h1>
           <p className="emp-lede">
             Meetings, deadlines, and tasks across your{' '}
-            {projects.length} assigned project{projects.length === 1 ? '' : 's'}. Change due dates
-            inline, or add a task on the selected day.
+            {projects.length} assigned project{projects.length === 1 ? '' : 's'}. Click a day number
+            or a chip to open that day; use <strong>+N more</strong> to expand hidden items. Change
+            due dates inline, or add a task on the selected day.
           </p>
         </div>
         <div className="emp-cal-controls">
@@ -354,11 +372,7 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
             <button
               type="button"
               className="cp-text-btn"
-              onClick={() => {
-                const n = new Date();
-                setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
-                setSelected(startOfDay(n));
-              }}
+              onClick={() => jumpToToday()}
             >
               Today
             </button>
@@ -389,30 +403,87 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
                       i.date.getTime() < today.getTime() &&
                       !/completed|n\/a/i.test(i.status),
                   );
-                  const shown = list.slice(0, 3);
-                  const extra = list.length - shown.length;
+                  const expanded = expandedDays.has(key);
+                  const shown = expanded ? list : list.slice(0, 3);
+                  const extra = expanded ? 0 : list.length - shown.length;
                   return (
-                    <button
+                    <div
                       key={key}
-                      type="button"
                       role="gridcell"
                       className={`cp-cal-cell${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}${list.length ? ' has-events' : ''}${hasOverdue ? ' overdue' : ''}`}
-                      onClick={() => setSelected(startOfDay(day))}
                     >
-                      <span className="cp-cal-daynum">{day.getDate()}</span>
+                      <button
+                        type="button"
+                        className="cp-cal-daynum-btn"
+                        title="Select this day"
+                        aria-label={`Select ${day.toLocaleDateString()}`}
+                        onClick={() => {
+                          setSelected(startOfDay(day));
+                          setFocusItemId(null);
+                        }}
+                      >
+                        <span className="cp-cal-daynum">{day.getDate()}</span>
+                      </button>
                       {shown.length ? (
                         <span className="cp-cal-labels">
                           {shown.map((i) => (
-                            <span key={i.id} className={`cp-cal-label ${i.kind}`} title={i.title}>
+                            <button
+                              key={i.id}
+                              type="button"
+                              className={`cp-cal-label ${i.kind}${focusItemId === i.id ? ' focus' : ''}`}
+                              title={`${i.title} — open day detail`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelected(startOfDay(day));
+                                setFocusItemId(i.id);
+                              }}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                onOpenProject(i.projectKey);
+                              }}
+                            >
                               {i.kind === 'meeting' ? 'Meet' : i.kind === 'deadline' ? 'Due' : 'Task'}
                               {' · '}
                               {i.title}
-                            </span>
+                            </button>
                           ))}
-                          {extra > 0 ? <span className="cp-cal-label more">+{extra} more</span> : null}
+                          {extra > 0 ? (
+                            <button
+                              type="button"
+                              className="cp-cal-label more"
+                              title={`Show ${extra} more on this day`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelected(startOfDay(day));
+                                setExpandedDays((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(key);
+                                  return next;
+                                });
+                              }}
+                            >
+                              +{extra} more
+                            </button>
+                          ) : null}
+                          {expanded && list.length > 3 ? (
+                            <button
+                              type="button"
+                              className="cp-cal-label more"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedDays((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(key);
+                                  return next;
+                                });
+                              }}
+                            >
+                              Show less
+                            </button>
+                          ) : null}
                         </span>
                       ) : null}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -433,7 +504,7 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
             ) : (
               <ul className="emp-agenda-list emp-agenda-list-edit">
                 {dayItems.map((i) => (
-                  <li key={i.id}>
+                  <li key={i.id} className={focusItemId === i.id ? 'emp-agenda-focus' : undefined}>
                     <div className="emp-agenda-edit-row">
                       <button type="button" onClick={() => onOpenProject(i.projectKey)}>
                         <span className={`emp-agenda-kind ${i.kind}`}>{kindLabel(i.kind)}</span>
@@ -491,13 +562,11 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
             </section>
           ) : null}
 
-          <section className="panel">
-            <h3>
-              Upcoming meetings <span className="tag">{meetingsUpcoming.length}</span>
-            </h3>
-            {!meetingsUpcoming.length ? (
-              <p className="pd-muted">No upcoming meetings.</p>
-            ) : (
+          {meetingsUpcoming.length ? (
+            <section className="panel">
+              <h3>
+                Upcoming meetings <span className="tag">{meetingsUpcoming.length}</span>
+              </h3>
               <ul className="emp-agenda-list">
                 {meetingsUpcoming.map((i) => (
                   <li key={i.id}>
@@ -511,8 +580,8 @@ export function EmployeeCalendar({ projects, employeeName, onOpenProject }: Prop
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
+            </section>
+          ) : null}
 
           <section className="panel">
             <h3>

@@ -6,7 +6,7 @@ import {
   type EmployeeHistoryRow,
   type HistoryWindowDays,
 } from '../lib/staffingHistoryAnalytics';
-import { phaseAbbrev } from '../lib/phaseAbbrev';
+import { abbrevGlossary, phaseAbbrev } from '../lib/phaseAbbrev';
 
 function pct(share: number): string {
   return `${Math.round(share * 100)}%`;
@@ -18,15 +18,35 @@ function shortLabel(label: string): string {
   return label.length > 14 ? `${label.slice(0, 13)}…` : label;
 }
 
-/** Format YYYY-MM-DD → "M/D" (no year). */
-function mdLabel(ymd: string): string {
-  const m = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return ymd;
-  return `${Number(m[2])}/${Number(m[3])}`;
+function labelTitle(label: string): string {
+  const abbr = phaseAbbrev(label);
+  const gloss = abbrevGlossary(abbr);
+  if (gloss && abbr !== label) return `${abbr} — ${gloss} (${label})`;
+  if (gloss) return `${abbr} — ${gloss}`;
+  return label;
 }
 
-function formatWindowRange(fromDate: string | null, toDate: string | null, windowDays: HistoryWindowDays): string {
-  if (fromDate && toDate) return `${mdLabel(fromDate)} → ${mdLabel(toDate)}`;
+/** Format YYYY-MM-DD → M/D or M/D/YYYY. */
+function mdLabel(ymd: string, withYear: boolean): string {
+  const m = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return ymd;
+  const base = `${Number(m[2])}/${Number(m[3])}`;
+  return withYear ? `${base}/${Number(m[1])}` : base;
+}
+
+function formatWindowRange(
+  fromDate: string | null,
+  toDate: string | null,
+  windowDays: HistoryWindowDays,
+): string {
+  if (fromDate && toDate) {
+    const y1 = fromDate.slice(0, 4);
+    const y2 = toDate.slice(0, 4);
+    // Always show years for all-history or when the span crosses years
+    // (otherwise 2023-08-11 and 2026-08-11 both read as "8/11").
+    const withYear = windowDays === 0 || y1 !== y2;
+    return `${mdLabel(fromDate, withYear)} → ${mdLabel(toDate, withYear)}`;
+  }
   if (windowDays === 0) return 'All history';
   return `${windowDays}d`;
 }
@@ -111,8 +131,14 @@ export function EmployeeTimecard({ employeeName }: { employeeName: string }) {
               <h4>Phase mix</h4>
               <div className="staff-share">
                 {row.topPhases.slice(0, 6).map((p) => (
-                  <div key={p.key} className="staff-share-row" title={`${p.label}: ${p.hours.toFixed(1)}h`}>
-                    <span className="staff-share-lab">{shortLabel(p.label)}</span>
+                  <div
+                    key={p.key}
+                    className="staff-share-row"
+                    title={`${labelTitle(p.label)}: ${p.hours.toFixed(1)}h`}
+                  >
+                    <span className="staff-share-lab" title={labelTitle(p.label)}>
+                      {shortLabel(p.label)}
+                    </span>
                     <span className="staff-share-track">
                       <span
                         className="staff-share-fill"
@@ -130,8 +156,14 @@ export function EmployeeTimecard({ employeeName }: { employeeName: string }) {
               <h4>Activity mix</h4>
               <div className="staff-share">
                 {row.topActivities.slice(0, 6).map((p) => (
-                  <div key={p.key} className="staff-share-row" title={`${p.label}: ${p.hours.toFixed(1)}h`}>
-                    <span className="staff-share-lab">{shortLabel(p.label)}</span>
+                  <div
+                    key={p.key}
+                    className="staff-share-row"
+                    title={`${labelTitle(p.label)}: ${p.hours.toFixed(1)}h`}
+                  >
+                    <span className="staff-share-lab" title={labelTitle(p.label)}>
+                      {shortLabel(p.label)}
+                    </span>
                     <span className="staff-share-track">
                       <span
                         className="staff-share-fill navy"
@@ -153,6 +185,7 @@ export function EmployeeTimecard({ employeeName }: { employeeName: string }) {
                     labels={row.topProjects.map((p) =>
                       p.label.length > 22 ? `${p.label.slice(0, 21)}…` : p.label,
                     )}
+                    fullLabels={row.topProjects.map((p) => p.label)}
                     values={row.topProjects.map((p) => p.hours)}
                   />
                 ) : (
@@ -164,8 +197,14 @@ export function EmployeeTimecard({ employeeName }: { employeeName: string }) {
               <h4>Project type</h4>
               <div className="staff-share">
                 {row.workTypes.slice(0, 6).map((p) => (
-                  <div key={p.key} className="staff-share-row" title={`${p.label}: ${p.hours.toFixed(1)}h`}>
-                    <span className="staff-share-lab">{shortLabel(p.label)}</span>
+                  <div
+                    key={p.key}
+                    className="staff-share-row"
+                    title={`${labelTitle(p.label)}: ${p.hours.toFixed(1)}h`}
+                  >
+                    <span className="staff-share-lab" title={labelTitle(p.label)}>
+                      {shortLabel(p.label)}
+                    </span>
                     <span className="staff-share-track">
                       <span
                         className="staff-share-fill gold"

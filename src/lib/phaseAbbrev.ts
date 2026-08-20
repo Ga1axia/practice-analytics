@@ -32,13 +32,63 @@ const RULES: { re: RegExp; code: string }[] = [
   { re: /schematic|conceptual/i, code: 'SD' },
   { re: /pre[-\s]?design/i, code: 'PD' },
   { re: /property\s*eval|master\s*plan|programming/i, code: 'MP' },
-  { re: /project\s*manage/i, code: 'PM' },
+  { re: /project\s*manage|project\s*coord/i, code: 'PC' },
   { re: /render/i, code: '3D' },
+  { re: /\bpto\b|vacation|time\s*off/i, code: 'PTO' },
+  { re: /\badmin\b|overhead/i, code: 'ADM' },
+  { re: /\bmeeting|client\s*call/i, code: 'MC' },
+  { re: /\bconsultant|coordination/i, code: 'CC' },
+  { re: /\bother\b/i, code: 'OTH' },
+  { re: /\bcommercial\b/i, code: 'COM' },
+  { re: /\bnew\s*(residence|home|build|construction)?\b/i, code: 'NEW' },
+  { re: /\bgo\b|general\s*office/i, code: 'GO' },
+  { re: /\blt\b|leadership/i, code: 'LT' },
+  { re: /\bdra\b|drawing/i, code: 'DRA' },
 ];
+
+/** Human-readable glossary for abbreviated codes (tooltips). */
+export const ABBREV_GLOSSARY: Record<string, string> = {
+  RS: 'Reimbursable services',
+  AS: 'Additional services',
+  ID: 'Interior design',
+  CST: 'Construction support / admin',
+  CS: 'Contractor selection',
+  CD: 'Construction documents',
+  DD: 'Design development',
+  PP: 'Planning package',
+  SD: 'Schematic / conceptual design',
+  PD: 'Pre-design',
+  MP: 'Master plan / programming',
+  PM: 'Project management',
+  PC: 'Project coordination',
+  '3D': 'Rendering / 3D',
+  PTO: 'Paid time off',
+  ADM: 'Admin / overhead',
+  MC: 'Meetings / client',
+  CC: 'Consultant coordination',
+  OTH: 'Other',
+  COM: 'Commercial',
+  NEW: 'New residence / home',
+  GO: 'General office',
+  LT: 'Leadership / team',
+  DRA: 'Drawing',
+  Actv: 'Active',
+  Comp: 'Completed',
+  Inact: 'Inactive',
+  FX: 'Fixed fee',
+  HR: 'Hourly',
+};
+
+export function abbrevGlossary(code: string | null | undefined): string | undefined {
+  if (!code) return undefined;
+  return ABBREV_GLOSSARY[code.trim().toUpperCase()] || ABBREV_GLOSSARY[code.trim()];
+}
 
 export function phaseAbbrev(phase: string | null | undefined): string {
   if (!phase) return '—';
   const p = phase.trim();
+  // Already a short known code — keep it (and glossary can expand).
+  if (/^[A-Za-z]{2,4}$/.test(p) && abbrevGlossary(p)) return p.toUpperCase();
   for (const { re, code } of RULES) {
     if (re.test(p)) return code;
   }

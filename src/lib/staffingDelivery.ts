@@ -67,8 +67,17 @@ export function isDeliveryHours(input: {
 
 /** Bucket activity labels for the trailing activity breakdown. */
 export function activityBucket(activity: string | null | undefined): string {
-  const a = (activity || '').trim().toLowerCase();
+  const raw = (activity || '').trim();
+  const a = raw.toLowerCase();
   if (!a) return 'Unspecified';
+  // Normalize short BQE codes into full buckets so charts don't duplicate abbreviations.
+  if (/^(pc|pm)$/i.test(raw)) return 'Project coordination';
+  if (/^(sd|dd|cd)$/i.test(raw)) return 'Design';
+  if (/^(ca|cst)$/i.test(raw)) return 'Construction coordination';
+  if (/^(adm|admin)$/i.test(raw)) return 'Admin';
+  if (/^(mc|mtg)$/i.test(raw)) return 'Meetings / client';
+  if (/^(cc)$/i.test(raw)) return 'Consultant coordination';
+  if (/^(pto)$/i.test(raw)) return 'PTO';
   if (/draft/.test(a)) return 'Drafting';
   if (/design|schematic|sd\b|dd\b|cd\b/.test(a)) return 'Design';
   if (/consultant|engineer|coordination with/.test(a)) return 'Consultant coordination';
@@ -76,7 +85,8 @@ export function activityBucket(activity: string | null | undefined): string {
   if (/construction|ca\b|site|rfi|submittal/.test(a)) return 'Construction coordination';
   if (/meeting|call|client/.test(a)) return 'Meetings / client';
   if (/admin|email|filing/.test(a)) return 'Admin';
-  return activity!.trim();
+  if (/\bpto\b|vacation|time\s*off/.test(a)) return 'PTO';
+  return raw;
 }
 
 export type WorkloadStatus = 'available' | 'near_capacity' | 'at_capacity' | 'over_capacity';

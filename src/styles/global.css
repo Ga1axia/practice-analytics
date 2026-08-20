@@ -2397,6 +2397,7 @@ footer{
   font-family:'Montserrat',sans-serif; font-size:13.5px;
 }
 .emp-quick{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.emp-quick-count{ white-space:nowrap; }
 .emp-primary-btn{
   margin-top:10px; font-family:'IBM Plex Mono',monospace; font-size:12px;
   background:var(--navy); color:#fff; border:none; padding:10px 16px; cursor:pointer;
@@ -2719,6 +2720,9 @@ footer{
 .emp-agenda-day{ margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
 .emp-agenda-day h4{ margin:0 0 8px; font-size:16px; color:var(--navy); }
 .emp-agenda-list{ list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.emp-agenda-list li.emp-agenda-focus{
+  outline:1px solid var(--teal); background:#F3F8F7; border-radius:4px;
+}
 .emp-agenda-list li button{
   width:100%; text-align:left; display:flex; flex-direction:column; gap:2px;
   padding:9px 10px; border:1px solid var(--border); background:#fff; cursor:pointer; font:inherit;
@@ -2748,7 +2752,18 @@ footer{
 }
 .cp-cal-grid.emp-cal-labeled .cp-cal-cell{
   min-height:54px; max-height:72px; padding:3px 4px; gap:2px; overflow:hidden;
+  display:flex; flex-direction:column; align-items:stretch;
 }
+.cp-cal-grid.emp-cal-labeled .cp-cal-cell.selected,
+.cp-cal-grid.emp-cal-labeled .cp-cal-cell:has(.cp-cal-label.more:focus){
+  max-height:none; overflow:visible; z-index:2;
+}
+.cp-cal-daynum-btn{
+  appearance:none; border:0; background:transparent; padding:0; margin:0;
+  align-self:flex-start; cursor:pointer; text-align:left;
+}
+.cp-cal-daynum-btn:hover .cp-cal-daynum,
+.cp-cal-daynum-btn:focus-visible .cp-cal-daynum{ color:var(--teal); text-decoration:underline; }
 .cp-cal-grid.emp-cal-labeled .cp-cal-daynum{ font-size:10px; line-height:1; }
 .cp-cal-labels{
   display:flex; flex-direction:column; gap:1px; min-height:0; overflow:hidden; width:100%;
@@ -2758,7 +2773,9 @@ footer{
   font-family:'Montserrat',sans-serif; font-size:9px; line-height:1.2;
   padding:1px 3px; border-radius:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   color:var(--navy); background:#E8EEF5;
+  appearance:none; border:0; text-align:left; cursor:pointer;
 }
+.cp-cal-label:hover, .cp-cal-label.focus{ outline:1px solid var(--teal); }
 .cp-cal-label.meeting{ color:var(--teal); background:var(--teal-soft); }
 .cp-cal-label.deadline, .cp-cal-label.deadline.date, .cp-cal-label.deadline.active{
   color:#7A5A22; background:var(--gold-soft);
@@ -3075,6 +3092,12 @@ footer{
 }
 .emp-members-panel{ margin:0 0 14px; }
 .emp-members-lede{ margin:0 0 10px; font-size:12.5px; }
+.emp-members-confirm{
+  margin:0 0 10px; padding:10px 12px;
+  border:1px solid #D9C4A0; background:#FBF6EC; border-radius:4px;
+}
+.emp-members-confirm p{ margin:0 0 8px; font-size:13px; color:var(--navy); }
+.emp-members-confirm-actions{ display:flex; gap:8px; align-items:center; }
 .emp-members-list{
   list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px;
 }

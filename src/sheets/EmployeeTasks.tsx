@@ -255,6 +255,15 @@ export function EmployeeTasks({
   );
   const hasMoreTasks = visibleCount < filtered.length;
 
+  const showAssignee = useMemo(
+    () => tasks.some((t) => Boolean((t.assigneeName || '').trim())),
+    [tasks],
+  );
+  const sortCols = useMemo(
+    () => (showAssignee ? SORT_COLS : SORT_COLS.filter((c) => c.key !== 'assignee')),
+    [showAssignee],
+  );
+
   useEffect(() => {
     if (!hasMoreTasks) return;
     const root = scrollRef.current;
@@ -602,7 +611,7 @@ export function EmployeeTasks({
             <table className="emp-tasks-table">
               <thead>
                 <tr>
-                  {SORT_COLS.map((col) => (
+                  {sortCols.map((col) => (
                     <th
                       key={col.key}
                       className={
@@ -735,9 +744,9 @@ export function EmployeeTasks({
                           <span className="emp-task-kind mono">subtask</span>
                         ) : null}
                       </td>
-                      <td className="emp-task-assignee mono">
-                        {t.assigneeName || '—'}
-                      </td>
+                      {showAssignee ? (
+                        <td className="emp-task-assignee mono">{t.assigneeName || '—'}</td>
+                      ) : null}
                       <td className="col-start">
                         {t.writable ? (
                           <ScheduleDateInput

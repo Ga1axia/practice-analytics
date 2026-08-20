@@ -16,12 +16,18 @@ import {
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
 import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { EmployeeCalendar } from './EmployeeCalendar';
 import { EmployeeProjectWorkspace } from './EmployeeProjectWorkspace';
 import { EmployeeTasks } from './EmployeeTasks';
 
 type PageId = 'hours' | 'projects' | 'tasks' | 'calendar' | 'project';
 type StatusFilter = 'active' | 'all';
+
+/** Seeded demo client projects — hide outside /demo. */
+function isDemoSeedProject(p: ProjectNode): boolean {
+  return /—\s*Demo\b|\bDemo Project\b/i.test(p.title || p.key || '');
+}
 
 function projectStatus(p: ProjectNode): string {
   return (
@@ -46,6 +52,7 @@ export function EmployeePortal({
   data: DashboardData;
   employeeName: string;
 }) {
+  const isDemo = useDemoMode();
   const [page, setPage] = useState<PageId>('hours');
   const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['hours']));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
@@ -116,10 +123,11 @@ export function EmployeePortal({
           .filter(
             (p) => isProjectListManager(p, employeeName) || memberRoles.has(p.key),
           )
+          .filter((p) => isDemo || !isDemoSeedProject(p))
           .map((p) => ({ ...p, clientName: c.client })),
       )
       .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
-  }, [hierarchy, employeeName, memberRoles]);
+  }, [hierarchy, employeeName, memberRoles, isDemo]);
 
   const activeProjects = useMemo(
     () => allProjects.filter(projectIsActive),
@@ -176,8 +184,12 @@ export function EmployeePortal({
   }
 
   useEffect(() => {
-    function openCalendar() {
+    function openCalendar(ev?: Event) {
+      const detail = (ev as CustomEvent<{ jumpToToday?: boolean }> | undefined)?.detail;
       go('calendar');
+      if (detail?.jumpToToday) {
+        window.dispatchEvent(new CustomEvent('pa-emp-calendar-today'));
+      }
     }
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -193,13 +205,15 @@ export function EmployeePortal({
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'c' || e.key === 'C') {
         e.preventDefault();
-        openCalendar();
+        openCalendar(
+          new CustomEvent('pa-emp-open-calendar', { detail: { jumpToToday: true } }),
+        );
       }
     }
-    window.addEventListener('pa-emp-open-calendar', openCalendar);
+    window.addEventListener('pa-emp-open-calendar', openCalendar as EventListener);
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('pa-emp-open-calendar', openCalendar);
+      window.removeEventListener('pa-emp-open-calendar', openCalendar as EventListener);
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
@@ -336,8 +350,10 @@ export function EmployeePortal({
           <div className="panel emp-quick">
             <h3>Jump to projects</h3>
             <p className="pd-muted">
-              {activeProjects.length} active assignment
-              {activeProjects.length === 1 ? '' : 's'}
+              <span className="emp-quick-count">
+                {activeProjects.length} active{' '}
+                {activeProjects.length === 1 ? 'assignment' : 'assignments'}
+              </span>
               {allProjects.length !== activeProjects.length
                 ? ` · ${allProjects.length} total assigned`
                 : ''}

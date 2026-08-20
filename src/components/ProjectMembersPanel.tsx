@@ -35,12 +35,14 @@ export function ProjectMembersPanel({
   const [error, setError] = useState<string | null>(null);
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<ProjectMember | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
+      setPendingRemove(null);
       if (canManage) {
         await ensureLeadMembership({ projectKey, employeeName });
       }
@@ -97,13 +99,19 @@ export function ProjectMembersPanel({
     onMembersChange?.(next);
   }
 
-  async function onRemove(m: ProjectMember) {
+  function requestRemove(m: ProjectMember) {
     if (!canManage || busy) return;
     if (m.role === 'lead' && m.employee_name === employeeName) {
       setError('You can’t remove yourself as project lead.');
       return;
     }
-    if (!window.confirm(`Remove ${m.employee_name} from this project?`)) return;
+    setPendingRemove(m);
+    setError(null);
+  }
+
+  async function confirmRemove() {
+    const m = pendingRemove;
+    if (!m || !canManage || busy) return;
     setBusy(true);
     setError(null);
     const res = await removeProjectMember({ projectKey, memberId: m.id });
@@ -112,6 +120,7 @@ export function ProjectMembersPanel({
       setError(res.error);
       return;
     }
+    setPendingRemove(null);
     const next = members.filter((x) => x.id !== m.id);
     setMembers(next);
     onMembersChange?.(next);
@@ -133,6 +142,31 @@ export function ProjectMembersPanel({
         </p>
       ) : null}
       {error ? <p className="plist-upload-err">{error}</p> : null}
+      {pendingRemove ? (
+        <div className="emp-members-confirm" role="alertdialog" aria-labelledby="emp-rm-title">
+          <p id="emp-rm-title">
+            Remove <strong>{pendingRemove.employee_name}</strong> from this project?
+          </p>
+          <div className="emp-members-confirm-actions">
+            <button
+              type="button"
+              className="emp-primary-btn"
+              disabled={busy}
+              onClick={() => void confirmRemove()}
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              className="cp-text-btn"
+              disabled={busy}
+              onClick={() => setPendingRemove(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
       {loading ? (
         <p className="pd-muted">…</p>
       ) : (
@@ -149,10 +183,10 @@ export function ProjectMembersPanel({
                 <button
                   type="button"
                   className="emp-task-delete"
-                  disabled={busy}
+                  disabled={busy || Boolean(pendingRemove)}
                   title="Remove member"
                   aria-label={`Remove ${m.employee_name}`}
-                  onClick={() => void onRemove(m)}
+                  onClick={() => requestRemove(m)}
                 >
                   ×
                 </button>

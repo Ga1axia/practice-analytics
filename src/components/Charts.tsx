@@ -224,7 +224,16 @@ export function RevenueChart({
   );
 }
 
-export function HoursHBar({ labels, values }: { labels: string[]; values: number[] }) {
+export function HoursHBar({
+  labels,
+  values,
+  fullLabels,
+}: {
+  labels: string[];
+  values: number[];
+  /** Optional full names for tooltips when `labels` are truncated. */
+  fullLabels?: string[];
+}) {
   return (
     <Chart
       type="bar"
@@ -234,7 +243,18 @@ export function HoursHBar({ labels, values }: { labels: string[]; values: number
       }}
       options={{
         indexAxis: 'y',
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const i = items[0]?.dataIndex ?? 0;
+                return fullLabels?.[i] || labels[i] || '';
+              },
+              label: (item) => ` ${Number(item.raw || 0).toFixed(1)}h`,
+            },
+          },
+        },
         scales: {
           x: { grid: { color: '#E4E8EE' } },
           y: { ticks: { font: { size: 10.5 } }, grid: { display: false } },

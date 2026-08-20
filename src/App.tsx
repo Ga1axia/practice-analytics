@@ -240,13 +240,15 @@ function EmployeeShell() {
             <button
               type="button"
               className="signout-btn emp-cal-nav-btn"
-              title="Open calendar (C)"
+              title="Jump to today on calendar (C)"
               aria-keyshortcuts="c"
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('pa-emp-open-calendar'));
+                window.dispatchEvent(
+                  new CustomEvent('pa-emp-open-calendar', { detail: { jumpToToday: true } }),
+                );
               }}
             >
-              Calendar <kbd className="emp-nav-kbd">C</kbd>
+              Today <kbd className="emp-nav-kbd">C</kbd>
             </button>
             <button type="button" className="signout-btn" onClick={() => void signOut()}>
               Sign out

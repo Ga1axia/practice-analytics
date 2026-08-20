@@ -33,6 +33,7 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Employee | `nini@mdesigns.test` | `DemoEmployee2026!` | Ni Ni |
 | Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He |
 | Employee | `avery.cobe@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
+| Customer | `sinnathamby@mdesigns.test` | `DemoCustomer2026!` | Thiru & Renuka Sinnathamby (26-012, live project) |
 | Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
 | Customer | `jordan.blake@mdesigns.test` | `DemoCustomer2026!` | Jordan Blake (demo remodel) |
 | Customer | `sam.rivera@mdesigns.test` | `DemoCustomer2026!` | Sam Rivera (demo ADU) |
@@ -103,6 +104,7 @@ On Vercel, set the same server vars in Project → Settings → Environment Vari
 - Sign in as admin → sheets A-1–A-5 including Project Schedule (editable)
 - Sign in as Arnita / Ni Ni / Zhengrui → employee workspace (hours, projects, tasks, calendar, project detail); no firm sheets / A/R
 - Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable
+- Sign in as Sinnathamby → client portal for **Thiru and Renuga Sinnathamby - 26-012**
 - On `/` with empty schedules, employee calendar/tasks show empty states (no demo seed)
 - On `/demo` with empty schedules, employee views may show demo seed tags
 - Signed-out users cannot read `pa_*` tables

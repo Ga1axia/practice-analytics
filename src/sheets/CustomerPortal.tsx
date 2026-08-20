@@ -18,17 +18,24 @@ export function CustomerPortal({ profile }: { profile: Profile }) {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const clientName = (profile.client_name || '').trim();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
+      if (!clientName) {
+        setProjects([]);
+        setLoading(false);
+        return;
+      }
       const { data, error: err } = await supabase
         .from('pa_projects')
         .select(
           'project,client,manager,status,type,phase,city,contract,spent,billed,ar,row_kind,parent_project',
         )
+        .eq('client', clientName)
         .order('project');
       if (cancelled) return;
       if (err) {
@@ -42,7 +49,7 @@ export function CustomerPortal({ profile }: { profile: Profile }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clientName]);
 
   const project = useMemo(() => pickProject(projects), [projects]);
   const greeting = profile.display_name || profile.client_name || 'there';

@@ -33,6 +33,13 @@ const demos = [
     gate: 'Employee',
   },
   {
+    role: 'Thiru & Renuga Sinnathamby',
+    email: 'sinnathamby@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Active residence · 26-012',
+    gate: 'Client',
+  },
+  {
     role: 'Elena Vargas',
     email: 'customer@mdesigns.test',
     password: 'DemoCustomer2026!',

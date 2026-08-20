@@ -20,6 +20,13 @@ const PASSWORD = 'DemoCustomer2026!';
 
 const CUSTOMERS = [
   {
+    email: 'sinnathamby@mdesigns.test',
+    display_name: 'Thiru and Renuga Sinnathamby',
+    client_name: 'Thiru & Renuka Sinnathamby',
+    /** Real firm client — do not seed a fake project row. */
+    existing: true,
+  },
+  {
     email: 'jordan.blake@mdesigns.test',
     display_name: 'Jordan Blake',
     client_name: 'Jordan Blake',
@@ -111,6 +118,11 @@ async function ensureCustomer(c, authUsers) {
     { onConflict: 'id' },
   );
   if (profErr) throw profErr;
+
+  if (c.existing) {
+    console.log(`  → bound to existing client ${c.client_name}`);
+    return;
+  }
 
   const { error: projErr } = await admin.from('pa_projects').upsert(
     {

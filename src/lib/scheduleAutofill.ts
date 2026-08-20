@@ -97,14 +97,12 @@ export function workTypeToPresetKind(workType: WorkType): SchedulePresetKind {
     case 'New':
       return 'new_residence';
     case 'Remodel':
-    case 'Addition':
       return 'remodel';
     case 'ADU':
       return 'adu';
     case 'Interior':
       return 'interior';
     case 'Commercial':
-    case 'Multi-family':
       return 'commercial';
     default:
       return 'new_residence';

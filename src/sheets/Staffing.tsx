@@ -10,11 +10,12 @@ import {
 } from '../lib/staffingTimeEntries';
 import {
   loadHistoryAnalytics,
+  resolveHistoryDateRange,
   type DimensionStat,
   type EmployeeHistoryRow,
   type FirmAverages,
   type HistoryAnalyticsResult,
-  type HistoryWindowDays,
+  type HistoryDatePreset,
   type HoursSlice,
 } from '../lib/staffingHistoryAnalytics';
 import { WORK_TYPES, type WorkType } from '../lib/workType';
@@ -248,9 +249,18 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
+function parsePresetSelect(value: string): HistoryDatePreset {
+  if (value === 'billing' || value === 'custom') return value;
+  const n = Number(value);
+  if (n === 30 || n === 60 || n === 90) return n;
+  return 'billing';
+}
+
 export function Staffing() {
   const [view, setView] = useState<StaffingView>('analytics');
-  const [windowDays, setWindowDays] = useState<HistoryWindowDays>(90);
+  const [preset, setPreset] = useState<HistoryDatePreset>('billing');
+  const [customFrom, setCustomFrom] = useState(() => daysAgoYmd(30));
+  const [customTo, setCustomTo] = useState(() => ymd(new Date()));
   const [employee, setEmployee] = useState('');
   const [phase, setPhase] = useState('');
   const [workType, setWorkType] = useState('');
@@ -268,12 +278,19 @@ export function Staffing() {
 
   const [selected, setSelected] = useState<string | null>(null);
 
+  const dateRange = useMemo(
+    () => resolveHistoryDateRange({ preset, customFrom, customTo }),
+    [preset, customFrom, customTo],
+  );
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await loadHistoryAnalytics({
-        windowDays,
+        preset,
+        customFrom,
+        customTo,
         employee: employee || undefined,
         phase: phase || undefined,
         workType: (workType as WorkType) || undefined,
@@ -294,7 +311,7 @@ export function Staffing() {
     } finally {
       setLoading(false);
     }
-  }, [windowDays, employee, phase, workType]);
+  }, [preset, customFrom, customTo, employee, phase, workType]);
 
   useEffect(() => {
     void reload();
@@ -379,8 +396,7 @@ export function Staffing() {
 
   const summary = data.summary;
   const opts = data.filterOptions;
-  const windowLabel =
-    windowDays === 0 ? 'All imported history' : `Trailing ${windowDays} days`;
+  const windowLabel = dateRange.label;
 
   return (
     <section className="sheet active staffing-sheet">
@@ -465,15 +481,33 @@ export function Staffing() {
           <div className="filters staff-filters">
             <span className="f-label">Window</span>
             <select
-              value={windowDays}
-              onChange={(e) => setWindowDays(Number(e.target.value) as HistoryWindowDays)}
+              value={String(preset)}
+              onChange={(e) => setPreset(parsePresetSelect(e.target.value))}
             >
+              <option value="billing">Current billing</option>
+              <option value="custom">Custom</option>
               <option value={30}>Trailing 30 days</option>
+              <option value={60}>Trailing 60 days</option>
               <option value={90}>Trailing 90 days</option>
-              <option value={180}>Trailing 180 days</option>
-              <option value={365}>Trailing 365 days</option>
-              <option value={0}>All imported history</option>
             </select>
+            {preset === 'custom' ? (
+              <>
+                <input
+                  type="date"
+                  className="staff-input"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  aria-label="From date"
+                />
+                <input
+                  type="date"
+                  className="staff-input"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  aria-label="To date"
+                />
+              </>
+            ) : null}
             <span className="f-label">Employee</span>
             <select value={employee} onChange={(e) => setEmployee(e.target.value)}>
               <option value="">All</option>

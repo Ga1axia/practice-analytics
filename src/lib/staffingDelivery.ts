@@ -134,3 +134,37 @@ export function weekStarts(from: Date, weeks: number): string[] {
 export function daysAgoYmd(n: number, now = new Date()): string {
   return ymd(addDays(now, -n));
 }
+
+/**
+ * Known biweekly billing end (Sunday). Periods are Mon→Sun spanning 14 days,
+ * closing every other Sunday. Shift this anchor if the firm calendar differs.
+ */
+export const BILLING_PERIOD_ANCHOR_END_YMD = '2024-01-07';
+
+function utcYmdDate(iso: string): Date {
+  const m = iso.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return new Date(NaN);
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+/**
+ * Current biweekly billing period: Monday start → today (not the future Sunday end).
+ */
+export function currentBillingPeriodBounds(now = new Date()): {
+  fromDate: string;
+  toDate: string;
+  periodEnd: string;
+} {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const anchor = utcYmdDate(BILLING_PERIOD_ANCHOR_END_YMD);
+  const days = Math.round((today.getTime() - anchor.getTime()) / 86_400_000);
+  // Period ends on anchor + 14k; period containing `today` ends at that Sunday.
+  const periodIndex = Math.floor((days + 13) / 14);
+  const periodEnd = addDays(anchor, periodIndex * 14);
+  const periodStart = addDays(periodEnd, -13); // Monday
+  return {
+    fromDate: ymd(periodStart),
+    toDate: ymd(today),
+    periodEnd: ymd(periodEnd),
+  };
+}

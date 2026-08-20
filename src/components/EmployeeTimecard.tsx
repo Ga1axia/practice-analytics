@@ -6,8 +6,9 @@ import { downloadCsv, toCsv } from '../lib/downloadCsv';
 import { downloadKvPdf } from '../lib/downloadPdf';
 import {
   loadHistoryAnalytics,
+  resolveHistoryDateRange,
   type EmployeeHistoryRow,
-  type HistoryWindowDays,
+  type HistoryDatePreset,
   type HoursSlice,
 } from '../lib/staffingHistoryAnalytics';
 import { abbrevGlossary, phaseAbbrev } from '../lib/phaseAbbrev';
@@ -43,27 +44,16 @@ function mdLabel(iso: string, withYear: boolean): string {
   return withYear ? `${base}/${Number(m[1])}` : base;
 }
 
-function formatWindowRange(
-  fromDate: string | null,
-  toDate: string | null,
-  windowDays: HistoryWindowDays,
-): string {
-  if (fromDate && toDate) {
-    const y1 = fromDate.slice(0, 4);
-    const y2 = toDate.slice(0, 4);
-    const withYear = windowDays === 0 || y1 !== y2;
-    return `${mdLabel(fromDate, withYear)} → ${mdLabel(toDate, withYear)}`;
-  }
-  if (windowDays === 0) return 'All history';
-  return `${windowDays}d`;
+function formatPresetRange(fromDate: string, toDate: string): string {
+  const withYear = fromDate.slice(0, 4) !== toDate.slice(0, 4);
+  return `${mdLabel(fromDate, withYear)} → ${mdLabel(toDate, withYear)}`;
 }
 
-function windowBounds(windowDays: HistoryWindowDays, fromDate: string | null, toDate: string | null) {
-  const to = toDate || ymd(new Date());
-  if (windowDays === 0) {
-    return { fromDate: fromDate || '2000-01-01', toDate: to };
-  }
-  return { fromDate: daysAgoYmd(windowDays), toDate: to };
+function parsePresetSelect(value: string): HistoryDatePreset {
+  if (value === 'billing' || value === 'custom') return value;
+  const n = Number(value);
+  if (n === 30 || n === 60 || n === 90) return n;
+  return 'billing';
 }
 
 export function EmployeeTimecard({
@@ -74,21 +64,33 @@ export function EmployeeTimecard({
   /** Resolve a BQE project label to an openable portal project. */
   onOpenProjectLabel?: (projectLabel: string) => void;
 }) {
-  const [windowDays, setWindowDays] = useState<HistoryWindowDays>(90);
+  const [preset, setPreset] = useState<HistoryDatePreset>('billing');
+  const [customFrom, setCustomFrom] = useState(() => daysAgoYmd(30));
+  const [customTo, setCustomTo] = useState(() => ymd(new Date()));
   const [row, setRow] = useState<EmployeeHistoryRow | null>(null);
-  const [fromDate, setFromDate] = useState<string | null>(null);
-  const [toDate, setToDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<string>('');
   const [drill, setDrill] = useState<TimeEntryDrillFilter | null>(null);
+
+  const bounds = useMemo(
+    () =>
+      resolveHistoryDateRange({
+        preset,
+        customFrom,
+        customTo,
+      }),
+    [preset, customFrom, customTo],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await loadHistoryAnalytics({
-        windowDays,
+        preset,
+        customFrom,
+        customTo,
         employee: employeeName,
       });
       const mine =
@@ -96,9 +98,7 @@ export function EmployeeTimecard({
         result.employees[0] ||
         null;
       setRow(mine);
-      setFromDate(result.summary.fromDate);
-      setToDate(result.summary.toDate);
-      setRange(formatWindowRange(result.summary.fromDate, result.summary.toDate, windowDays));
+      setRange(formatPresetRange(bounds.fromDate, bounds.toDate));
       if (!mine && result.summary.entriesLoaded === 0) {
         setError(
           'No time entries available for your name yet. Ask an admin to import BQE time entries.',
@@ -110,16 +110,11 @@ export function EmployeeTimecard({
     } finally {
       setLoading(false);
     }
-  }, [windowDays, employeeName]);
+  }, [preset, customFrom, customTo, employeeName, bounds.fromDate, bounds.toDate]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const bounds = useMemo(
-    () => windowBounds(windowDays, fromDate, toDate),
-    [windowDays, fromDate, toDate],
-  );
 
   const billableShare = row && row.totalHours > 0 ? row.billableHours / row.totalHours : 0;
 
@@ -221,16 +216,34 @@ export function EmployeeTimecard({
         <div className="emp-timecard-tools">
           <select
             className="staff-input"
-            value={windowDays}
-            onChange={(e) => setWindowDays(Number(e.target.value) as HistoryWindowDays)}
+            value={String(preset)}
+            onChange={(e) => setPreset(parsePresetSelect(e.target.value))}
             aria-label="Timecard window"
           >
+            <option value="billing">Current billing</option>
+            <option value="custom">Custom</option>
             <option value={30}>Trailing 30 days</option>
+            <option value={60}>Trailing 60 days</option>
             <option value={90}>Trailing 90 days</option>
-            <option value={180}>Trailing 180 days</option>
-            <option value={365}>Trailing 365 days</option>
-            <option value={0}>All history</option>
           </select>
+          {preset === 'custom' ? (
+            <>
+              <input
+                type="date"
+                className="staff-input"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="From date"
+              />
+              <input
+                type="date"
+                className="staff-input"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="To date"
+              />
+            </>
+          ) : null}
           <button
             type="button"
             className="cp-text-btn"

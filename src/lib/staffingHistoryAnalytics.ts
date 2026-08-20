@@ -1,10 +1,48 @@
-import { activityBucket, daysAgoYmd, isDeliveryHours, ymd, addDays } from './staffingDelivery';
+import {
+  activityBucket,
+  currentBillingPeriodBounds,
+  daysAgoYmd,
+  isDeliveryHours,
+  ymd,
+} from './staffingDelivery';
 import { phaseAbbrev, phaseDisplayName } from './phaseAbbrev';
 import { classifyWorkType, type WorkType } from './workType';
 import { supabase } from './supabase';
 import type { TimeEntryLite } from './staffingTypes';
 
-export type HistoryWindowDays = 30 | 90 | 180 | 365 | 0; // 0 = all imported
+/** @deprecated Prefer HistoryDatePreset */
+export type HistoryWindowDays = 30 | 90 | 180 | 365 | 0;
+
+/** Date filter presets for timecard / staffing history. */
+export type HistoryDatePreset = 'billing' | 'custom' | 30 | 60 | 90;
+
+export function resolveHistoryDateRange(input: {
+  preset: HistoryDatePreset;
+  customFrom?: string;
+  customTo?: string;
+  now?: Date;
+}): { fromDate: string; toDate: string; label: string } {
+  const now = input.now ?? new Date();
+  const today = ymd(now);
+  if (input.preset === 'billing') {
+    const b = currentBillingPeriodBounds(now);
+    return {
+      fromDate: b.fromDate,
+      toDate: b.toDate,
+      label: `Current billing (${b.fromDate} → ${b.toDate})`,
+    };
+  }
+  if (input.preset === 'custom') {
+    const fromDate = input.customFrom || daysAgoYmd(30, now);
+    const toDate = input.customTo || today;
+    return { fromDate, toDate, label: `${fromDate} → ${toDate}` };
+  }
+  return {
+    fromDate: daysAgoYmd(input.preset, now),
+    toDate: today,
+    label: `Trailing ${input.preset} days`,
+  };
+}
 
 export type HoursSlice = {
   key: string;
@@ -461,19 +499,39 @@ async function fetchEntriesInRange(
 }
 
 export async function loadHistoryAnalytics(input: {
-  windowDays: HistoryWindowDays;
+  /** Prefer `preset`. Kept for older call sites. */
+  windowDays?: HistoryWindowDays;
+  preset?: HistoryDatePreset;
+  customFrom?: string;
+  customTo?: string;
   employee?: string;
   phase?: string;
   workType?: WorkType;
 }): Promise<HistoryAnalyticsResult> {
   const now = new Date();
-  const toDate = ymd(addDays(now, 1));
-  const fromDate = input.windowDays === 0 ? null : daysAgoYmd(input.windowDays, now);
+  let fromDate: string | null;
+  let toDate: string;
+
+  if (input.preset != null) {
+    const range = resolveHistoryDateRange({
+      preset: input.preset,
+      customFrom: input.customFrom,
+      customTo: input.customTo,
+      now,
+    });
+    fromDate = range.fromDate;
+    toDate = range.toDate;
+  } else {
+    const windowDays = input.windowDays ?? 90;
+    toDate = ymd(now);
+    fromDate = windowDays === 0 ? null : daysAgoYmd(windowDays, now);
+  }
 
   let probeQ = supabase
     .from('pa_time_entries')
     .select('id', { count: 'exact', head: true })
     .lte('work_date', toDate);
+  if (fromDate) probeQ = probeQ.gte('work_date', fromDate);
   if (input.employee) probeQ = probeQ.eq('employee_name', input.employee);
   const probe = await probeQ;
   if (probe.error) {

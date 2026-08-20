@@ -9,6 +9,7 @@ import {
 } from '../../api/_lib/bqeTimeEntrySync';
 import {
   classifyDeliveryHours,
+  currentBillingPeriodBounds,
   isDeliveryHours,
   workloadStatus,
   weekStarts,
@@ -57,6 +58,22 @@ describe('delivery classification', () => {
       }),
       'uncertain_project_nb',
     );
+  });
+});
+
+describe('current billing period', () => {
+  it('uses Monday of the open biweekly period through today', () => {
+    const mid = currentBillingPeriodBounds(new Date(Date.UTC(2026, 7, 20)));
+    assert.equal(mid.fromDate, '2026-08-17');
+    assert.equal(mid.toDate, '2026-08-20');
+    assert.equal(mid.periodEnd, '2026-08-30');
+  });
+
+  it('keeps Sunday as the period end day', () => {
+    const onEnd = currentBillingPeriodBounds(new Date(Date.UTC(2026, 7, 16)));
+    assert.equal(onEnd.fromDate, '2026-08-03');
+    assert.equal(onEnd.toDate, '2026-08-16');
+    assert.equal(onEnd.periodEnd, '2026-08-16');
   });
 });
 

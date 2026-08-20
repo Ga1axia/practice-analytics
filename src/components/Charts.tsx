@@ -228,11 +228,13 @@ export function HoursHBar({
   labels,
   values,
   fullLabels,
+  onBarClick,
 }: {
   labels: string[];
   values: number[];
   /** Optional full names for tooltips when `labels` are truncated. */
   fullLabels?: string[];
+  onBarClick?: (index: number) => void;
 }) {
   return (
     <Chart
@@ -243,6 +245,15 @@ export function HoursHBar({
       }}
       options={{
         indexAxis: 'y',
+        onClick: (_evt, elements) => {
+          if (!onBarClick || !elements.length) return;
+          const idx = elements[0]?.index;
+          if (typeof idx === 'number') onBarClick(idx);
+        },
+        onHover: (evt, elements) => {
+          const el = evt.native?.target as HTMLElement | undefined;
+          if (el) el.style.cursor = elements.length && onBarClick ? 'pointer' : 'default';
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -252,6 +263,7 @@ export function HoursHBar({
                 return fullLabels?.[i] || labels[i] || '';
               },
               label: (item) => ` ${Number(item.raw || 0).toFixed(1)}h`,
+              afterBody: () => (onBarClick ? ['Click to open'] : []),
             },
           },
         },

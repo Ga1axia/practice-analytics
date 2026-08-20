@@ -2396,8 +2396,40 @@ footer{
   width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:2px;
   font-family:'Montserrat',sans-serif; font-size:13.5px;
 }
-.emp-quick{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
-.emp-quick-count{ white-space:nowrap; }
+.emp-timecard-tools{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.emp-timecard-bench{ margin:6px 0 0; font-size:12px; line-height:1.45; }
+.emp-timecard-bench strong{ color:var(--navy); font-weight:600; }
+.staff-share-row-btn{
+  appearance:none; border:0; background:transparent; width:100%;
+  cursor:pointer; text-align:left; padding:0; font:inherit; color:inherit;
+}
+.staff-share-row-btn:hover .staff-share-lab,
+.staff-share-row-btn:focus-visible .staff-share-lab{ color:var(--teal); text-decoration:underline; }
+.emp-drill{ margin-top:14px; }
+.emp-drill-head{
+  display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;
+  margin-bottom:10px;
+}
+.emp-drill-actions{ display:flex; gap:8px; align-items:center; }
+.emp-drill-table-wrap{ overflow:auto; max-height:320px; border:1px solid var(--border); }
+.emp-drill-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+.emp-drill-table th, .emp-drill-table td{
+  padding:6px 8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top;
+}
+.emp-drill-table th{
+  position:sticky; top:0; background:#F7F8FA; font-size:11px; letter-spacing:0.04em;
+  text-transform:uppercase; color:var(--ink-soft);
+}
+.emp-today-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.emp-today-grid{ margin-top:14px; }
+@media (max-width:700px){
+  .emp-sheets{
+    display:flex; flex-wrap:nowrap; overflow-x:auto; gap:0; -webkit-overflow-scrolling:touch;
+  }
+  .emp-sheets button{ flex:0 0 auto; white-space:nowrap; }
+  .emp-today-actions{ width:100%; }
+  .emp-timecard-head{ flex-direction:column; align-items:flex-start; }
+}
 .emp-primary-btn{
   margin-top:10px; font-family:'IBM Plex Mono',monospace; font-size:12px;
   background:var(--navy); color:#fff; border:none; padding:10px 16px; cursor:pointer;

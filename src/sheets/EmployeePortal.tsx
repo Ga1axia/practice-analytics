@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { EfficiencyLineChart, StackedHoursChart } from '../components/Charts';
 import { EmployeeTimecard } from '../components/EmployeeTimecard';
+import { EmployeeToday } from '../components/EmployeeToday';
 import { KpiRow } from '../components/KpiRow';
 import { ProjectSchedulePulse } from '../components/ProjectSchedulePulse';
 import { processPhaseLabel } from '../lib/architecturalProcess';
+import { extractProjectCode } from '../lib/projectLoggedHours';
 import { fmtPct, fmtUSD, monthLabel } from '../lib/format';
 import {
   ensureMyMembershipsFromTimeEntries,
@@ -21,12 +23,37 @@ import { EmployeeCalendar } from './EmployeeCalendar';
 import { EmployeeProjectWorkspace } from './EmployeeProjectWorkspace';
 import { EmployeeTasks } from './EmployeeTasks';
 
-type PageId = 'hours' | 'projects' | 'tasks' | 'calendar' | 'project';
+type PageId = 'today' | 'hours' | 'projects' | 'tasks' | 'calendar' | 'project';
 type StatusFilter = 'active' | 'all';
 
 /** Seeded demo client projects — hide outside /demo. */
 function isDemoSeedProject(p: ProjectNode): boolean {
   return /—\s*Demo\b|\bDemo Project\b/i.test(p.title || p.key || '');
+}
+
+function resolveProjectKey(
+  projects: (ProjectNode & { clientName: string })[],
+  label: string,
+): string | null {
+  const raw = label.trim();
+  if (!raw) return null;
+  const code = extractProjectCode(raw);
+  if (code) {
+    const byCode = projects.find((p) => p.code === code || extractProjectCode(p.key) === code);
+    if (byCode) return byCode.key;
+  }
+  const n = raw.toLowerCase();
+  const exact = projects.find(
+    (p) => p.key.toLowerCase() === n || p.title.toLowerCase() === n,
+  );
+  if (exact) return exact.key;
+  const fuzzy = projects.find(
+    (p) =>
+      p.key.toLowerCase().includes(n) ||
+      n.includes(p.title.toLowerCase()) ||
+      p.title.toLowerCase().includes(n.replace(/\s*-\s*\d{2}-\d{3}\s*$/, '').trim()),
+  );
+  return fuzzy?.key || null;
 }
 
 function projectStatus(p: ProjectNode): string {
@@ -53,14 +80,15 @@ export function EmployeePortal({
   employeeName: string;
 }) {
   const isDemo = useDemoMode();
-  const [page, setPage] = useState<PageId>('hours');
-  const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['hours']));
+  const [page, setPage] = useState<PageId>('today');
+  const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['today']));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [memberRoles, setMemberRoles] = useState<Map<string, ProjectMemberRole>>(
     () => new Map(),
   );
+  const [roleDefaultApplied, setRoleDefaultApplied] = useState(false);
 
   function go(next: PageId) {
     setVisited((prev) => {
@@ -164,6 +192,20 @@ export function EmployeePortal({
   const bookOut = leadBookSource.reduce((a, p) => a + Math.max(0, p.outstanding), 0);
   const clientCount = new Set(bookSource.map((p) => p.clientName)).size;
   const showPaymentBook = leadBookSource.length > 0;
+  const isPm = leadBookSource.length > 0;
+
+  // Role-based landing once memberships resolve: multi-lead PMs → projects; others stay on Today.
+  useEffect(() => {
+    if (roleDefaultApplied) return;
+    if (!allProjects.length && memberRoles.size === 0) return;
+    const leadN = allProjects.filter((p) =>
+      isProjectLead(p, employeeName, memberRoles.get(p.key) || null),
+    ).length;
+    if (leadN >= 2) {
+      go('projects');
+    }
+    setRoleDefaultApplied(true);
+  }, [allProjects, memberRoles, employeeName, roleDefaultApplied]);
 
   function goProjects() {
     go('projects');
@@ -176,6 +218,11 @@ export function EmployeePortal({
       window.scrollTo({ top: 0, behavior: 'smooth' });
       document.getElementById('emp-project-page')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  }
+
+  function openProjectFromTimecardLabel(label: string) {
+    const key = resolveProjectKey(allProjects, label);
+    if (key) selectProject(key);
   }
 
   function onPickFromSelect(key: string) {
@@ -223,45 +270,54 @@ export function EmployeePortal({
       <nav className="sheets emp-sheets" aria-label="Employee pages">
         <button
           type="button"
-          className={page === 'hours' ? 'active' : ''}
-          onClick={() => go('hours')}
+          className={page === 'today' ? 'active' : ''}
+          onClick={() => go('today')}
         >
-          <span className="num">01</span>My timecard
-        </button>
-        <button
-          type="button"
-          className={page === 'projects' ? 'active' : ''}
-          onClick={goProjects}
-        >
-          <span className="num">02</span>My projects
+          <span className="num">01</span>Today
         </button>
         <button
           type="button"
           className={page === 'tasks' ? 'active' : ''}
           onClick={() => go('tasks')}
         >
-          <span className="num">03</span>My tasks
+          <span className="num">02</span>My tasks
         </button>
         <button
           type="button"
           className={page === 'calendar' ? 'active' : ''}
           onClick={() => go('calendar')}
         >
-          <span className="num">04</span>My calendar
+          <span className="num">03</span>My calendar
         </button>
         <button
           type="button"
-          className={page === 'project' ? 'active' : ''}
-          onClick={() => {
-            if (!selectedKey && activeProjects[0]) setSelectedKey(activeProjects[0].key);
-            else if (!selectedKey && allProjects[0]) setSelectedKey(allProjects[0].key);
-            go('project');
-          }}
-          disabled={!allProjects.length}
+          className={page === 'projects' || page === 'project' ? 'active' : ''}
+          onClick={goProjects}
         >
-          <span className="num">05</span>Project detail
+          <span className="num">04</span>My projects
+        </button>
+        <button
+          type="button"
+          className={page === 'hours' ? 'active' : ''}
+          onClick={() => go('hours')}
+        >
+          <span className="num">05</span>My timecard
         </button>
       </nav>
+
+      <div className={page === 'today' ? 'emp-page' : 'emp-page emp-page-hidden'} hidden={page !== 'today'}>
+        <EmployeeToday
+          projects={activeProjects.length ? activeProjects : allProjects}
+          employeeName={employeeName}
+          memberRoles={memberRoles}
+          isPm={isPm}
+          onOpenProject={selectProject}
+          onGoTasks={() => go('tasks')}
+          onGoCalendar={() => go('calendar')}
+          onGoTimecard={() => go('hours')}
+          onGoProjects={goProjects}
+        />
+      </div>
 
       <div className={page === 'hours' ? 'emp-page' : 'emp-page emp-page-hidden'} hidden={page !== 'hours'}>
         <>
@@ -271,7 +327,8 @@ export function EmployeePortal({
                 <p className="pd-kicker">My timecard</p>
                 <h1 className="display">{employeeName}</h1>
                 <p className="emp-lede">
-                  Phase mix, project load, and efficiency from your BQE time entries.
+                  Phase mix, project load, and efficiency from your BQE time entries. Click chart
+                  bars to drill into entries or open a project.
                 </p>
               </div>
             </header>
@@ -285,7 +342,7 @@ export function EmployeePortal({
                   cls: 'accent-teal',
                 },
                 {
-                  k: 'Efficiency',
+                  k: 'Efficiency (target 85%)',
                   v: totals ? fmtPct(totals.efficiency || 0) : '—',
                   cls: 'accent-gold',
                 },
@@ -308,7 +365,10 @@ export function EmployeePortal({
               ]}
             />
 
-            <EmployeeTimecard employeeName={employeeName} />
+            <EmployeeTimecard
+              employeeName={employeeName}
+              onOpenProjectLabel={openProjectFromTimecardLabel}
+            />
           </div>
 
           <div className="grid grid-2">

@@ -34,6 +34,13 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He |
 | Employee | `avery.cobe@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
 | Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
+| Customer | `jordan.blake@mdesigns.test` | `DemoCustomer2026!` | Jordan Blake (demo remodel) |
+| Customer | `sam.rivera@mdesigns.test` | `DemoCustomer2026!` | Sam Rivera (demo ADU) |
+| Customer | `casey.nguyen@mdesigns.test` | `DemoCustomer2026!` | Casey Nguyen (demo new build) |
+| Customer | `morgan.patel@mdesigns.test` | `DemoCustomer2026!` | Morgan Patel (demo interior) |
+| Customer | `alex.torres@mdesigns.test` | `DemoCustomer2026!` | Alex Torres (demo commercial) |
+
+Re-seed fake customers: `node --env-file=.env.local scripts/seed-demo-customers.mjs`
 
 ### Active employees (from time entries)
 

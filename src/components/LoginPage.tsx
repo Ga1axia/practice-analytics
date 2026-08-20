@@ -39,6 +39,41 @@ const demos = [
     note: 'Client project board',
     gate: 'Client',
   },
+  {
+    role: 'Jordan Blake',
+    email: 'jordan.blake@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Fake demo remodel',
+    gate: 'Client',
+  },
+  {
+    role: 'Sam Rivera',
+    email: 'sam.rivera@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Fake demo ADU',
+    gate: 'Client',
+  },
+  {
+    role: 'Casey Nguyen',
+    email: 'casey.nguyen@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Fake demo new build',
+    gate: 'Client',
+  },
+  {
+    role: 'Morgan Patel',
+    email: 'morgan.patel@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Fake demo interior',
+    gate: 'Client',
+  },
+  {
+    role: 'Alex Torres',
+    email: 'alex.torres@mdesigns.test',
+    password: 'DemoCustomer2026!',
+    note: 'Fake demo commercial',
+    gate: 'Client',
+  },
 ];
 
 export function LoginPage() {

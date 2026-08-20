@@ -14,7 +14,8 @@
     "import:time-entries": "tsx scripts/import-time-entries.ts",
     "seed:time-entries-json": "tsx scripts/seed-time-entries-from-json.ts",
     "provision:employees": "node --env-file=.env.local scripts/provision-employees-from-time.mjs",
-    "sync:project-members": "node --env-file=.env.local scripts/sync-project-members-from-time.mjs"
+    "sync:project-members": "node --env-file=.env.local scripts/sync-project-members-from-time.mjs",
+    "seed:demo-customers": "node --env-file=.env.local scripts/seed-demo-customers.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",

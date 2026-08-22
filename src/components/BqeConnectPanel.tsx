@@ -42,11 +42,16 @@ async function readApiJson<T extends { error?: string }>(res: Response): Promise
     const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
     if (/A server error has occurred/i.test(snippet)) {
       throw new Error(
-        'API crashed before returning JSON. Check server logs and that SUPABASE_SERVICE_ROLE_KEY, CORE_CLIENT_ID, and CORE_CLIENT_SECRET are set (Vercel project env or .env.local + npm run dev:api).',
+        'API crashed (often a timeout on a long CORE sync, or missing env on Vercel). Locally: run npm run dev:api in a second terminal and use http://localhost:5173 — not the Vercel URL. Check CORE_CLIENT_* + SUPABASE_SERVICE_ROLE_KEY in .env.local.',
       );
     }
     if (/ECONNREFUSED|Local API is not running/i.test(snippet)) {
       throw new Error('Local API is not running. Start it with: npm run dev:api');
+    }
+    if (res.status === 502 || /Local API is not running on :8787/i.test(snippet)) {
+      throw new Error(
+        'Local API is not running on :8787. Open a second terminal and run: npm run dev:api',
+      );
     }
     throw new Error(`API returned non-JSON (${res.status}): ${snippet}`);
   }

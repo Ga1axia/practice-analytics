@@ -62,12 +62,21 @@ async function tryList<T>(
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof BqeHttpError && (e.status === 403 || e.status === 401)) {
-      const sub = /not subscribed/i.test(e.body)
-        ? `${label}: CORE subscription does not include this module (skipped)`
-        : `${label}: access denied (${e.status}) — skipped`;
-      warnings.push(sub);
-      return [];
+    if (e instanceof BqeHttpError) {
+      if (e.status === 403 || e.status === 401) {
+        const sub = /not subscribed/i.test(e.body)
+          ? `${label}: CORE subscription does not include this module (skipped)`
+          : `${label}: access denied (${e.status}) — skipped`;
+        warnings.push(sub);
+        return [];
+      }
+      // Module Security — UI may allow Time Entry screen but not Employee/Client APIs
+      if (e.status === 409 && /SEC_Module/i.test(e.body)) {
+        warnings.push(
+          `${label}: Module Security blocked this API for the connected CORE user (skipped)`,
+        );
+        return [];
+      }
     }
     throw e;
   }

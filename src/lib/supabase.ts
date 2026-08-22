@@ -9,4 +9,10 @@ if (!url || !anon) {
   );
 }
 
-export const supabase = createClient(url || 'http://localhost', anon || 'missing');
+export const supabase = createClient(url || 'http://localhost', anon || 'missing', {
+  auth: {
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+  },
+});

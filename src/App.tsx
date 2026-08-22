@@ -309,24 +309,18 @@ function CustomerShell() {
 }
 
 function Gate() {
-  const { session, profile, loading, error } = useAuth();
+  const { session, profile, loading } = useAuth();
 
   if (loading) {
     return (
-      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace' }}>Checking session…</div>
+      <div className="login-page">
+        <p className="login-session-check mono">Checking session…</p>
+      </div>
     );
   }
 
   if (!session || !profile) {
     return <LoginPage />;
-  }
-
-  if (error && !profile) {
-    return (
-      <div style={{ padding: 48, fontFamily: 'IBM Plex Mono, monospace', color: '#B3261E' }}>
-        {error}
-      </div>
-    );
   }
 
   if (profile.role === 'customer') {

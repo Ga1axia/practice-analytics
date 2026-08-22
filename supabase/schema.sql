@@ -163,6 +163,8 @@ grant usage on all sequences in schema public to anon, authenticated;
 -- Auth profiles + role RLS (applied via migration pa_auth_profiles_and_rls)
 -- See pa_profiles, pa_profile_role(), and per-table authenticated SELECT policies.
 -- Anon SELECT is revoked; clients must sign in.
+-- Microsoft (Azure) OAuth: pa_handle_new_auth_user() provisions employee profiles
+-- for @mdesignsarchitects.com (migration 20260820210013_microsoft_oauth_profiles).
 
 -- Project schedules (applied via migration; RLS by role)
 create table if not exists public.pa_schedules (

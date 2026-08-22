@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { oauthRedirectTo } from '../lib/oauthRedirect';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/authTypes';
 
@@ -17,6 +18,7 @@ type AuthState = {
   loading: boolean;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithMicrosoft: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -82,6 +84,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const signInWithMicrosoft = useCallback(async () => {
+    setError(null);
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: 'azure',
+      options: {
+        scopes: 'email openid profile',
+        redirectTo: oauthRedirectTo(),
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+    if (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setProfile(null);
@@ -89,8 +107,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ session, profile, loading, error, signIn, signOut }),
-    [session, profile, loading, error, signIn, signOut],
+    () => ({ session, profile, loading, error, signIn, signInWithMicrosoft, signOut }),
+    [session, profile, loading, error, signIn, signInWithMicrosoft, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

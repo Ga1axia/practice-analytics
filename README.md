@@ -92,6 +92,25 @@ Open the Vite URL (usually http://localhost:5173) for production sign-in, or htt
 
 On Vercel, set the same server vars in Project → Settings → Environment Variables (Production + Preview).
 
+### Microsoft (Azure) sign-in
+
+Production staff sign in with their `@mdesignsarchitects.com` Microsoft 365 account. Clients and `/demo` accounts still use email + password.
+
+1. **Azure Entra ID** → App registrations → New registration.
+   - Supported accounts: *Accounts in this organizational directory only* (M·Designs tenant).
+   - Web redirect URI: `https://wmlhewtqaqqpxhcqfbqq.supabase.co/auth/v1/callback`
+2. Certificates & secrets → New client secret. Copy the **Value**.
+3. Optional (recommended): App manifest → add `email` and `xms_edov` optional claims on the ID token ([Supabase Azure guide](https://supabase.com/docs/guides/auth/social-login/auth-azure)).
+4. **Supabase** → Authentication → Providers → Azure: enable, paste Client ID + secret, set Azure Tenant URL to `https://login.microsoftonline.com/<M-DESIGNS-TENANT-ID>`.
+5. Authentication → URL Configuration → Redirect URLs, allow:
+   - `http://localhost:5173`
+   - `http://localhost:5173/demo`
+   - `https://practice-analytics-six.vercel.app`
+   - `https://practice-analytics-six.vercel.app/demo`
+   - `https://*.vercel.app/**` (preview deploys)
+
+Apply `supabase/migrations/20260820210013_microsoft_oauth_profiles.sql` so new firm Microsoft users get an employee `pa_profiles` row (admin role is never auto-granted).
+
 ## Production
 
 - Site: https://practice-analytics-six.vercel.app
@@ -99,8 +118,9 @@ On Vercel, set the same server vars in Project → Settings → Environment Vari
 
 ## Manual test plan
 
-- `/` login has no demo account cards and empty credential fields
-- `/demo` shows demo account cards and Demo branding
+- `/` login has Microsoft as the primary action, no demo account cards, and empty credential fields
+- `/demo` shows demo account cards on the right and Demo branding
+- Microsoft OAuth returns to `/` or `/demo` (same origin you started from)
 - Sign in as admin → sheets A-1–A-5 including Project Schedule (editable)
 - Sign in as Arnita / Ni Ni / Zhengrui → employee workspace (hours, projects, tasks, calendar, project detail); no firm sheets / A/R
 - Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable

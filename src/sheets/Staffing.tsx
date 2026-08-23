@@ -249,6 +249,30 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
+async function readSyncJson<T extends { error?: string; message?: string }>(
+  res: Response,
+): Promise<T> {
+  const text = await res.text();
+  if (!text) {
+    throw new Error(res.ok ? 'Empty response from API' : `Request failed (${res.status})`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
+    if (/A server error has occurred/i.test(snippet)) {
+      throw new Error(
+        'API crashed during sync (often timeout). Use http://localhost:5173 with npm run dev:api running — not the Vercel URL.',
+      );
+    }
+    if (res.status === 502 || /Local API is not running/i.test(snippet)) {
+      throw new Error('Local API is not running. Start: npm run dev:api');
+    }
+    // Safari often surfaces non-JSON as "The string did not match the expected pattern."
+    throw new Error(`API returned non-JSON (${res.status}): ${snippet || '(empty)'}`);
+  }
+}
+
 function parsePresetSelect(value: string): HistoryDatePreset {
   if (value === 'billing' || value === 'custom') return value;
   const n = Number(value);
@@ -322,6 +346,9 @@ export function Staffing() {
     setMsg(null);
     setError(null);
     try {
+      if ((mode === 'historical' || mode === 'dry_run') && !/^\d{4}-\d{2}-\d{2}$/.test(histSince)) {
+        throw new Error('Historical since must be a valid date (YYYY-MM-DD).');
+      }
       const res = await fetch('/api/bqe/sync', {
         method: 'POST',
         headers: await authHeaders(),
@@ -330,13 +357,13 @@ export function Staffing() {
           since: mode === 'historical' || mode === 'dry_run' ? histSince : undefined,
         }),
       });
-      const body = (await res.json()) as {
+      const body = await readSyncJson<{
         message?: string;
         error?: string;
         fetched?: number;
         inserted?: number;
         updated?: number;
-      };
+      }>(res);
       if (!res.ok) throw new Error(body.error || 'Sync failed');
       setMsg(
         body.message ||

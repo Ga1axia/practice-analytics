@@ -301,13 +301,23 @@ export async function upsertTimeEntryRows(
   rows: TimeEntryRow[],
 ): Promise<{ inserted: number; updated: number }> {
   if (!rows.length) return { inserted: 0, updated: 0 };
-  const ids = rows.map((r) => r.bqe_time_entry_id);
+
+  // CORE pagination / retries can yield the same id twice; Postgres rejects
+  // ON CONFLICT when one INSERT would update the same row twice.
+  const byId = new Map<string, TimeEntryRow>();
+  for (const r of rows) {
+    if (!r.bqe_time_entry_id) continue;
+    byId.set(r.bqe_time_entry_id, r);
+  }
+  const unique = [...byId.values()];
+
+  const ids = unique.map((r) => r.bqe_time_entry_id);
   const before = await existingIds(sb, ids);
   let inserted = 0;
   let updated = 0;
   const chunk = 150;
-  for (let i = 0; i < rows.length; i += chunk) {
-    const slice = rows.slice(i, i + chunk);
+  for (let i = 0; i < unique.length; i += chunk) {
+    const slice = unique.slice(i, i + chunk);
     const { error } = await sb.from('pa_time_entries').upsert(slice, {
       onConflict: 'bqe_time_entry_id',
     });

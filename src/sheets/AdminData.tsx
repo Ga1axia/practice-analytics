@@ -117,7 +117,7 @@ export function AdminData() {
 
   if (!allowed) {
     return (
-      <section className="sheet">
+      <section className="sheet active">
         <p className="pd-muted">Admin Data Console is only available to dashboard admins.</p>
       </section>
     );
@@ -147,7 +147,7 @@ export function AdminData() {
   }
 
   return (
-    <section className="sheet admin-data">
+    <section className="sheet active admin-data">
       <header className="admin-data-head">
         <div>
           <p className="pd-kicker">Admin only</p>

@@ -9,14 +9,13 @@ import {
   loadHistoricalTimeEntryStats,
 } from '../lib/staffingTimeEntries';
 import {
-  loadHistoryAnalytics,
+  loadStaffingOverview,
   resolveHistoryDateRange,
-  type DimensionStat,
   type EmployeeHistoryRow,
-  type FirmAverages,
   type HistoryAnalyticsResult,
   type HistoryDatePreset,
   type HoursSlice,
+  type StaffingOverview,
 } from '../lib/staffingHistoryAnalytics';
 import { WORK_TYPES, type WorkType } from '../lib/workType';
 import { phaseAbbrev } from '../lib/phaseAbbrev';
@@ -76,165 +75,108 @@ function ShareBars({
   );
 }
 
-function DimBars({
-  rows,
-  max = 6,
-  tone = 'teal',
-}: {
-  rows: DimensionStat[];
-  max?: number;
-  tone?: 'teal' | 'gold' | 'navy';
-}) {
-  return (
-    <ShareBars
-      slices={rows.slice(0, max).map((r) => ({
-        label: r.label,
-        share: r.share,
-        hours: r.hours,
-      }))}
-      max={max}
-      tone={tone}
-      showHours
-    />
-  );
+function focusResult(
+  full: HistoryAnalyticsResult,
+  name: string | null | undefined,
+): HistoryAnalyticsResult {
+  const want = (name || '').trim();
+  if (!want) return full;
+  const row = full.employees.find((e) => e.employeeName === want);
+  if (!row) {
+    return {
+      ...full,
+      summary: {
+        ...full.summary,
+        employees: 0,
+        totalHours: 0,
+        billableHours: 0,
+        deliveryHours: 0,
+        projectCount: 0,
+      },
+      averages: { ...full.averages, byPhase: [] },
+      employees: [],
+    };
+  }
+  return {
+    ...full,
+    summary: {
+      ...full.summary,
+      employees: 1,
+      totalHours: row.totalHours,
+      billableHours: row.billableHours,
+      deliveryHours: row.deliveryHours,
+      projectCount: row.projectCount,
+    },
+    averages: {
+      ...full.averages,
+      byPhase: row.topPhases.map((p) => ({
+        key: p.key,
+        label: p.label,
+        hours: p.hours,
+        share: p.share,
+        billableHours: p.billableHours,
+        people: 1,
+        projects: 0,
+        avgHoursPerPerson: p.hours,
+        avgHoursPerProject: 0,
+      })),
+    },
+    employees: [row],
+  };
 }
 
-function FirmAveragesPanel({ averages }: { averages: FirmAverages }) {
+function fmtHoursKpi(n: number): string {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+function PeriodSnapshotPanel({
+  title,
+  who,
+  rangeLabel,
+  result,
+}: {
+  title: string;
+  who: string;
+  rangeLabel: string;
+  result: HistoryAnalyticsResult;
+}) {
+  const summary = result.summary;
+  const phases = result.averages.byPhase.slice(0, 10);
+  const solo = result.employees.length === 1 ? result.employees[0]! : null;
+  const kpiItems = [
+    {
+      k: 'Hours',
+      v: fmtHoursKpi(summary.totalHours),
+      cls: 'accent-teal',
+    },
+    {
+      k: 'Billable',
+      v: fmtHoursKpi(summary.billableHours),
+      cls: 'accent-gold',
+    },
+    { k: 'Projects', v: String(summary.projectCount) },
+    solo
+      ? { k: 'Pace', v: `${solo.weeklyPace.toFixed(1)} h/wk` }
+      : { k: 'Delivery', v: fmtHoursKpi(summary.deliveryHours) },
+  ];
   return (
-    <div className="panel" style={{ marginBottom: 12 }}>
+    <div className="panel staff-period">
       <h3>
-        Firm averages <span className="tag">Observed in window</span>
+        {title} <span className="tag">{who}</span>{' '}
+        <span className="tag">{rangeLabel}</span>
       </h3>
-      <KpiRow
-        items={[
-          {
-            k: 'Avg h / person',
-            v: averages.avgHoursPerEmployee.toFixed(0),
-            cls: 'accent-teal',
-          },
-          {
-            k: 'Avg billable / person',
-            v: averages.avgBillablePerEmployee.toFixed(0),
-            cls: 'accent-gold',
-          },
-          { k: 'Avg pace', v: `${averages.avgWeeklyPace.toFixed(1)} h/wk` },
-          { k: 'Avg projects / person', v: averages.avgProjectsPerEmployee.toFixed(1) },
-          { k: 'Avg h / project', v: averages.avgHoursPerProject.toFixed(0) },
-          {
-            k: 'Avg touch / person·project',
-            v: averages.avgPersonProjectTouch.toFixed(0),
-          },
-        ]}
-      />
-      <p className="pd-muted staff-kpi-note">
-        Bars = share of firm hours. Right column = total hours. Hover for avg h/person and
-        avg h/project on that slice.
-      </p>
-      <div className="staff-avg-grid">
-        <div className="staff-avg-card">
-          <h4>By phase</h4>
-          <div title={averages.byPhase
-            .slice(0, 8)
-            .map(
-              (p) =>
-                `${p.label}: ${p.hours.toFixed(0)}h · avg ${p.avgHoursPerPerson.toFixed(0)}h/person · ${p.avgHoursPerProject.toFixed(0)}h/project`,
-            )
-            .join('\n')}>
-            <DimBars rows={averages.byPhase} max={8} tone="teal" />
-          </div>
-          <p className="staff-avg-meta">
-            {averages.byPhase[0]
-              ? `Top: avg ${averages.byPhase[0].avgHoursPerPerson.toFixed(0)}h/person on ${shortLabel(averages.byPhase[0].label)}`
-              : 'No phase hours'}
-          </p>
-        </div>
-        <div className="staff-avg-card">
-          <h4>By project type</h4>
-          <DimBars rows={averages.byWorkType} max={8} tone="gold" />
-          <p className="staff-avg-meta">
-            {averages.byWorkType[0]
-              ? `Top type: ${averages.byWorkType[0].label} · avg ${averages.byWorkType[0].avgHoursPerPerson.toFixed(0)}h/person`
-              : 'No type hours'}
-          </p>
-        </div>
-        <div className="staff-avg-card">
-          <h4>By activity</h4>
-          <DimBars rows={averages.byActivity} max={8} tone="navy" />
-          <p className="staff-avg-meta">
-            {averages.byActivity[0]
-              ? `Top: ${averages.byActivity[0].label} · ${averages.byActivity[0].people} people`
-              : 'No activity hours'}
-          </p>
-        </div>
-        <div className="staff-avg-card">
-          <h4>Largest projects</h4>
-          <DimBars rows={averages.byProject} max={8} tone="teal" />
-          <p className="staff-avg-meta">
-            {averages.byProject[0]
-              ? `Largest: avg ${averages.byProject[0].avgHoursPerPerson.toFixed(0)}h across ${averages.byProject[0].people} people`
-              : 'No projects'}
-          </p>
-        </div>
-      </div>
-      <div className="grid grid-2" style={{ marginTop: 8, gap: 12 }}>
-        {averages.byPhase.length ? (
-          <div className="table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Phase</th>
-                  <th className="num">Hours</th>
-                  <th className="num">Share</th>
-                  <th className="num">People</th>
-                  <th className="num">Avg h/person</th>
-                  <th className="num">Avg h/project</th>
-                </tr>
-              </thead>
-              <tbody>
-                {averages.byPhase.map((p) => (
-                  <tr key={p.key}>
-                    <td>{p.label}</td>
-                    <td className="num">{p.hours.toFixed(0)}</td>
-                    <td className="num">{pct(p.share)}</td>
-                    <td className="num">{p.people}</td>
-                    <td className="num">{p.avgHoursPerPerson.toFixed(1)}</td>
-                    <td className="num">{p.avgHoursPerProject.toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-        {averages.byWorkType.length ? (
-          <div className="table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Project type</th>
-                  <th className="num">Hours</th>
-                  <th className="num">Share</th>
-                  <th className="num">People</th>
-                  <th className="num">Projects</th>
-                  <th className="num">Avg h/person</th>
-                  <th className="num">Avg h/project</th>
-                </tr>
-              </thead>
-              <tbody>
-                {averages.byWorkType.map((p) => (
-                  <tr key={p.key}>
-                    <td>{p.label}</td>
-                    <td className="num">{p.hours.toFixed(0)}</td>
-                    <td className="num">{pct(p.share)}</td>
-                    <td className="num">{p.people}</td>
-                    <td className="num">{p.projects}</td>
-                    <td className="num">{p.avgHoursPerPerson.toFixed(1)}</td>
-                    <td className="num">{p.avgHoursPerProject.toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+      <KpiRow items={kpiItems} />
+      <h4 className="exec-load-sub">Phase mix</h4>
+      <div className="chart-wrap tall">
+        {phases.length ? (
+          <HoursHBar
+            labels={phases.map((p) => shortLabel(p.label, 16))}
+            values={phases.map((p) => p.hours)}
+            fullLabels={phases.map((p) => `${p.label} · ${pct(p.share)}`)}
+          />
+        ) : (
+          <div className="plist-empty">No phase hours in this range.</div>
+        )}
       </div>
     </div>
   );
@@ -289,7 +231,7 @@ export function Staffing() {
   const [phase, setPhase] = useState('');
   const [workType, setWorkType] = useState('');
 
-  const [data, setData] = useState<HistoryAnalyticsResult | null>(null);
+  const [overview, setOverview] = useState<StaffingOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -311,7 +253,7 @@ export function Staffing() {
     setLoading(true);
     setError(null);
     try {
-      const result = await loadHistoryAnalytics({
+      const result = await loadStaffingOverview({
         preset,
         customFrom,
         customTo,
@@ -319,9 +261,9 @@ export function Staffing() {
         phase: phase || undefined,
         workType: (workType as WorkType) || undefined,
       });
-      setData(result);
+      setOverview(result);
       setSelected((prev) =>
-        prev && result.employees.some((e) => e.employeeName === prev) ? prev : null,
+        prev && result.period.employees.some((e) => e.employeeName === prev) ? prev : null,
       );
     } catch (e) {
       const message =
@@ -331,7 +273,7 @@ export function Staffing() {
             ? e.message
             : 'Failed to load staffing history';
       setError(message);
-      setData(null);
+      setOverview(null);
     } finally {
       setLoading(false);
     }
@@ -378,11 +320,11 @@ export function Staffing() {
   }
 
   const selectedRow = useMemo(
-    () => data?.employees.find((e) => e.employeeName === selected) || null,
-    [data, selected],
+    () => overview?.period.employees.find((e) => e.employeeName === selected) || null,
+    [overview, selected],
   );
 
-  if (loading && !data) {
+  if (loading && !overview) {
     return (
       <section className="sheet active">
         <div className="panel">
@@ -392,7 +334,7 @@ export function Staffing() {
     );
   }
 
-  if (!data) {
+  if (!overview) {
     return (
       <section className="sheet active">
         <div className="panel">
@@ -421,9 +363,15 @@ export function Staffing() {
     );
   }
 
-  const summary = data.summary;
-  const opts = data.filterOptions;
-  const windowLabel = dateRange.label;
+  const period = overview.period;
+  const ytd = overview.ytd;
+  const opts = overview.filterOptions;
+  const who = employee.trim() || selected || 'All staff';
+  const focusName = employee.trim() || selected;
+  const ytdView = focusResult(ytd, focusName);
+  const periodView = focusResult(period, focusName);
+  const windowRange = `${dateRange.fromDate} → ${dateRange.toDate}`;
+  const ytdRangeLabel = `${overview.ytdRange.fromDate} → ${overview.ytdRange.toDate}`;
 
   return (
     <section className="sheet active staffing-sheet">
@@ -441,7 +389,7 @@ export function Staffing() {
         <div className="staff-meta">
           <div>
             <span className="k">Last time-entry sync</span>
-            <div className="v">{fmtWhen(summary.lastSyncAt)}</div>
+            <div className="v">{fmtWhen(period.summary.lastSyncAt)}</div>
           </div>
           <div className="exec-toggle" role="group" aria-label="Staffing view">
             <button
@@ -517,6 +465,7 @@ export function Staffing() {
               <option value={60}>Trailing 60 days</option>
               <option value={90}>Trailing 90 days</option>
             </select>
+            <span className="staff-window-range mono">{windowRange}</span>
             {preset === 'custom' ? (
               <>
                 <input
@@ -564,52 +513,32 @@ export function Staffing() {
             </select>
           </div>
 
-          <KpiRow
-            items={[
-              {
-                k: 'Hours in window',
-                v: summary.totalHours.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-                cls: 'accent-teal',
-              },
-              {
-                k: 'Billable hours',
-                v: summary.billableHours.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-                cls: 'accent-gold',
-              },
-              { k: 'People with hours', v: String(summary.employees) },
-              { k: 'Projects touched', v: String(summary.projectCount) },
-              {
-                k: 'Avg h / person',
-                v: data.averages.avgHoursPerEmployee.toFixed(0),
-              },
-              {
-                k: 'Range',
-                v:
-                  summary.fromDate && summary.toDate
-                    ? `${summary.fromDate} → ${summary.toDate}`
-                    : windowLabel,
-              },
-            ]}
+          <PeriodSnapshotPanel
+            title="Year to date"
+            who={who}
+            rangeLabel={ytdRangeLabel}
+            result={ytdView}
           />
-          <p className="pd-muted staff-kpi-note">
-            All figures are <strong>observed</strong> from imported time entries ({windowLabel}).
-            Click a person for detail.
-          </p>
 
-          {summary.entriesLoaded === 0 ? (
+          <PeriodSnapshotPanel
+            title="Current period"
+            who={who}
+            rangeLabel={dateRange.label}
+            result={periodView}
+          />
+
+          {period.summary.entriesLoaded === 0 ? (
             <div className="panel staff-stale" style={{ maxWidth: 'none', marginBottom: 12 }}>
               <p className="plist-empty" style={{ margin: 0 }}>
                 No time entries in this window. Import historical entries or widen the range. Use{' '}
                 <strong>Raw time entries</strong> to inspect the table directly.
               </p>
             </div>
-          ) : (
-            <FirmAveragesPanel averages={data.averages} />
-          )}
+          ) : null}
 
           <div className="panel">
             <h3>
-              Who is working <span className="tag">{data.employees.length}</span>
+              Who is working <span className="tag">{period.employees.length}</span>
             </h3>
             <div className="table-scroll">
               <table className="data">
@@ -626,14 +555,14 @@ export function Staffing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.employees.length === 0 ? (
+                  {period.employees.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="plist-empty">
                         No employees match these filters.
                       </td>
                     </tr>
                   ) : (
-                    data.employees.map((e) => (
+                    period.employees.map((e) => (
                       <tr
                         key={e.employeeName}
                         className={selected === e.employeeName ? 'staff-row-on' : undefined}

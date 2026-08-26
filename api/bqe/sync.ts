@@ -17,6 +17,13 @@ import {
   mapEmployeesToRoster,
 } from '../_lib/bqeSyncBuild.js';
 import {
+  filterMappedProjectsByRecentHours,
+  hoursCutoffIso,
+  loadRecentHoursIndexFromDb,
+  mergeBqeTimeEntriesIntoHoursIndex,
+  pruneProjectsWithoutRecentHours,
+} from '../_lib/projectHoursFilter.js';
+import {
   persistFetchedTimeEntries,
   runTimeEntrySync,
   type TimeEntrySyncMode,
@@ -40,6 +47,11 @@ type SyncBody = {
   reset?: boolean;
   /** CORE where clause for /project (e.g. status = 4 for Active). */
   projectWhere?: string;
+  /**
+   * When true (default), only keep projects with hours in the last 3 years
+   * and prune the rest from the dashboard.
+   */
+  requireRecentHours?: boolean;
 };
 
 async function clearTable(sb: Sb, table: string) {
@@ -193,10 +205,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               )
             : [];
 
-        const mapped = mapCoreProjects(projects);
-        if (mapped.excludedCount) {
+        const mappedRaw = mapCoreProjects(projects);
+        if (mappedRaw.excludedCount) {
           warnings.push(
-            `Excluded ${mapped.excludedCount} test / Internal Office rows from this page`,
+            `Excluded ${mappedRaw.excludedCount} test / Internal Office rows from this page`,
+          );
+        }
+
+        const requireRecentHours = body.requireRecentHours !== false;
+        const hoursSince = hoursCutoffIso(3);
+        let mapped = mappedRaw;
+        let hoursFilter: {
+          beforeRoots: number;
+          afterRoots: number;
+          beforeRows: number;
+          afterRows: number;
+        } | null = null;
+
+        if (requireRecentHours) {
+          const index = await loadRecentHoursIndexFromDb(sb, hoursSince);
+          const filtered = filterMappedProjectsByRecentHours(mappedRaw, index);
+          mapped = filtered.mapped;
+          hoursFilter = filtered;
+          warnings.push(
+            `Hours filter (≥${hoursSince}): kept ${filtered.afterRoots}/${filtered.beforeRoots} project headers ` +
+              `(${index.codes.size} codes / ${index.projectIds.size} CORE ids with TE; scanned ${index.teRowsScanned} TE rows)`,
           );
         }
 
@@ -228,6 +261,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await insertChunks(sb, 'pa_employee_roster', roster);
         }
 
+        let prune: Awaited<ReturnType<typeof pruneProjectsWithoutRecentHours>> | null = null;
+        if (requireRecentHours && (page <= 0 || !hasMore)) {
+          prune = await pruneProjectsWithoutRecentHours(sb, hoursSince);
+          warnings.push(
+            `Pruned ${prune.deletedProjects} project rows / ${prune.deletedSchedules} orphan schedules without hours since ${hoursSince}`,
+          );
+        }
+
         const msg =
           page > 0
             ? `Projects page ${page}: +${insertedProjects} rows` +
@@ -253,6 +294,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           coreProjects: projects.length,
           insertedProjects,
           employees: employees.length,
+          hoursSince: requireRecentHours ? hoursSince : null,
+          hoursFilter,
+          prune,
           warnings,
           message: msg,
         });
@@ -332,7 +376,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         warnings,
       );
 
-      const mapped = mapCoreProjects(projects);
+      const mappedRaw = mapCoreProjects(projects);
+      const requireRecentHours = body.requireRecentHours !== false;
+      const hoursSince = hoursCutoffIso(3);
+      const hoursIndex = await loadRecentHoursIndexFromDb(sb, hoursSince);
+      mergeBqeTimeEntriesIntoHoursIndex(hoursIndex, timeEntries, hoursSince);
+
+      let mapped = mappedRaw;
+      let hoursFilter: {
+        beforeRoots: number;
+        afterRoots: number;
+        beforeRows: number;
+        afterRows: number;
+      } | null = null;
+      if (requireRecentHours) {
+        const filtered = filterMappedProjectsByRecentHours(mappedRaw, hoursIndex);
+        mapped = filtered.mapped;
+        hoursFilter = filtered;
+        warnings.push(
+          `Hours filter (≥${hoursSince}): kept ${filtered.afterRoots}/${filtered.beforeRoots} project headers`,
+        );
+      }
+
       const built = applyTimeAndInvoices(
         mapped,
         timeEntries,
@@ -340,9 +405,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expenseEntries,
       );
       const roster = mapEmployeesToRoster(employees);
-      if (mapped.excludedCount) {
+      if (mappedRaw.excludedCount) {
         warnings.push(
-          `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
+          `Excluded ${mappedRaw.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
         );
       }
 
@@ -378,6 +443,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await insertChunks(sb, 'pa_ar_clients', built.arClients);
         await insertChunks(sb, 'pa_invoice_ledger', built.invoiceLedger);
         await insertChunks(sb, 'pa_monthly_revenue', built.monthlyRevenue);
+      }
+
+      let prune: Awaited<ReturnType<typeof pruneProjectsWithoutRecentHours>> | null = null;
+      if (requireRecentHours) {
+        prune = await pruneProjectsWithoutRecentHours(sb, hoursSince);
+        if (prune.deletedProjects || prune.deletedSchedules) {
+          warnings.push(
+            `Pruned ${prune.deletedProjects} project rows / ${prune.deletedSchedules} orphan schedules without hours since ${hoursSince}`,
+          );
+        }
       }
 
       // Persist TE only when asked — default OFF on Vercel to stay under timeout
@@ -425,6 +500,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mode: 'aggregates',
         since,
         lookbackMonths: lookback,
+        hoursSince: requireRecentHours ? hoursSince : null,
+        hoursFilter,
+        prune,
         coreProjects: projects.length,
         timeEntries: built.stats.timeEntries,
         invoices: built.stats.invoices,

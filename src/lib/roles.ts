@@ -5,7 +5,7 @@ export function isAdminRole(role: UserRole | null | undefined): boolean {
   return role === 'admin';
 }
 
-/** Firm analytics (Executive / Main / A/R / Staffing). Includes admin. */
+/** Firm analytics (Executive / Main / Staffing). Includes admin. */
 export function isExecRole(role: UserRole | null | undefined): boolean {
   return role === 'admin' || role === 'exec';
 }

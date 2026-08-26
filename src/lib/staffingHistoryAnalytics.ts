@@ -552,3 +552,91 @@ export async function loadHistoryAnalytics(input: {
   result.summary.lastSyncAt = (syncRun.data?.completed_at as string) || null;
   return result;
 }
+
+/** Calendar year through today (UTC dates, matching `ymd`). */
+export function ytdRange(now = new Date()): { fromDate: string; toDate: string; label: string } {
+  const y = now.getUTCFullYear();
+  const toDate = ymd(now);
+  return {
+    fromDate: `${y}-01-01`,
+    toDate,
+    label: `YTD ${y} (${y}-01-01 → ${toDate})`,
+  };
+}
+
+function inDateRange(workDate: string | null | undefined, fromDate: string, toDate: string): boolean {
+  const d = String(workDate || '').slice(0, 10);
+  if (!d) return false;
+  return d >= fromDate && d <= toDate;
+}
+
+export type StaffingOverview = {
+  ytd: HistoryAnalyticsResult;
+  period: HistoryAnalyticsResult;
+  ytdRange: { fromDate: string; toDate: string; label: string };
+  periodRange: { fromDate: string; toDate: string; label: string };
+  filterOptions: HistoryAnalyticsResult['filterOptions'];
+};
+
+/** One fetch covering YTD and the selected window, then two rollups. */
+export async function loadStaffingOverview(input: {
+  preset: HistoryDatePreset;
+  customFrom?: string;
+  customTo?: string;
+  employee?: string;
+  phase?: string;
+  workType?: WorkType;
+}): Promise<StaffingOverview> {
+  const now = new Date();
+  const ytd = ytdRange(now);
+  const periodRange = resolveHistoryDateRange({
+    preset: input.preset,
+    customFrom: input.customFrom,
+    customTo: input.customTo,
+    now,
+  });
+  const fetchFrom = ytd.fromDate < periodRange.fromDate ? ytd.fromDate : periodRange.fromDate;
+  const fetchTo = ytd.toDate > periodRange.toDate ? ytd.toDate : periodRange.toDate;
+
+  const [entries, syncRun] = await Promise.all([
+    fetchEntriesInRange(fetchFrom, fetchTo),
+    supabase
+      .from('pa_bqe_sync_runs')
+      .select('completed_at')
+      .in('sync_type', ['historical', 'incremental'])
+      .in('status', ['succeeded', 'partial'])
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const lastSync = (syncRun.data?.completed_at as string) || null;
+  const opts = {
+    employee: input.employee,
+    phase: input.phase,
+    workType: input.workType,
+  };
+  const ytdEntries = entries.filter((e) => inDateRange(e.work_date, ytd.fromDate, ytd.toDate));
+  const periodEntries = entries.filter((e) =>
+    inDateRange(e.work_date, periodRange.fromDate, periodRange.toDate),
+  );
+
+  const ytdResult = aggregateEmployeeHistory(ytdEntries, opts);
+  const periodResult = aggregateEmployeeHistory(periodEntries, opts);
+  const optionsSource = aggregateEmployeeHistory(entries);
+
+  ytdResult.summary.lastSyncAt = lastSync;
+  ytdResult.summary.fromDate = ytd.fromDate;
+  ytdResult.summary.toDate = ytd.toDate;
+  periodResult.summary.lastSyncAt = lastSync;
+  periodResult.summary.fromDate = periodRange.fromDate;
+  periodResult.summary.toDate = periodRange.toDate;
+
+  return {
+    ytd: ytdResult,
+    period: periodResult,
+    ytdRange: ytd,
+    periodRange,
+    filterOptions: optionsSource.filterOptions,
+  };
+}

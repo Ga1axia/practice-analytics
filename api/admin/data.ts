@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { serviceSupabase } from '../_lib/bqe.js';
 import { requireAdmin } from '../_lib/requireAdmin.js';
+import {
+  hoursCutoffIso,
+  pruneProjectsWithoutRecentHours,
+} from '../_lib/projectHoursFilter.js';
+import { seedSchedulesFromTimeEntries } from '../_lib/seedSchedulesFromTe.js';
 
 /** Whitelist — never accept arbitrary table names from the client. */
 export const ADMIN_TABLES = [
@@ -63,6 +68,7 @@ type Body = {
   patch?: Record<string, unknown>;
   match?: Record<string, string | number | boolean | null>;
   dryRun?: boolean;
+  forceWipe?: boolean;
   /** project_schedules filters */
   scheduleFilter?: 'all' | 'assigned' | 'unassigned' | 'missing_start';
   projectKey?: string;
@@ -541,6 +547,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'seed_schedules_from_te') {
+      const result = await seedSchedulesFromTimeEntries(sb, {
+        dryRun: Boolean(body.dryRun),
+        forceWipe: Boolean(body.forceWipe),
+      });
+      res.status(200).json(result);
+      return;
+    }
+
+    if (action === 'prune_projects_without_te') {
+      const since = hoursCutoffIso(3);
+      const result = await pruneProjectsWithoutRecentHours(sb, since);
+      res.status(200).json({ ok: true, since, ...result });
+      return;
+    }
+
     if (action === 'clear_schedules') {
       // Match all UUID primary keys
       const { error: e1 } = await sb
@@ -947,6 +969,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'update',
         'delete',
         'seed_members_from_te',
+        'seed_schedules_from_te',
+        'prune_projects_without_te',
         'clear_schedules',
         'clear_projects',
         'sql_count',

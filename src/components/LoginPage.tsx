@@ -276,7 +276,7 @@ export function LoginPage() {
           <aside className="login-aside login-hero">
             <div className="login-hero-copy">
               <p className="login-kicker">M·Designs user portal</p>
-              <h2 className="display">Your work, projects, and client updates — in one place.</h2>
+              <h2 className="display">Your work, projects, and client updates, all in one place.</h2>
               <p className="login-lede">
                 Staff and clients sign in with Google or Microsoft. Firm analytics and project
                 workspaces open from the same portal.
@@ -285,7 +285,7 @@ export function LoginPage() {
             <ul className="login-hero-points">
               <li>
                 <span className="k">Staff</span>
-                <span>Firm reports, A/R, project analysis</span>
+                <span>Firm reports, staffing, project analysis</span>
               </li>
               <li>
                 <span className="k">Employees</span>

@@ -14,7 +14,11 @@ import GridLayout, {
 } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { BillNbEfficiencyChart, GaugeRing, HBarChart, VBarChart } from '../components/Charts';
-import { buildEfficiencyAnalysis } from '../lib/efficiencyAnalysis';
+import {
+  buildEfficiencyAnalysis,
+  type EfficiencyAnalysis,
+} from '../lib/efficiencyAnalysis';
+import { loadLiveEfficiencyAnalysis } from '../lib/loadEfficiencyLive';
 import { fmtUSD, fmtUSDk, palette } from '../lib/format';
 import {
   managerInitials,
@@ -177,6 +181,7 @@ export function MainReport({
   const [focus, setFocus] = useState<Focus>(null);
   const [layout, setLayout] = useState<Layout>(() => loadLayout());
   const [gridH, setGridH] = useState(0);
+  const [liveEfficiency, setLiveEfficiency] = useState<EfficiencyAnalysis | null>(null);
   const { width, containerRef, mounted, measureWidth } = useContainerWidth({
     measureBeforeMount: false,
     initialWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -595,10 +600,21 @@ export function MainReport({
     };
   }, [scopedRows, data.ar_clients]);
 
-  const efficiencyAnalysis = useMemo(
+  const snapshotEfficiency = useMemo(
     () => buildEfficiencyAnalysis(data.company_monthly),
     [data.company_monthly],
   );
+  const efficiencyAnalysis = liveEfficiency ?? snapshotEfficiency;
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadLiveEfficiencyAnalysis().then((live) => {
+      if (!cancelled && live) setLiveEfficiency(live);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const clientPerf = useMemo(() => {
     const map: Record<string, number> = {};

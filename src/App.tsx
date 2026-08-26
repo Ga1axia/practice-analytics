@@ -12,7 +12,6 @@ import { AdminData } from './sheets/AdminData';
 import { CustomerPortal } from './sheets/CustomerPortal';
 import { EmployeePortal } from './sheets/EmployeePortal';
 import { Executive } from './sheets/Executive';
-import { FinancialAR } from './sheets/FinancialAR';
 import { MainReport } from './sheets/MainReport';
 import { ProjectAnalysis } from './sheets/ProjectAnalysis';
 import { ProjectList } from './sheets/ProjectList';
@@ -135,31 +134,24 @@ function StaffShell() {
         </button>
         <button
           type="button"
-          className={sheet === 's3' ? 'active' : ''}
-          onClick={() => setSheet('s3')}
-        >
-          <span className="num">SHEET A-3</span>Financial &amp; A/R
-        </button>
-        <button
-          type="button"
           className={sheet === 's4' ? 'active' : ''}
           onClick={() => setSheet('s4')}
         >
-          <span className="num">SHEET A-4</span>Project Dashboard
+          <span className="num">SHEET A-3</span>Project Dashboard
         </button>
         <button
           type="button"
           className={sheet === 's5' ? 'active' : ''}
           onClick={() => setSheet('s5')}
         >
-          <span className="num">SHEET A-5</span>Project List
+          <span className="num">SHEET A-4</span>Project List
         </button>
         <button
           type="button"
           className={sheet === 's6' ? 'active' : ''}
           onClick={() => setSheet('s6')}
         >
-          <span className="num">SHEET A-6</span>Staffing
+          <span className="num">SHEET A-5</span>Staffing
         </button>
         {showAdminConsole ? (
           <button
@@ -179,7 +171,6 @@ function StaffShell() {
         ) : null}
         {sheet === 's1' ? <ProjectAnalysis data={data} /> : null}
         {sheet === 's2' ? <WorkloadPerformance data={data} /> : null}
-        {sheet === 's3' ? <FinancialAR data={data} /> : null}
         {sheet === 's4' ? <ProjectDashboard data={data} /> : null}
         {sheet === 's5' ? <ProjectList data={data} /> : null}
         {sheet === 's6' ? <Staffing /> : null}

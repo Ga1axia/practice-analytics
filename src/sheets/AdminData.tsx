@@ -7,8 +7,10 @@ import {
   deleteAdminRows,
   listAdminTables,
   listProjectSchedules,
+  pruneProjectsWithoutRecentHours,
   queryAdminTable,
   seedMembersFromTimeEntries,
+  seedSchedulesFromTimeEntries,
   setScheduleStartDate,
   updateAdminRows,
   upsertAdminRows,
@@ -623,7 +625,7 @@ export function AdminData() {
           </p>
           <p className="pd-muted">
             Does <strong>not</strong> create, clear, or change schedules, schedule rows, or project
-            start dates. Use the Schedules tab (or Danger zone) for those.
+            start dates by itself — use the schedule seed below for that.
           </p>
           <div className="admin-data-actions">
             <button
@@ -631,10 +633,10 @@ export function AdminData() {
               className="signout-btn"
               disabled={busy}
               onClick={() =>
-                void run('Dry-run seed', async () => seedMembersFromTimeEntries(true))
+                void run('Dry-run seed members', async () => seedMembersFromTimeEntries(true))
               }
             >
-              Dry run
+              Dry run members
             </button>
             <button
               type="button"
@@ -645,15 +647,104 @@ export function AdminData() {
                 void run('Seed members', async () => seedMembersFromTimeEntries(false));
               }}
             >
-              Run seed
+              Run member seed
             </button>
           </div>
+
+          <h3 style={{ marginTop: 28 }}>Seed schedules from logged hours</h3>
+          <p className="pd-muted">
+            For each Project List header with time entries: set{' '}
+            <span className="mono">start_date</span> to the first work date, create a schedule shell
+            if missing, and fill the firm checklist rows dated from that kickoff. Hand-edited
+            schedules (non autofill/preset rows) are skipped unless you force wipe.
+          </p>
+          <div className="admin-data-actions">
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy}
+              onClick={() =>
+                void run('Dry-run seed schedules', async () =>
+                  seedSchedulesFromTimeEntries(true, false),
+                )
+              }
+            >
+              Dry run schedules
+            </button>
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    'Create/update start dates and seed checklist rows from first logged hours? Hand-edited schedules are skipped.',
+                  )
+                ) {
+                  return;
+                }
+                void run('Seed schedules', async () => seedSchedulesFromTimeEntries(false, false));
+              }}
+            >
+              Run schedule seed
+            </button>
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    'FORCE wipe all schedule rows for projects with hours and rebuild from first TE date? This overwrites hand edits.',
+                  )
+                ) {
+                  return;
+                }
+                void run('Force seed schedules', async () =>
+                  seedSchedulesFromTimeEntries(false, true),
+                );
+              }}
+            >
+              Force wipe + seed
+            </button>
+          </div>
+
+          <h3 style={{ marginTop: 28 }}>Prune projects without recent hours</h3>
+          <p className="pd-muted">
+            Delete Project List rows (and orphan schedules) with no time entries in the last 3 years.
+            CORE sync also applies this filter automatically.
+          </p>
+          <div className="admin-data-actions">
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    'Delete all projects (and their schedules) with no hours in the last 3 years?',
+                  )
+                ) {
+                  return;
+                }
+                void run('Prune projects', async () => pruneProjectsWithoutRecentHours());
+              }}
+            >
+              Prune now
+            </button>
+          </div>
+
           <ul className="admin-data-table-counts">
             {tables
               .filter((t) =>
-                ['pa_projects', 'pa_time_entries', 'pa_project_members', 'pa_profiles'].includes(
-                  t.table,
-                ),
+                [
+                  'pa_projects',
+                  'pa_time_entries',
+                  'pa_project_members',
+                  'pa_schedules',
+                  'pa_schedule_rows',
+                  'pa_profiles',
+                ].includes(t.table),
               )
               .map((t) => (
                 <li key={t.table}>

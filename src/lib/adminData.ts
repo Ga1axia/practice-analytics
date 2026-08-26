@@ -133,6 +133,33 @@ export function seedMembersFromTimeEntries(dryRun = false) {
   }>({ action: 'seed_members_from_te', dryRun });
 }
 
+export function seedSchedulesFromTimeEntries(dryRun = false, forceWipe = false) {
+  return adminData<{
+    scannedTe: number;
+    codesWithHours: number;
+    projectHeaders: number;
+    wouldUpdateStarts: number;
+    wouldInsertSchedules: number;
+    wouldFillRows: number;
+    wouldSkipProtected: number;
+    updatedStarts: number;
+    insertedSchedules: number;
+    filledRows: number;
+    skippedProtected: number;
+    deletedOldRows: number;
+  }>({ action: 'seed_schedules_from_te', dryRun, forceWipe });
+}
+
+export function pruneProjectsWithoutRecentHours() {
+  return adminData<{
+    ok: boolean;
+    since: string;
+    deletedProjects: number;
+    deletedSchedules: number;
+    keptHeaders: number;
+  }>({ action: 'prune_projects_without_te' });
+}
+
 export function clearAllSchedules() {
   return adminData<{ ok: boolean; message?: string }>({ action: 'clear_schedules' });
 }

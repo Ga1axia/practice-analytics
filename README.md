@@ -86,11 +86,11 @@ Open the Vite URL (usually http://localhost:5173) for production sign-in, or htt
 | `SUPABASE_ANON_KEY` | Server (user JWT + RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server — BQE token store + project sync (required) |
 | `CORE_CLIENT_ID` / `CORE_CLIENT_SECRET` | Server — BQE OAuth app |
-| `BQE_REDIRECT_URI` | Server — must match Developer Portal (local: `http://localhost:5173/api/bqe/callback`) |
-| `BQE_APP_ORIGIN` | Server — e.g. `http://localhost:5173` |
+| `BQE_REDIRECT_URI` | Server — must match Developer Portal (local: `http://localhost:5173/api/bqe/callback`; prod: `https://practice-analytics-six.vercel.app/api/bqe/callback`) |
+| `BQE_APP_ORIGIN` | Server — e.g. `http://localhost:5173` or `https://practice-analytics-six.vercel.app` |
 | `ANTHROPIC_API_KEY` | Server only |
 
-On Vercel, set the same server vars in Project → Settings → Environment Variables (Production + Preview).
+On Vercel, set the same server vars in Project → Settings → Environment Variables (Production + Preview). Also register the **production** callback URL in the [BQE Developer Portal](https://api-developer.bqecore.com). Hobby plan caps functions at ~10s — the UI syncs in small monthly steps automatically on Vercel.
 
 ### Microsoft (Azure) sign-in
 

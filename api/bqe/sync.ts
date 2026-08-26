@@ -25,9 +25,11 @@ import { requireAdmin } from '../_lib/requireAdmin';
 type Sb = ReturnType<typeof serviceSupabase>;
 
 type SyncBody = {
-  mode?: 'historical' | 'incremental' | 'dry_run' | 'aggregates';
+  mode?: 'historical' | 'incremental' | 'dry_run' | 'aggregates' | 'projects';
   since?: string;
   until?: string;
+  /** Months of time/expense/invoice lookback for aggregates (default 36; use 1–3 on Vercel). */
+  lookbackMonths?: number;
   /** When running aggregates, also persist raw time entries (incremental). */
   includeTimeEntries?: boolean;
 };
@@ -93,9 +95,11 @@ export const config = { maxDuration: 300 };
 
 /**
  * BQE CORE sync.
- * - Default / mode omitted / mode=aggregates: existing aggregate analytics replace.
- * - mode=historical|incremental|dry_run: persist (or count) raw time entries only.
- * - includeTimeEntries on aggregates: also runs incremental TE persist after aggregates.
+ * - mode=projects: projects + employee roster only (Vercel-safe, ~seconds).
+ * - mode omitted / aggregates: analytics replace (pass lookbackMonths:1–3 on Hobby).
+ * - mode=historical|incremental|dry_run: persist (or count) raw time entries;
+ *   pass since+until (YYYY-MM-DD) to keep each call under serverless limits.
+ * - includeTimeEntries on aggregates: also persist fetched TE rows.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -142,11 +146,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    // --- Projects-only (fast path for Vercel Hobby ~10s limit) ---
+    if (mode === 'projects') {
+      const sb = serviceSupabase();
+      try {
+        const warnings: string[] = [];
+        const projects = await bqeListAll<BqeProject>('/project', 500);
+        const employees = await tryList(
+          'Employee',
+          () =>
+            bqeListAll<BqeEmployee>('/employee', 500, {
+              fields: 'id,firstName,lastName,status,department,title,displayName',
+            }),
+          warnings,
+        );
+        const mapped = mapCoreProjects(projects);
+        const roster = mapEmployeesToRoster(employees);
+        if (mapped.excludedCount) {
+          warnings.push(
+            `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list`,
+          );
+        }
+
+        await clearTable(sb, 'pa_projects');
+        await clearTable(sb, 'pa_employee_roster');
+        const insertedProjects = await insertChunks(
+          sb,
+          'pa_projects',
+          mapped.rows as unknown as Record<string, unknown>[],
+        );
+        await insertChunks(sb, 'pa_employee_roster', roster);
+
+        const msg =
+          `Projects sync: ${projects.length} CORE → ${insertedProjects} rows · ${roster.length} employees` +
+          (warnings.length ? ` · ${warnings.join(' | ')}` : '');
+
+        await sb
+          .from('pa_bqe_connection')
+          .update({
+            last_sync_at: new Date().toISOString(),
+            last_sync_status: warnings.length ? 'ok_partial' : 'ok',
+            last_sync_message: msg.slice(0, 900),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', 1);
+
+        res.status(200).json({
+          ok: true,
+          mode: 'projects',
+          coreProjects: projects.length,
+          insertedProjects,
+          employees: employees.length,
+          warnings,
+          message: msg,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'projects sync failed';
+        res.status(500).json({ error: msg });
+      }
+      return;
+    }
+
     const sb = serviceSupabase();
     try {
-      const since = bqeSinceDate(36);
+      const onVercel = process.env.VERCEL === '1';
+      const lookback =
+        typeof body.lookbackMonths === 'number' && body.lookbackMonths > 0
+          ? Math.min(Math.floor(body.lookbackMonths), 36)
+          : onVercel
+            ? 2
+            : 36;
+      const since = bqeSinceDate(lookback);
       const whereDate = `date >= '${since}'`;
       const warnings: string[] = [];
+      if (onVercel && lookback < 36) {
+        warnings.push(
+          `Vercel: using ${lookback}-month lookback (Hobby/serverless limit). Use monthly historical import for older time.`,
+        );
+      }
 
       // Sequential on purpose — CORE rate limit is ~100 calls/min
       const projects = await bqeListAll<BqeProject>('/project', 500);
@@ -247,10 +324,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await insertChunks(sb, 'pa_monthly_revenue', built.monthlyRevenue);
       }
 
-      // Persist the already-fetched CORE time entries for Staffing (no second BQE pull).
-      // Set includeTimeEntries:false to skip. Default: persist when entries were fetched.
+      // Persist TE only when asked — default OFF on Vercel to stay under timeout
       let timeEntryPersist: Awaited<ReturnType<typeof persistFetchedTimeEntries>> | null = null;
-      const shouldPersistTe = body.includeTimeEntries !== false && timeEntries.length > 0;
+      const shouldPersistTe =
+        (body.includeTimeEntries === true || (!onVercel && body.includeTimeEntries !== false)) &&
+        timeEntries.length > 0;
       if (shouldPersistTe) {
         timeEntryPersist = await persistFetchedTimeEntries(sb, timeEntries, projects, {
           initiatedBy: admin.userId,
@@ -290,6 +368,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ok: true,
         mode: 'aggregates',
         since,
+        lookbackMonths: lookback,
         coreProjects: projects.length,
         timeEntries: built.stats.timeEntries,
         invoices: built.stats.invoices,

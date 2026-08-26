@@ -1,4 +1,21 @@
 {
+  "functions": {
+    "api/bqe/sync.ts": {
+      "maxDuration": 300
+    },
+    "api/bqe/connect.ts": {
+      "maxDuration": 30
+    },
+    "api/bqe/callback.ts": {
+      "maxDuration": 30
+    },
+    "api/bqe/status.ts": {
+      "maxDuration": 30
+    },
+    "api/ask.ts": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

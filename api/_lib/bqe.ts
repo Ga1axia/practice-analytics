@@ -45,11 +45,14 @@ export function hasServiceRole(): boolean {
 }
 
 export function bqeConfig() {
-  return {
-    clientId: envStr('CORE_CLIENT_ID', 'BQE_CLIENT_ID'),
-    clientSecret: envStr('CORE_CLIENT_SECRET', 'BQE_CLIENT_SECRET'),
-    redirectUri: envStr('BQE_REDIRECT_URI', 'CORE_REDIRECT_URI'),
-  };
+  const clientId = envStr('CORE_CLIENT_ID', 'BQE_CLIENT_ID');
+  const clientSecret = envStr('CORE_CLIENT_SECRET', 'BQE_CLIENT_SECRET');
+  let redirectUri = envStr('BQE_REDIRECT_URI', 'CORE_REDIRECT_URI');
+  // Production fallback when env not set explicitly
+  if (!redirectUri && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    redirectUri = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}/api/bqe/callback`;
+  }
+  return { clientId, clientSecret, redirectUri };
 }
 
 export function requireBqeConfig() {

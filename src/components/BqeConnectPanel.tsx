@@ -21,6 +21,32 @@ type BqeStatus = {
   error?: string;
 };
 
+function isVercelHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  return h !== 'localhost' && h !== '127.0.0.1';
+}
+
+function ymd(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** Last N calendar months as [since, until] inclusive UTC ranges. */
+function lastNMonthWindows(n: number): { since: string; until: string; label: string }[] {
+  const out: { since: string; until: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+    out.push({
+      since: ymd(start),
+      until: ymd(end),
+      label: `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}`,
+    });
+  }
+  return out;
+}
+
 async function authHeaders(): Promise<HeadersInit> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -42,7 +68,7 @@ async function readApiJson<T extends { error?: string }>(res: Response): Promise
     const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
     if (/A server error has occurred/i.test(snippet)) {
       throw new Error(
-        'API crashed (often a timeout on a long CORE sync, or missing env on Vercel). Locally: run npm run dev:api in a second terminal and use http://localhost:5173 — not the Vercel URL. Check CORE_CLIENT_* + SUPABASE_SERVICE_ROLE_KEY in .env.local.',
+        'Vercel timed out (Hobby ~10s). Sync now runs in small steps — retry Sync from CORE. Or upgrade to Pro for longer functions. Ensure CORE_* + SUPABASE_SERVICE_ROLE_KEY are set in Vercel Project → Settings → Environment Variables.',
       );
     }
     if (/ECONNREFUSED|Local API is not running/i.test(snippet)) {
@@ -68,6 +94,7 @@ function fmtWhen(iso: string | null): string {
 
 export function BqeConnectPanel() {
   const { reload } = useDashboard();
+  const onVercel = isVercelHost();
   const [status, setStatus] = useState<BqeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -99,7 +126,7 @@ export function BqeConnectPanel() {
     const bqe = params.get('bqe');
     if (!bqe) return;
     if (bqe === 'connected') {
-      setMsg('Connected to BQE CORE. Click Sync from CORE to pull projects, time, and invoices.');
+      setMsg('Connected to BQE CORE. Click Sync from CORE to pull data.');
       void refreshStatus();
     } else if (bqe === 'denied') {
       setErr(`BQE authorization declined: ${params.get('error') || 'denied'}`);
@@ -130,19 +157,66 @@ export function BqeConnectPanel() {
     }
   }
 
+  /** Production: projects → recent months TE → short aggregates. Local: one full sync. */
   async function sync() {
     setBusy(true);
     setMsg(null);
     setErr(null);
     try {
-      const res = await fetch('/api/bqe/sync', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({ includeTimeEntries: true }),
-      });
-      const body = await readApiJson<{ message?: string; error?: string }>(res);
-      if (!res.ok) throw new Error(body.error || 'Sync failed');
-      setMsg(body.message || 'Sync complete.');
+      if (onVercel) {
+        setMsg('Step 1/3 — syncing projects…');
+        const pRes = await fetch('/api/bqe/sync', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ mode: 'projects' }),
+        });
+        const pBody = await readApiJson<{ message?: string; error?: string }>(pRes);
+        if (!pRes.ok) throw new Error(pBody.error || 'Projects sync failed');
+
+        const months = lastNMonthWindows(3);
+        let teFetched = 0;
+        for (let i = 0; i < months.length; i += 1) {
+          const m = months[i]!;
+          setMsg(`Step 2/3 — time ${m.label} (${i + 1}/${months.length})…`);
+          const tRes = await fetch('/api/bqe/sync', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ mode: 'historical', since: m.since, until: m.until }),
+          });
+          const tBody = await readApiJson<{
+            message?: string;
+            error?: string;
+            fetched?: number;
+          }>(tRes);
+          if (!tRes.ok) throw new Error(tBody.error || `Time sync failed for ${m.label}`);
+          teFetched += tBody.fetched || 0;
+        }
+
+        setMsg('Step 3/3 — rebuilding analytics (2-month lookback)…');
+        const aRes = await fetch('/api/bqe/sync', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            lookbackMonths: 2,
+            includeTimeEntries: false,
+          }),
+        });
+        const aBody = await readApiJson<{ message?: string; error?: string }>(aRes);
+        if (!aRes.ok) throw new Error(aBody.error || 'Analytics sync failed');
+
+        setMsg(
+          `Vercel sync complete. ${pBody.message || 'Projects ok'} · TE fetched ~${teFetched} over 3 months · ${aBody.message || 'Analytics ok'}`,
+        );
+      } else {
+        const res = await fetch('/api/bqe/sync', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ includeTimeEntries: true }),
+        });
+        const body = await readApiJson<{ message?: string; error?: string }>(res);
+        if (!res.ok) throw new Error(body.error || 'Sync failed');
+        setMsg(body.message || 'Sync complete.');
+      }
       await refreshStatus();
       await reload();
     } catch (e) {
@@ -157,23 +231,54 @@ export function BqeConnectPanel() {
     setMsg(null);
     setErr(null);
     try {
-      const res = await fetch('/api/bqe/sync', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({ mode }),
-      });
-      const body = await readApiJson<{
-        message?: string;
-        error?: string;
-        fetched?: number;
-        inserted?: number;
-        updated?: number;
-      }>(res);
-      if (!res.ok) throw new Error(body.error || 'Time entry sync failed');
-      setMsg(
-        body.message ||
-          `Time entries: fetched ${body.fetched ?? 0}, inserted ${body.inserted ?? 0}, updated ${body.updated ?? 0}`,
-      );
+      if (mode === 'historical' && onVercel) {
+        // 36 months one-by-one so each request stays under Hobby timeout
+        const months = lastNMonthWindows(36);
+        let fetched = 0;
+        let inserted = 0;
+        let updated = 0;
+        for (let i = 0; i < months.length; i += 1) {
+          const m = months[i]!;
+          setMsg(`Historical ${m.label} (${i + 1}/${months.length})…`);
+          const res = await fetch('/api/bqe/sync', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ mode: 'historical', since: m.since, until: m.until }),
+          });
+          const body = await readApiJson<{
+            message?: string;
+            error?: string;
+            fetched?: number;
+            inserted?: number;
+            updated?: number;
+          }>(res);
+          if (!res.ok) throw new Error(body.error || `Failed ${m.label}`);
+          fetched += body.fetched || 0;
+          inserted += body.inserted || 0;
+          updated += body.updated || 0;
+        }
+        setMsg(
+          `Historical import done: fetched ${fetched}, inserted ${inserted}, updated ${updated} across ${months.length} months.`,
+        );
+      } else {
+        const res = await fetch('/api/bqe/sync', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ mode }),
+        });
+        const body = await readApiJson<{
+          message?: string;
+          error?: string;
+          fetched?: number;
+          inserted?: number;
+          updated?: number;
+        }>(res);
+        if (!res.ok) throw new Error(body.error || 'Time entry sync failed');
+        setMsg(
+          body.message ||
+            `Time entries: fetched ${body.fetched ?? 0}, inserted ${body.inserted ?? 0}, updated ${body.updated ?? 0}`,
+        );
+      }
       await refreshStatus();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Time entry sync failed');
@@ -195,9 +300,19 @@ export function BqeConnectPanel() {
         <span className="tag">Projects · Time · Invoices · Employees</span>
       </h3>
       <p className="plist-upload-help">
-        Connect with a CORE admin login, then sync. Sync pulls projects, time entries, employees, and
-        invoices when your CORE subscription includes them (last 36 months). Requires{' '}
-        <span className="mono">npm run dev:api</span> locally.
+        {onVercel ? (
+          <>
+            Production sync runs in small steps (projects → recent months of time → analytics) so
+            Vercel Hobby does not time out. Set{' '}
+            <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
+            to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
+          </>
+        ) : (
+          <>
+            Connect with a CORE admin login, then sync. Locally also run{' '}
+            <span className="mono">npm run dev:api</span>.
+          </>
+        )}
       </p>
 
       {loading ? <p className="plist-upload-help">Checking connection…</p> : null}
@@ -206,6 +321,7 @@ export function BqeConnectPanel() {
         <div className="plist-upload-help" style={{ marginBottom: 10 }}>
           <div>
             Env: {status.configured ? 'ready' : `missing ${missing.join(', ') || 'config'}`}
+            {onVercel ? ' · host: Vercel' : ' · host: local'}
           </div>
           <div>
             Status:{' '}

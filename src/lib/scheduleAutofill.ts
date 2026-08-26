@@ -255,11 +255,17 @@ export function clearScheduleStartDismiss(projectKey: string) {
 }
 
 const START_DATE_KEY = 'pa-project-start-date-v1';
+const START_DATE_CLEARED_KEY = 'pa-project-start-date-cleared-v2';
 
 type StartDateMap = Record<string, string>;
 
 function readStartDateMap(): StartDateMap {
   try {
+    // One-time wipe of cached kickoff dates after DB schedules were cleared.
+    if (!localStorage.getItem(START_DATE_CLEARED_KEY)) {
+      localStorage.removeItem(START_DATE_KEY);
+      localStorage.setItem(START_DATE_CLEARED_KEY, '1');
+    }
     const raw = localStorage.getItem(START_DATE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as StartDateMap;

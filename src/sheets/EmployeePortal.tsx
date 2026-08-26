@@ -65,11 +65,14 @@ function projectStatus(p: ProjectNode): string {
 }
 
 function projectIsActive(p: ProjectNode): boolean {
-  if ((p.row?.status || '').toUpperCase() === 'ACTIVE') return true;
-  if (p.phases.some((ph) => (ph.row.status || '').toUpperCase() === 'ACTIVE')) return true;
-  // Missing status on header + phases → treat as active (same as Project List defaults)
-  if (!p.row?.status && !p.phases.some((ph) => ph.row.status)) return true;
-  return false;
+  const statuses = [p.row?.status, ...p.phases.map((ph) => ph.row.status)]
+    .map((s) => (s || '').trim().toUpperCase())
+    .filter(Boolean);
+  // No status on header or phases → treat as active (same as Project List defaults)
+  if (!statuses.length) return true;
+  return statuses.some(
+    (s) => s === 'ACTIVE' || s === 'IN PROGRESS' || s === 'IN-PROGRESS' || s === 'OPEN',
+  );
 }
 
 export function EmployeePortal({
@@ -307,7 +310,7 @@ export function EmployeePortal({
 
       <div className={page === 'today' ? 'emp-page' : 'emp-page emp-page-hidden'} hidden={page !== 'today'}>
         <EmployeeToday
-          projects={activeProjects.length ? activeProjects : allProjects}
+          projects={statusFilter === 'active' ? activeProjects : allProjects}
           employeeName={employeeName}
           memberRoles={memberRoles}
           isPm={isPm}
@@ -583,7 +586,7 @@ export function EmployeePortal({
           hidden={page !== 'tasks'}
         >
           <EmployeeTasks
-            projects={activeProjects.length ? activeProjects : allProjects}
+            projects={statusFilter === 'active' ? activeProjects : allProjects}
             employeeName={employeeName}
             onOpenProject={selectProject}
             active={page === 'tasks'}
@@ -597,7 +600,7 @@ export function EmployeePortal({
           hidden={page !== 'calendar'}
         >
           <EmployeeCalendar
-            projects={activeProjects.length ? activeProjects : allProjects}
+            projects={statusFilter === 'active' ? activeProjects : allProjects}
             employeeName={employeeName}
             onOpenProject={selectProject}
           />

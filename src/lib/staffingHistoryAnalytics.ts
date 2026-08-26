@@ -263,7 +263,10 @@ export function aggregateEmployeeHistory(
   const byEmployee = new Map<string, TimeEntryLite[]>();
   for (const e of entries) {
     const name = (e.employee_name || '').trim() || 'Unassigned';
-    if (opts?.employee && name !== opts.employee) continue;
+    if (opts?.employee) {
+      const want = opts.employee.trim().toLowerCase();
+      if (name.toLowerCase() !== want) continue;
+    }
     if (opts?.phase) {
       const ph = phaseLabel(e);
       const code = phaseAbbrev(ph);
@@ -477,6 +480,7 @@ async function fetchEntriesInRange(
   const out: TimeEntryLite[] = [];
   let from = 0;
   const pageSize = 1000;
+  const emp = (employeeName || '').trim();
   for (;;) {
     let q = supabase
       .from('pa_time_entries')
@@ -486,7 +490,8 @@ async function fetchEntriesInRange(
       .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
     if (fromDate) q = q.gte('work_date', fromDate);
-    if (employeeName) q = q.eq('employee_name', employeeName);
+    // Case-insensitive exact match (BQE / profile casing can differ)
+    if (emp) q = q.ilike('employee_name', emp.replace(/[%_]/g, '\\$&'));
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     const chunk = (data || []) as TimeEntryLite[];

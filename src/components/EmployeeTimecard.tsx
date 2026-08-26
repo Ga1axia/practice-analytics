@@ -64,7 +64,7 @@ export function EmployeeTimecard({
   /** Resolve a BQE project label to an openable portal project. */
   onOpenProjectLabel?: (projectLabel: string) => void;
 }) {
-  const [preset, setPreset] = useState<HistoryDatePreset>('billing');
+  const [preset, setPreset] = useState<HistoryDatePreset>(90);
   const [customFrom, setCustomFrom] = useState(() => daysAgoYmd(30));
   const [customTo, setCustomTo] = useState(() => ymd(new Date()));
   const [row, setRow] = useState<EmployeeHistoryRow | null>(null);
@@ -93,15 +93,16 @@ export function EmployeeTimecard({
         customTo,
         employee: employeeName,
       });
+      const want = employeeName.trim().toLowerCase();
       const mine =
-        result.employees.find((e) => e.employeeName === employeeName) ||
-        result.employees[0] ||
+        result.employees.find((e) => e.employeeName.trim().toLowerCase() === want) ||
+        (result.employees.length === 1 ? result.employees[0] : null) ||
         null;
       setRow(mine);
       setRange(formatPresetRange(bounds.fromDate, bounds.toDate));
       if (!mine && result.summary.entriesLoaded === 0) {
         setError(
-          'No time entries available for your name yet. Ask an admin to import BQE time entries.',
+          'No time entries available for your name yet. Ask an admin to import BQE time entries, and confirm your profile employee name matches BQE.',
         );
       }
     } catch (e) {

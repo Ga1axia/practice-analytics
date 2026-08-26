@@ -35,6 +35,7 @@ export async function requireAdmin(
   }
 
   const supabase = createClient(url, anon, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 

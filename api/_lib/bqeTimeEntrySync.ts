@@ -5,8 +5,8 @@ import {
   bqeSinceDate,
   type BqeProject,
   type BqeTimeEntry,
-} from './bqe';
-import { mapCoreProjects, type MappedProjects } from './bqeSyncBuild';
+} from './bqe.js';
+import { mapCoreProjects, type MappedProjects } from './bqeSyncBuild.js';
 
 export type TimeEntrySyncMode = 'historical' | 'incremental' | 'dry_run';
 

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { bqeConfig, hasServiceRole, loadConnection, serviceSupabase } from '../_lib/bqe';
-import { requireAdmin } from '../_lib/requireAdmin';
+import { bqeConfig, hasServiceRole, loadConnection, serviceSupabase } from '../_lib/bqe.js';
+import { requireAdmin } from '../_lib/requireAdmin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {

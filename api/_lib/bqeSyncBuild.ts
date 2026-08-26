@@ -7,7 +7,7 @@ import {
   type BqeInvoice,
   type BqeProject,
   type BqeTimeEntry,
-} from './bqe';
+} from './bqe.js';
 
 export type ProjectInsert = {
   project: string;

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { BQE_IDENTITY_BASE, BQE_SCOPES, requireBqeConfig } from '../_lib/bqe';
-import { requireAdmin } from '../_lib/requireAdmin';
+import { BQE_IDENTITY_BASE, BQE_SCOPES, requireBqeConfig } from '../_lib/bqe.js';
+import { requireAdmin } from '../_lib/requireAdmin.js';
 
 /**
  * Start BQE CORE OAuth (Authorization Code).

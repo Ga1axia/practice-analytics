@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { exchangeCodeForTokens, saveConnection } from '../_lib/bqe';
+import { exchangeCodeForTokens, saveConnection } from '../_lib/bqe.js';
 
 /**
  * OAuth redirect target. Exchanges ?code= for tokens and stores them.

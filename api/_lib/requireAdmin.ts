@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { envStr } from './bqe';
+import { envStr } from './bqe.js';
 
 export async function requireAdmin(
   req: VercelRequest,

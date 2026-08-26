@@ -10,18 +10,18 @@ import {
   type BqeInvoice,
   type BqeProject,
   type BqeTimeEntry,
-} from '../_lib/bqe';
+} from '../_lib/bqe.js';
 import {
   applyTimeAndInvoices,
   mapCoreProjects,
   mapEmployeesToRoster,
-} from '../_lib/bqeSyncBuild';
+} from '../_lib/bqeSyncBuild.js';
 import {
   persistFetchedTimeEntries,
   runTimeEntrySync,
   type TimeEntrySyncMode,
-} from '../_lib/bqeTimeEntrySync';
-import { requireAdmin } from '../_lib/requireAdmin';
+} from '../_lib/bqeTimeEntrySync.js';
+import { requireAdmin } from '../_lib/requireAdmin.js';
 
 type Sb = ReturnType<typeof serviceSupabase>;
 

@@ -48,16 +48,27 @@ function lastNMonthWindows(n: number): { since: string; until: string; label: st
 }
 
 async function authHeaders(): Promise<HeadersInit> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  // Prefer a fresh access token — expired JWTs cause 401 on /api/bqe/*
+  const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+  let token = refreshed.session?.access_token;
+  if (!token) {
+    const { data } = await supabase.auth.getSession();
+    token = data.session?.access_token;
+  }
+  if (!token) {
+    throw new Error(
+      refreshErr?.message ||
+        'Not signed in (no session token). Sign out, sign back in as admin, then retry Connect.',
+    );
+  }
   return {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    Authorization: `Bearer ${token}`,
   };
 }
 
 /** Parse JSON when possible; surface plain-text server crashes (e.g. Vercel). */
-async function readApiJson<T extends { error?: string }>(res: Response): Promise<T> {
+async function readApiJson<T extends { error?: string; detail?: string }>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) {
     throw new Error(res.ok ? 'Empty response from API' : `Request failed (${res.status})`);
@@ -81,6 +92,11 @@ async function readApiJson<T extends { error?: string }>(res: Response): Promise
     }
     throw new Error(`API returned non-JSON (${res.status}): ${snippet}`);
   }
+}
+
+function apiErrorMessage(body: { error?: string; detail?: string }, fallback: string): string {
+  if (body.error && body.detail) return `${body.error} ${body.detail}`;
+  return body.error || body.detail || fallback;
 }
 
 function fmtWhen(iso: string | null): string {
@@ -107,7 +123,7 @@ export function BqeConnectPanel() {
     try {
       const res = await fetch('/api/bqe/status', { headers: await authHeaders() });
       const body = await readApiJson<BqeStatus>(res);
-      if (!res.ok) throw new Error(body.error || 'Failed to load BQE status');
+      if (!res.ok) throw new Error(apiErrorMessage(body, 'Failed to load BQE status'));
       setStatus(body);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load BQE status');
@@ -146,9 +162,9 @@ export function BqeConnectPanel() {
     setErr(null);
     try {
       const res = await fetch('/api/bqe/connect', { headers: await authHeaders() });
-      const body = await readApiJson<{ authorizeUrl?: string; error?: string }>(res);
+      const body = await readApiJson<{ authorizeUrl?: string; error?: string; detail?: string }>(res);
       if (!res.ok || !body.authorizeUrl) {
-        throw new Error(body.error || 'Could not start BQE connect');
+        throw new Error(apiErrorMessage(body, 'Could not start BQE connect'));
       }
       window.location.href = body.authorizeUrl;
     } catch (e) {

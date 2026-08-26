@@ -13,9 +13,22 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 
 | Role | Access |
 |------|--------|
-| **Admin** | Full Practice Analytics (Project Analysis, Workload, Financial A/R, Project Schedule) |
-| **Employee** | Multi-page workspace: hours, project list (active by default), project detail — no firm sheets |
+| **Admin** | Full Practice Analytics + dashboard management (BQE connect/sync, project list writes). Includes all executive capabilities. |
+| **Executive (`exec`)** | Firm analytics sheets (Executive, Main Report, Project Analysis, Workload, Financial A/R, Project Dashboard/List, Staffing). No BQE connect. |
+| **Project lead** | Employee workspace; contract / billed / outstanding and team hours on projects where they are **lead** (Project List manager or `pa_project_members.role = lead`). |
+| **Employee** | Employee workspace for projects they belong to (membership or hours). Lead privileges only on projects where they are assigned as lead. |
 | **Customer** | Client status tracker + Project Schedule (Client’s Comments editable only) |
+
+### Microsoft firm accounts (`@mdesignsarchitects.com`)
+
+Any firm Microsoft 365 user can sign in. Profiles are auto-created on first sign-in:
+
+| Email local-part | Role |
+|------------------|------|
+| `taihei`, `junaidq` | admin |
+| `malikajunaid` (also `malika`) | exec |
+| `avery` / `avery.cobe` | project_lead |
+| everyone else | employee |
 
 ### Production vs demo
 
@@ -29,10 +42,11 @@ M. Designs Architects practice dashboard — Vite + React + TypeScript on Vercel
 | Role | Email | Password | Bound to |
 |------|-------|----------|----------|
 | Admin | `admin@mdesigns.test` | `DemoAdmin2026!` | — |
+| Exec | `malika.junaid@mdesigns.test` | `DemoEmployee2026!` | Malika Junaid |
+| Project lead | `avery.cobe@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
 | Employee | `arnita@mdesigns.test` | `DemoEmployee2026!` | Arnita Serri |
 | Employee | `nini@mdesigns.test` | `DemoEmployee2026!` | Ni Ni |
 | Employee | `zhengrui@mdesigns.test` | `DemoEmployee2026!` | Zhengrui He |
-| Employee | `avery.cobe@mdesigns.test` | `DemoEmployee2026!` | Avery Cobe |
 | Customer | `sinnathamby@mdesigns.test` | `DemoCustomer2026!` | Thiru & Renuka Sinnathamby (26-012, live project) |
 | Customer | `customer@mdesigns.test` | `DemoCustomer2026!` | Elena Vargas (1 project) |
 | Customer | `jordan.blake@mdesigns.test` | `DemoCustomer2026!` | Jordan Blake (demo remodel) |
@@ -109,7 +123,7 @@ Production staff sign in with their `@mdesignsarchitects.com` Microsoft 365 acco
    - `https://practice-analytics-six.vercel.app/demo`
    - `https://*.vercel.app/**` (preview deploys)
 
-Apply `supabase/migrations/20260820210013_microsoft_oauth_profiles.sql` so new firm Microsoft users get an employee `pa_profiles` row (admin role is never auto-granted).
+Apply `supabase/migrations/20260826053528_roles_exec_admin_lead.sql` so firm Microsoft users get a `pa_profiles` row with the correct role seed (admin / exec / project_lead / employee). Non-firm emails are not auto-provisioned.
 
 ## Production
 
@@ -118,14 +132,16 @@ Apply `supabase/migrations/20260820210013_microsoft_oauth_profiles.sql` so new f
 
 ## Manual test plan
 
-- `/` login has Microsoft as the primary action, no demo account cards, and empty credential fields
-- `/demo` shows demo account cards on the right and Demo branding
-- Microsoft OAuth returns to `/` or `/demo` (same origin you started from)
-- Sign in as admin → sheets A-1–A-5 including Project Schedule (editable)
-- Sign in as Arnita / Ni Ni / Zhengrui → employee workspace (hours, projects, tasks, calendar, project detail); no firm sheets / A/R
+- Sign in as admin → sheets A-1–A-6 including BQE Connect on Executive
+- Sign in as exec (Malika demo) → firm sheets, no BQE Connect
+- Sign in as Avery → employee workspace with lead financials on managed projects
+- Sign in as Arnita / Ni Ni / Zhengrui → employee workspace; no firm sheets / A/R
 - Sign in as customer → status tracker + schedule for Elena Vargas; only Client’s Comments editable
 - Sign in as Sinnathamby → client portal for **Thiru and Renuga Sinnathamby - 26-012**
 - On `/` with empty schedules, employee calendar/tasks show empty states (no demo seed)
 - On `/demo` with empty schedules, employee views may show demo seed tags
 - Signed-out users cannot read `pa_*` tables
-- Q&A requires auth; customers blocked from Ask This Sheet
+- Q&A requires auth; customers blocked from Ask This Sheet; firm financial Q&A is exec/admin only
+- Microsoft OAuth returns to `/` or `/demo` (same origin you started from)
+- `/` login has Microsoft as the primary action, no demo account cards, and empty credential fields
+- `/demo` shows demo account cards on the right and Demo branding

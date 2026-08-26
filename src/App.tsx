@@ -17,6 +17,7 @@ import { ProjectList } from './sheets/ProjectList';
 import { ProjectDashboard } from './sheets/ProjectDashboard';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
 import { Staffing } from './sheets/Staffing';
+import { isEmployeePortalRole, isExecRole, roleLabel } from './lib/roles';
 import type { SheetId } from './lib/types';
 import './styles/global.css';
 
@@ -55,7 +56,11 @@ function StaffShell() {
       <header className="titleblock">
         <div className="tb-brand">
           <BrandMark
-            subtitle={isDemo ? 'Practice Analytics · Admin · Demo' : 'Practice Analytics'}
+            subtitle={
+              isDemo
+                ? `Practice Analytics · ${roleLabel(profile?.role)} · Demo`
+                : `Practice Analytics · ${roleLabel(profile?.role)}`
+            }
           />
         </div>
         <div className="tb-meta">
@@ -225,7 +230,9 @@ function EmployeeShell() {
         <div className="tb-brand">
           <BrandMark
             subtitle={
-              isDemo ? `My work · ${employeeName} · Demo` : `My work · ${employeeName}`
+              isDemo
+                ? `My work · ${roleLabel(profile?.role)} · ${employeeName} · Demo`
+                : `My work · ${roleLabel(profile?.role)} · ${employeeName}`
             }
           />
         </div>
@@ -327,7 +334,7 @@ function Gate() {
     return <CustomerShell />;
   }
 
-  if (profile.role === 'employee') {
+  if (isEmployeePortalRole(profile.role)) {
     return (
       <DataProvider>
         <EmployeeShell />
@@ -335,11 +342,15 @@ function Gate() {
     );
   }
 
-  return (
-    <DataProvider>
-      <StaffShell />
-    </DataProvider>
-  );
+  if (isExecRole(profile.role)) {
+    return (
+      <DataProvider>
+        <StaffShell />
+      </DataProvider>
+    );
+  }
+
+  return <LoginPage />;
 }
 
 export default function App() {

@@ -29,7 +29,7 @@ function mapErr(error: { message?: string; code?: string } | null): string | nul
     return 'Time entry table is missing. Apply the staffing migration, then retry.';
   }
   if (/permission|row-level|rls|not accept/i.test(msg)) {
-    return 'Cannot read time entries (admin RLS). Confirm your profile role is admin.';
+    return 'Cannot read time entries (RLS). Confirm your profile role is admin or exec.';
   }
   return msg;
 }

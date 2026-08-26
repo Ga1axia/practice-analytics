@@ -3,6 +3,7 @@ import { BqeConnectPanel } from '../components/BqeConnectPanel';
 import { HBarChart, StackedCountHBar, StackedValueHBar } from '../components/Charts';
 import { KpiRow } from '../components/KpiRow';
 import { useAuth } from '../hooks/useAuth';
+import { isAdminRole } from '../lib/roles';
 import {
   matchProcessPhaseIndex,
   PROCESS_PHASES,
@@ -104,7 +105,7 @@ function seriesFromMaps(
 
 export function Executive({ data }: { data: DashboardData }) {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = isAdminRole(profile?.role);
   const [loadSort, setLoadSort] = useState<LoadSort>('load');
   const [typeMetric, setTypeMetric] = useState<'count' | 'contract'>('count');
 

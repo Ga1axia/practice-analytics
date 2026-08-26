@@ -576,8 +576,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(403).json({ error: 'Ask This Sheet is not available in the client portal.' });
       return;
     }
-    if (profile.role === 'employee' && sheet === 's3') {
-      res.status(403).json({ error: 'Financial Q&A is admin-only.' });
+    const firmAnalytics = profile.role === 'admin' || profile.role === 'exec';
+    if (!firmAnalytics && (sheet === 's3' || sheet === 'exec' || sheet === 'main')) {
+      res.status(403).json({ error: 'Firm financial Q&A is limited to executives and admins.' });
       return;
     }
 

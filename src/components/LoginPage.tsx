@@ -9,8 +9,22 @@ const demos = [
     role: 'Admin',
     email: 'admin@mdesigns.test',
     password: 'DemoAdmin2026!',
-    note: 'Firm analytics & project list',
-    gate: 'Staff',
+    note: 'Dashboard + firm analytics & BQE',
+    gate: 'Admin',
+  },
+  {
+    role: 'Malika Junaid',
+    email: 'malika.junaid@mdesigns.test',
+    password: 'DemoEmployee2026!',
+    note: 'Executive firm analytics (no BQE)',
+    gate: 'Exec',
+  },
+  {
+    role: 'Avery Cobe',
+    email: 'avery.cobe@mdesigns.test',
+    password: 'DemoEmployee2026!',
+    note: 'Project lead financials on assigned jobs',
+    gate: 'Lead',
   },
   {
     role: 'Arnita Serri',
@@ -171,7 +185,9 @@ export function LoginPage() {
               <h1 className="display">This Microsoft account is not provisioned yet.</h1>
               <p className="login-lede soft">
                 You signed in as <span className="mono">{session?.user.email}</span>, but there is no
-                portal profile for that email. Ask an administrator to link it, then sign in again.
+                portal profile for that email. Firm staff must use an{' '}
+                <span className="mono">@mdesignsarchitects.com</span> Microsoft account. Ask an
+                administrator if you still see this after signing in with your work email.
               </p>
               <button type="button" className="login-submit" onClick={() => void signOut()}>
                 Sign out

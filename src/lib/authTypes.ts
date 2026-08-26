@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'employee' | 'customer';
+export type UserRole = 'admin' | 'exec' | 'project_lead' | 'employee' | 'customer';
 
 export type Profile = {
   id: string;

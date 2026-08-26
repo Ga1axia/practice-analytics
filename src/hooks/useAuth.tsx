@@ -180,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const startImpersonation = useCallback(
     async (profileId: string) => {
-      if (!isAdminRole(realProfile?.role)) {
+      if (!realProfile || !isAdminRole(realProfile.role)) {
         throw new Error('Only dashboard admins can use testing mode.');
       }
       if (profileId === realProfile.id) {

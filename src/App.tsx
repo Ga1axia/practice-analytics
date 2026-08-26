@@ -8,6 +8,7 @@ import { DataProvider, useDashboard } from './hooks/useDashboard';
 import { useDemoMode } from './hooks/useDemoMode';
 import type { ChatViewAction } from './lib/chatViewAction';
 import { fmtUSDk } from './lib/format';
+import { AdminData } from './sheets/AdminData';
 import { CustomerPortal } from './sheets/CustomerPortal';
 import { EmployeePortal } from './sheets/EmployeePortal';
 import { Executive } from './sheets/Executive';
@@ -18,19 +19,20 @@ import { ProjectList } from './sheets/ProjectList';
 import { ProjectDashboard } from './sheets/ProjectDashboard';
 import { WorkloadPerformance } from './sheets/WorkloadPerformance';
 import { Staffing } from './sheets/Staffing';
-import { isEmployeePortalRole, isExecRole, roleLabel } from './lib/roles';
+import { isAdminRole, isEmployeePortalRole, isExecRole, roleLabel } from './lib/roles';
 import type { SheetId } from './lib/types';
 import './styles/global.css';
 
 function StaffShell() {
   const isDemo = useDemoMode();
-  const { profile, signOut } = useAuth();
+  const { profile, realProfile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
   const [sheet, setSheet] = useState<SheetId>('exec');
   const [chatOpen, setChatOpen] = useState(false);
   const [viewAction, setViewAction] = useState<{ seq: number; action: ChatViewAction } | null>(
     null,
   );
+  const showAdminConsole = isAdminRole(realProfile?.role);
 
   function applyChatView(action: ChatViewAction) {
     setSheet('main');
@@ -159,6 +161,15 @@ function StaffShell() {
         >
           <span className="num">SHEET A-6</span>Staffing
         </button>
+        {showAdminConsole ? (
+          <button
+            type="button"
+            className={sheet === 'admin' ? 'active' : ''}
+            onClick={() => setSheet('admin')}
+          >
+            <span className="num">ADMIN</span>Data Console
+          </button>
+        ) : null}
       </nav>
 
       <main className={fillViewport ? 'main-fill' : undefined}>
@@ -172,6 +183,7 @@ function StaffShell() {
         {sheet === 's4' ? <ProjectDashboard data={data} /> : null}
         {sheet === 's5' ? <ProjectList data={data} /> : null}
         {sheet === 's6' ? <Staffing /> : null}
+        {sheet === 'admin' && showAdminConsole ? <AdminData /> : null}
       </main>
 
       {!fillViewport ? (

@@ -125,6 +125,10 @@ Production staff sign in with **Google** or **Microsoft 365** (`@mdesignsarchite
 
 Admins get a **Test as…** control to view the portal as any `pa_profiles` user (UI only; JWT stays admin).
 
+### Admin Data Console
+
+Dashboard **admins** get an **ADMIN · Data Console** sheet to browse/edit whitelisted `pa_*` tables, bulk upsert, seed project members from logged hours, and clear schedules / project list. Backed by `POST /api/admin/data` (admin JWT + service role).
+
 ## Production
 
 - Site: https://practice-analytics-six.vercel.app

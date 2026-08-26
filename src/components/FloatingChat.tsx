@@ -26,6 +26,7 @@ const SHEET_LABELS: Record<SheetId, string> = {
   s4: 'Project Dashboard',
   s5: 'Project List',
   s6: 'Staffing',
+  admin: 'Data Console',
 };
 
 function defaultPanelPos() {

@@ -137,4 +137,4 @@ export type DashboardData = {
   invoice_ledger: InvoiceRow[];
 };
 
-export type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6';
+export type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6' | 'admin';

@@ -33,12 +33,14 @@ async function loadHandlers(): Promise<Record<string, Handler>> {
   const bqeCallback = (await import('../api/bqe/callback')).default as Handler;
   const bqeStatus = (await import('../api/bqe/status')).default as Handler;
   const bqeSync = (await import('../api/bqe/sync')).default as Handler;
+  const adminData = (await import('../api/admin/data')).default as Handler;
   return {
     '/api/ask': ask,
     '/api/bqe/connect': bqeConnect,
     '/api/bqe/callback': bqeCallback,
     '/api/bqe/status': bqeStatus,
     '/api/bqe/sync': bqeSync,
+    '/api/admin/data': adminData,
   };
 }
 

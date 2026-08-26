@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6';
+type SheetId = 'exec' | 'main' | 's1' | 's2' | 's3' | 's4' | 's5' | 's6' | 'admin';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, 'public', any>;
 
@@ -574,6 +574,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (profile.role === 'customer') {
       res.status(403).json({ error: 'Ask This Sheet is not available in the client portal.' });
+      return;
+    }
+    if (sheet === 'admin') {
+      res.status(403).json({ error: 'Ask This Sheet is not available on the Data Console.' });
       return;
     }
     const firmAnalytics = profile.role === 'admin' || profile.role === 'exec';

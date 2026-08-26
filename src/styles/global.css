@@ -501,7 +501,44 @@ footer{
   border-color:#8a8a8a; box-shadow:0 8px 20px rgba(20,20,20,0.08);
 }
 .login-microsoft:disabled{ opacity:0.6; cursor:default; }
+.login-oauth-secondary{ margin-top:10px; }
 .login-ms-mark{ width:18px; height:18px; flex-shrink:0; }
+.impersonation-banner{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  padding:8px 16px; background:#1f3a3a; color:#f3efe6;
+  font-family:'Montserrat',sans-serif; font-size:12.5px; font-weight:500;
+}
+.impersonation-banner .mono{ opacity:0.85; font-size:11.5px; }
+.impersonation-banner button{
+  border:1px solid rgba(243,239,230,0.35); background:transparent; color:inherit;
+  font:inherit; font-weight:600; padding:6px 10px; cursor:pointer;
+}
+.impersonation-banner button:hover{ border-color:#c5a47e; color:#c5a47e; }
+.admin-test-as{ position:relative; }
+.admin-test-popover{
+  position:absolute; right:0; top:calc(100% + 8px); z-index:40;
+  width:min(360px, 86vw); max-height:420px; overflow:auto;
+  background:var(--paper); border:1px solid var(--border); box-shadow:0 12px 32px rgba(20,20,20,0.12);
+  padding:12px;
+}
+.admin-test-hint{ margin:0 0 8px; color:var(--ink-soft); font-size:12px; line-height:1.4; }
+.admin-test-search{
+  width:100%; box-sizing:border-box; padding:8px 10px; margin-bottom:8px;
+  border:1px solid var(--border); background:#fff; font:inherit; font-size:13px;
+}
+.admin-test-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.admin-test-list button{
+  width:100%; text-align:left; display:grid; gap:2px;
+  padding:8px 10px; border:1px solid transparent; background:transparent; cursor:pointer;
+  font-family:'Montserrat',sans-serif;
+}
+.admin-test-list button:hover:not(:disabled){ border-color:var(--border); background:rgba(20,20,20,0.03); }
+.admin-test-list button:disabled{ opacity:0.45; cursor:default; }
+.admin-test-list strong{ font-size:13px; color:var(--ink); }
+.admin-test-list .mono{ font-size:11px; color:var(--ink-soft); }
+.admin-test-role{
+  font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--teal, #146C6B);
+}
 .login-or{
   display:flex; align-items:center; gap:12px; color:var(--ink-soft);
   font-family:'Montserrat',sans-serif; font-size:10.5px; font-weight:600;

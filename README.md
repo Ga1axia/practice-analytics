@@ -108,22 +108,22 @@ On Vercel, set the same server vars in Project → Settings → Environment Vari
 
 ### Microsoft (Azure) sign-in
 
-Production staff sign in with their `@mdesignsarchitects.com` Microsoft 365 account. Clients and `/demo` accounts still use email + password.
+Production staff sign in with **Google** or **Microsoft 365** (`@mdesignsarchitects.com`). Email/password is removed from production login (demo role cards on `/demo` still use seeded passwords).
 
-1. **Azure Entra ID** → App registrations → New registration.
-   - Supported accounts: *Accounts in this organizational directory only* (M·Designs tenant).
-   - Web redirect URI: `https://wmlhewtqaqqpxhcqfbqq.supabase.co/auth/v1/callback`
-2. Certificates & secrets → New client secret. Copy the **Value**.
-3. Optional (recommended): App manifest → add `email` and `xms_edov` optional claims on the ID token ([Supabase Azure guide](https://supabase.com/docs/guides/auth/social-login/auth-azure)).
-4. **Supabase** → Authentication → Providers → Azure: enable, paste Client ID + secret, set Azure Tenant URL to `https://login.microsoftonline.com/<M-DESIGNS-TENANT-ID>`.
-5. Authentication → URL Configuration → Redirect URLs, allow:
+1. **Google Cloud Console** → APIs & Services → Credentials → Create OAuth client (Web).
+   - Authorized JavaScript origins: `https://practice-analytics-six.vercel.app`, `http://localhost:5173`
+   - Authorized redirect URI: `https://wmlhewtqaqqpxhcqfbqq.supabase.co/auth/v1/callback`
+2. **Supabase** → Authentication → Providers → Google: enable, paste Client ID + Client Secret.
+3. **Azure Entra ID** (Microsoft) — same as before; redirect URI:
+   `https://wmlhewtqaqqpxhcqfbqq.supabase.co/auth/v1/callback`
+4. Authentication → URL Configuration → Redirect URLs, allow:
    - `http://localhost:5173`
    - `http://localhost:5173/demo`
    - `https://practice-analytics-six.vercel.app`
    - `https://practice-analytics-six.vercel.app/demo`
    - `https://*.vercel.app/**` (preview deploys)
 
-Apply `supabase/migrations/20260826053528_roles_exec_admin_lead.sql` so firm Microsoft users get a `pa_profiles` row with the correct role seed (admin / exec / project_lead / employee). Non-firm emails are not auto-provisioned.
+Admins get a **Test as…** control to view the portal as any `pa_profiles` user (UI only; JWT stays admin).
 
 ## Production
 

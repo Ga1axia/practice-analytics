@@ -104,8 +104,8 @@ function seriesFromMaps(
 }
 
 export function Executive({ data }: { data: DashboardData }) {
-  const { profile } = useAuth();
-  const isAdmin = isAdminRole(profile?.role);
+  const { realProfile, impersonating } = useAuth();
+  const isAdmin = isAdminRole(realProfile?.role) && !impersonating;
   const [loadSort, setLoadSort] = useState<LoadSort>('load');
   const [typeMetric, setTypeMetric] = useState<'count' | 'contract'>('count');
 

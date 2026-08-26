@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AdminTestAsPanel, ImpersonationBanner } from './components/AdminTestAs';
 import { BrandMark } from './components/BrandMark';
 import { AskAiNavButton, FloatingChat } from './components/FloatingChat';
 import { LoginPage } from './components/LoginPage';
@@ -53,6 +54,7 @@ function StaffShell() {
 
   return (
     <div className={`app-shell${fillViewport ? ' fill-viewport' : ''}`}>
+      <ImpersonationBanner />
       <header className="titleblock">
         <div className="tb-brand">
           <BrandMark
@@ -83,6 +85,7 @@ function StaffShell() {
             </div>
           </div>
           <div className="tb-cell tb-cell-actions">
+            <AdminTestAsPanel />
             <AskAiNavButton
               open={chatOpen}
               onClick={() => {
@@ -226,6 +229,7 @@ function EmployeeShell() {
 
   return (
     <div className="app-shell emp-shell">
+      <ImpersonationBanner />
       <header className="titleblock">
         <div className="tb-brand">
           <BrandMark
@@ -244,6 +248,7 @@ function EmployeeShell() {
             </div>
           </div>
           <div className="tb-cell tb-cell-actions">
+            <AdminTestAsPanel />
             <button
               type="button"
               className="signout-btn emp-cal-nav-btn"
@@ -287,6 +292,7 @@ function CustomerShell() {
 
   return (
     <div className="cp-shell">
+      <ImpersonationBanner />
       <header className="titleblock cp-titleblock">
         <div className="tb-brand">
           <BrandMark subtitle={isDemo ? 'Client portal · Demo' : 'Client portal'} />
@@ -298,7 +304,8 @@ function CustomerShell() {
               {profile.client_name || profile.email}
             </div>
           </div>
-          <div className="tb-cell">
+          <div className="tb-cell tb-cell-actions">
+            <AdminTestAsPanel />
             <button type="button" className="signout-btn" onClick={() => void signOut()}>
               Sign out
             </button>

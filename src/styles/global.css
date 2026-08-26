@@ -721,6 +721,26 @@ footer{
   border:1px solid var(--border);
 }
 .admin-data-danger{ border-color:#b3261e33; }
+.admin-data-sched-summary{
+  display:flex; flex-wrap:wrap; gap:14px; margin:0 0 14px;
+  font-size:13px; color:var(--ink-soft);
+}
+.admin-data-sched-summary strong{ color:var(--ink); margin-left:4px; }
+.admin-data-pre{
+  margin:0 0 16px; padding:12px 14px; max-height:220px; overflow:auto;
+  background:rgba(20,20,20,0.03); border:1px solid var(--border);
+  font-size:11.5px; line-height:1.45;
+}
+.admin-data-pill{
+  display:inline-block; padding:2px 8px; font-size:10px; font-weight:700;
+  letter-spacing:0.06em; text-transform:uppercase; border:1px solid var(--border);
+}
+.admin-data-pill.on{ background:rgba(20,108,107,0.12); border-color:#146C6B; color:#146C6B; }
+.admin-data-pill.off{ background:rgba(179,38,30,0.06); border-color:#b3261e55; color:#8a2a22; }
+.admin-data-start-input{
+  width:120px; font:inherit; font-size:12px; padding:4px 6px;
+  border:1px solid var(--border); background:#fff;
+}
 .cp-titleblock{ border-bottom:1px solid var(--border); flex-shrink:0; }
 .cp-footer{
   flex-shrink:0; padding:10px 24px; text-align:center;

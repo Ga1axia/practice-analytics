@@ -6,16 +6,35 @@ import {
   clearProjectList,
   deleteAdminRows,
   listAdminTables,
+  listProjectSchedules,
   queryAdminTable,
   seedMembersFromTimeEntries,
+  setScheduleStartDate,
   updateAdminRows,
   upsertAdminRows,
+  type ProjectScheduleRow,
   type TableInfo,
 } from '../lib/adminData';
+import {
+  AdminEmployeesPanel,
+  AdminMembersPanel,
+  AdminOverviewPanel,
+  AdminProfilesPanel,
+} from '../components/AdminManagePanels';
 import { isAdminRole } from '../lib/roles';
 import { useAuth } from '../hooks/useAuth';
 
-type TabId = 'browse' | 'seed' | 'bulk' | 'danger';
+type TabId =
+  | 'overview'
+  | 'employees'
+  | 'profiles'
+  | 'members'
+  | 'browse'
+  | 'schedules'
+  | 'seed'
+  | 'bulk'
+  | 'danger';
+type ScheduleFilter = 'all' | 'assigned' | 'unassigned' | 'missing_start';
 
 const SEARCH_COLUMNS: Record<string, string> = {
   pa_projects: 'project',
@@ -41,7 +60,7 @@ export function AdminData() {
   const { reload } = useDashboard();
   const allowed = isAdminRole(realProfile?.role) && !impersonating;
 
-  const [tab, setTab] = useState<TabId>('browse');
+  const [tab, setTab] = useState<TabId>('overview');
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [table, setTable] = useState<string>('pa_projects');
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -57,6 +76,19 @@ export function AdminData() {
   const [bulkJson, setBulkJson] = useState('[\n  \n]');
   const [bulkStatus, setBulkStatus] = useState('ACTIVE');
   const [bulkMatchStatus, setBulkMatchStatus] = useState('COMPLETED');
+  const [schedRows, setSchedRows] = useState<ProjectScheduleRow[]>([]);
+  const [schedTotal, setSchedTotal] = useState(0);
+  const [schedFrom, setSchedFrom] = useState(0);
+  const [schedSearch, setSchedSearch] = useState('');
+  const [schedFilter, setSchedFilter] = useState<ScheduleFilter>('all');
+  const [schedSummary, setSchedSummary] = useState<{
+    projects: number;
+    assigned: number;
+    unassigned: number;
+    with_start: number;
+  } | null>(null);
+  const [startEdits, setStartEdits] = useState<Record<string, string>>({});
+  const schedLimit = 100;
 
   const columns = useMemo(() => {
     if (!rows.length) return [] as string[];
@@ -102,6 +134,33 @@ export function AdminData() {
     }
   }, [table, from, limit, search]);
 
+  const loadSchedules = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await listProjectSchedules({
+        from: schedFrom,
+        limit: schedLimit,
+        search: schedSearch.trim() || undefined,
+        scheduleFilter: schedFilter,
+      });
+      setSchedRows(res.rows);
+      setSchedTotal(res.count);
+      setSchedSummary(res.summary);
+      const edits: Record<string, string> = {};
+      for (const r of res.rows) edits[r.project] = r.start_date || '';
+      setStartEdits(edits);
+      setMsg(
+        `Schedules: ${res.summary.assigned} assigned / ${res.summary.unassigned} unassigned · ${res.summary.with_start} with start date`,
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load project schedules');
+      setSchedRows([]);
+    } finally {
+      setBusy(false);
+    }
+  }, [schedFrom, schedSearch, schedFilter]);
+
   useEffect(() => {
     if (!allowed) return;
     void refreshTables().catch((e) =>
@@ -114,6 +173,11 @@ export function AdminData() {
     void loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when table/page/search change
   }, [allowed, tab, table, from, search]);
+
+  useEffect(() => {
+    if (!allowed || tab !== 'schedules') return;
+    void loadSchedules();
+  }, [allowed, tab, loadSchedules]);
 
   if (!allowed) {
     return (
@@ -132,6 +196,7 @@ export function AdminData() {
       setMsg(`${label}: ${typeof result === 'string' ? result : JSON.stringify(result)}`);
       await refreshTables();
       if (tab === 'browse') await loadRows();
+      if (tab === 'schedules') await loadSchedules();
       await reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : label);
@@ -153,13 +218,19 @@ export function AdminData() {
           <p className="pd-kicker">Admin only</p>
           <h2 className="display">Data console</h2>
           <p className="emp-lede">
-            Browse and edit practice tables, seed memberships from BQE hours, and run bulk / cleanup
-            tools. Uses the service role after your admin session is verified.
+            Firm management hub: everyone in the system, portal roles, memberships, schedules, table
+            browse/edit, seed from hours, and cleanup. Uses the service role after your admin session
+            is verified.
           </p>
         </div>
         <div className="admin-data-tabs">
           {(
             [
+              ['overview', 'Overview'],
+              ['employees', 'Employees'],
+              ['profiles', 'Profiles / roles'],
+              ['members', 'Members'],
+              ['schedules', 'Schedules'],
               ['browse', 'Browse / edit'],
               ['seed', 'Seed from hours'],
               ['bulk', 'Bulk edit'],
@@ -180,6 +251,42 @@ export function AdminData() {
 
       {err ? <p className="plist-upload-err">{err}</p> : null}
       {msg ? <p className="admin-data-msg mono">{msg}</p> : null}
+
+      {tab === 'overview' ? (
+        <AdminOverviewPanel
+          busy={busy}
+          onBusy={setBusy}
+          onError={setErr}
+          onMsg={setMsg}
+        />
+      ) : null}
+
+      {tab === 'employees' ? (
+        <AdminEmployeesPanel
+          busy={busy}
+          onBusy={setBusy}
+          onError={setErr}
+          onMsg={setMsg}
+        />
+      ) : null}
+
+      {tab === 'profiles' ? (
+        <AdminProfilesPanel
+          busy={busy}
+          onBusy={setBusy}
+          onError={setErr}
+          onMsg={setMsg}
+        />
+      ) : null}
+
+      {tab === 'members' ? (
+        <AdminMembersPanel
+          busy={busy}
+          onBusy={setBusy}
+          onError={setErr}
+          onMsg={setMsg}
+        />
+      ) : null}
 
       {tab === 'browse' ? (
         <div className="admin-data-browse">
@@ -346,6 +453,161 @@ export function AdminData() {
                 New blank
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'schedules' ? (
+        <div className="admin-data-panel">
+          <h3>Project schedules</h3>
+          <p className="pd-muted">
+            Project List headers with schedule assignment and kickoff start date (
+            <span className="mono">pa_schedules.start_date</span>).
+          </p>
+          {schedSummary ? (
+            <div className="admin-data-sched-summary">
+              <span>
+                Projects <strong>{schedSummary.projects}</strong>
+              </span>
+              <span>
+                Assigned <strong>{schedSummary.assigned}</strong>
+              </span>
+              <span>
+                Unassigned <strong>{schedSummary.unassigned}</strong>
+              </span>
+              <span>
+                With start date <strong>{schedSummary.with_start}</strong>
+              </span>
+            </div>
+          ) : null}
+          <div className="admin-data-inline" style={{ marginBottom: 12 }}>
+            <label>
+              Filter
+              <select
+                value={schedFilter}
+                onChange={(e) => {
+                  setSchedFilter(e.target.value as ScheduleFilter);
+                  setSchedFrom(0);
+                }}
+              >
+                <option value="all">All projects</option>
+                <option value="assigned">Schedule assigned</option>
+                <option value="unassigned">Schedule not assigned</option>
+                <option value="missing_start">Assigned, missing start date</option>
+              </select>
+            </label>
+            <label>
+              Search
+              <input
+                value={schedSearch}
+                onChange={(e) => {
+                  setSchedSearch(e.target.value);
+                  setSchedFrom(0);
+                }}
+                placeholder="Project, client, manager…"
+              />
+            </label>
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy}
+              onClick={() => void loadSchedules()}
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="admin-data-pager" style={{ marginBottom: 10 }}>
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy || schedFrom <= 0}
+              onClick={() => setSchedFrom((f) => Math.max(0, f - schedLimit))}
+            >
+              Prev
+            </button>
+            <span className="mono">
+              {schedTotal ? `${schedFrom + 1}–${schedFrom + schedRows.length} / ${schedTotal}` : '0'}
+            </span>
+            <button
+              type="button"
+              className="signout-btn"
+              disabled={busy || schedFrom + schedRows.length >= schedTotal}
+              onClick={() => setSchedFrom((f) => f + schedLimit)}
+            >
+              Next
+            </button>
+          </div>
+          <div className="admin-data-grid-wrap">
+            <table className="admin-data-grid">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Client</th>
+                  <th>Status</th>
+                  <th>Schedule</th>
+                  <th>Start date</th>
+                  <th>Rows</th>
+                  <th>Manager</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedRows.map((r) => (
+                  <tr key={r.project}>
+                    <td title={r.project}>{cellPreview(r.project)}</td>
+                    <td>{cellPreview(r.client)}</td>
+                    <td>{cellPreview(r.status)}</td>
+                    <td>
+                      <span
+                        className={
+                          r.schedule_assigned
+                            ? 'admin-data-pill on'
+                            : 'admin-data-pill off'
+                        }
+                      >
+                        {r.schedule_assigned ? 'Assigned' : 'Not assigned'}
+                      </span>
+                    </td>
+                    <td>
+                      <input
+                        className="admin-data-start-input"
+                        value={startEdits[r.project] ?? ''}
+                        placeholder="M/D/YYYY or blank"
+                        onChange={(e) =>
+                          setStartEdits((prev) => ({ ...prev, [r.project]: e.target.value }))
+                        }
+                      />
+                    </td>
+                    <td className="mono">{r.schedule_row_count}</td>
+                    <td>{cellPreview(r.manager)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="signout-btn"
+                        disabled={busy}
+                        onClick={() =>
+                          void run('Set start', async () => {
+                            const v = (startEdits[r.project] || '').trim();
+                            const res = await setScheduleStartDate(r.project, v);
+                            await loadSchedules();
+                            return res.created
+                              ? `created schedule + start “${v || '(none)'}”`
+                              : `start → “${v || '(none)'}”`;
+                          })
+                        }
+                      >
+                        Save
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!schedRows.length ? (
+                  <tr>
+                    <td colSpan={8}>{busy ? 'Loading…' : 'No projects match'}</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : null}

@@ -140,3 +140,154 @@ export function clearAllSchedules() {
 export function clearProjectList() {
   return adminData<{ ok: boolean; result?: unknown }>({ action: 'clear_projects' });
 }
+
+export type ProjectScheduleRow = {
+  project: string;
+  client: string | null;
+  status: string | null;
+  manager: string | null;
+  schedule_assigned: boolean;
+  schedule_id: string | null;
+  start_date: string | null;
+  has_start_date: boolean;
+  schedule_row_count: number;
+  schedule_title: string | null;
+};
+
+export function listProjectSchedules(input: {
+  from?: number;
+  limit?: number;
+  search?: string;
+  scheduleFilter?: 'all' | 'assigned' | 'unassigned' | 'missing_start';
+}) {
+  return adminData<{
+    rows: ProjectScheduleRow[];
+    count: number;
+    from: number;
+    limit: number;
+    summary: {
+      projects: number;
+      assigned: number;
+      unassigned: number;
+      with_start: number;
+    };
+  }>({
+    action: 'project_schedules',
+    from: input.from,
+    limit: input.limit,
+    search: input.search ? { column: 'project', value: input.search } : undefined,
+    scheduleFilter: input.scheduleFilter || 'all',
+  });
+}
+
+export function setScheduleStartDate(projectKey: string, startDate: string) {
+  return adminData<{
+    ok: boolean;
+    schedule: { id: string; project_key: string; start_date: string | null };
+    created?: boolean;
+  }>({
+    action: 'set_schedule_start',
+    projectKey,
+    startDate,
+  });
+}
+
+export type ManagementOverview = {
+  tableCounts: { table: string; count: number }[];
+  roles: Record<string, number>;
+  lastSyncRuns: Record<string, unknown>[];
+  schedulesAssigned: number;
+  projectHeaders: number;
+  activeProjectHeaders: number;
+  bqeConnection: Record<string, unknown> | null;
+};
+
+export function loadManagementOverview() {
+  return adminData<ManagementOverview>({ action: 'management_overview' });
+}
+
+export type EmployeeDirectoryRow = {
+  name: string;
+  email: string | null;
+  profile_id: string | null;
+  role: string | null;
+  display_name: string | null;
+  team: string | null;
+  capacity_hours: number | null;
+  job_role: string | null;
+  discipline: string | null;
+  total_hours: number | null;
+  bill_hours: number | null;
+  member_projects: number;
+  lead_projects: number;
+  sources: string[];
+};
+
+export function listEmployeesDirectory(input: {
+  from?: number;
+  limit?: number;
+  search?: string;
+}) {
+  return adminData<{
+    rows: EmployeeDirectoryRow[];
+    count: number;
+    from: number;
+    limit: number;
+    summary: {
+      people: number;
+      with_profile: number;
+      with_te: number;
+      with_capacity: number;
+    };
+  }>({
+    action: 'employees_directory',
+    from: input.from,
+    limit: input.limit,
+    search: input.search ? { column: 'name', value: input.search } : undefined,
+  });
+}
+
+export type MembersOverviewRow = {
+  project_key: string;
+  members: number;
+  leads: string[];
+  lead_count: number;
+};
+
+export function listMembersOverview(input: {
+  from?: number;
+  limit?: number;
+  search?: string;
+}) {
+  return adminData<{
+    rows: MembersOverviewRow[];
+    count: number;
+    summary: {
+      projects_with_members: number;
+      total_memberships: number;
+      lead_memberships: number;
+    };
+  }>({
+    action: 'members_overview',
+    from: input.from,
+    limit: input.limit,
+    search: input.search ? { column: 'project', value: input.search } : undefined,
+  });
+}
+
+export function updateProfile(
+  profileId: string,
+  patch: Partial<{
+    role: string;
+    display_name: string | null;
+    employee_name: string | null;
+    client_name: string | null;
+    email: string;
+  }>,
+) {
+  return adminData<{ ok: boolean; profile: Record<string, unknown> }>({
+    action: 'update_profile',
+    profileId,
+    patch,
+  });
+}

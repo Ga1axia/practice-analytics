@@ -63,6 +63,11 @@ type Body = {
   patch?: Record<string, unknown>;
   match?: Record<string, string | number | boolean | null>;
   dryRun?: boolean;
+  /** project_schedules filters */
+  scheduleFilter?: 'all' | 'assigned' | 'unassigned' | 'missing_start';
+  projectKey?: string;
+  startDate?: string;
+  profileId?: string;
 };
 
 async function countTable(table: AdminTable): Promise<number> {
@@ -270,6 +275,163 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'project_schedules') {
+      const from = Math.max(0, Number(body.from) || 0);
+      const limit = Math.min(500, Math.max(1, Number(body.limit) || 100));
+      const q = (body.search?.value || '').trim().toLowerCase();
+      const filter = body.scheduleFilter || 'all';
+
+      type Proj = {
+        project: string;
+        client: string | null;
+        status: string | null;
+        manager: string | null;
+        row_kind: string | null;
+      };
+      type Sched = {
+        id: string;
+        project_key: string;
+        start_date: string | null;
+        title: string | null;
+      };
+
+      const projects: Proj[] = [];
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_projects')
+          .select('project, client, status, manager, row_kind')
+          .eq('row_kind', 'project')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        projects.push(...(data as Proj[]));
+        if (data.length < 1000) break;
+      }
+
+      const schedules: Sched[] = [];
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_schedules')
+          .select('id, project_key, start_date, title')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        schedules.push(...(data as Sched[]));
+        if (data.length < 1000) break;
+      }
+
+      const rowCounts = new Map<string, number>();
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_schedule_rows')
+          .select('schedule_id')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const sid = String((r as { schedule_id: string }).schedule_id);
+          rowCounts.set(sid, (rowCounts.get(sid) || 0) + 1);
+        }
+        if (data.length < 1000) break;
+      }
+
+      const byKey = new Map<string, Sched>();
+      for (const s of schedules) byKey.set(s.project_key, s);
+
+      let rows = projects.map((p) => {
+        const sched = byKey.get(p.project);
+        const start = (sched?.start_date || '').trim();
+        const assigned = Boolean(sched);
+        return {
+          project: p.project,
+          client: p.client,
+          status: p.status,
+          manager: p.manager,
+          schedule_assigned: assigned,
+          schedule_id: sched?.id || null,
+          start_date: start || null,
+          has_start_date: Boolean(start),
+          schedule_row_count: sched ? rowCounts.get(sched.id) || 0 : 0,
+          schedule_title: sched?.title || null,
+        };
+      });
+
+      if (q) {
+        rows = rows.filter((r) => {
+          const blob = [r.project, r.client, r.manager, r.status, r.start_date]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return blob.includes(q);
+        });
+      }
+      if (filter === 'assigned') rows = rows.filter((r) => r.schedule_assigned);
+      if (filter === 'unassigned') rows = rows.filter((r) => !r.schedule_assigned);
+      if (filter === 'missing_start') {
+        rows = rows.filter((r) => r.schedule_assigned && !r.has_start_date);
+      }
+
+      rows.sort((a, b) => a.project.localeCompare(b.project, undefined, { sensitivity: 'base' }));
+
+      const summary = {
+        projects: projects.length,
+        assigned: projects.filter((p) => byKey.has(p.project)).length,
+        unassigned: projects.filter((p) => !byKey.has(p.project)).length,
+        with_start: [...byKey.values()].filter((s) => (s.start_date || '').trim()).length,
+      };
+
+      const page = rows.slice(from, from + limit);
+      res.status(200).json({
+        rows: page,
+        count: rows.length,
+        from,
+        limit,
+        summary,
+      });
+      return;
+    }
+
+    if (action === 'set_schedule_start') {
+      const projectKey = String(body.projectKey || '').trim();
+      if (!projectKey) {
+        res.status(400).json({ error: 'projectKey required' });
+        return;
+      }
+      const startDate = String(body.startDate || '').trim();
+      const { data: existing, error: findErr } = await sb
+        .from('pa_schedules')
+        .select('id, project_key, start_date, title, client_name')
+        .eq('project_key', projectKey)
+        .maybeSingle();
+      if (findErr) throw new Error(findErr.message);
+
+      if (existing) {
+        const { data, error } = await sb
+          .from('pa_schedules')
+          .update({ start_date: startDate })
+          .eq('id', existing.id)
+          .select('id, project_key, start_date')
+          .single();
+        if (error) throw new Error(error.message);
+        res.status(200).json({ ok: true, schedule: data });
+        return;
+      }
+
+      const { data, error } = await sb
+        .from('pa_schedules')
+        .insert({
+          project_key: projectKey,
+          title: projectKey,
+          client_name: '',
+          start_date: startDate,
+        })
+        .select('id, project_key, start_date')
+        .single();
+      if (error) throw new Error(error.message);
+      res.status(200).json({ ok: true, schedule: data, created: true });
+      return;
+    }
+
     if (action === 'query') {
       const table = String(body.table || '');
       if (!isAdminTable(table)) {
@@ -413,6 +575,369 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'management_overview') {
+      const tableCounts: { table: string; count: number }[] = [];
+      for (const table of [
+        'pa_projects',
+        'pa_profiles',
+        'pa_project_members',
+        'pa_time_entries',
+        'pa_schedules',
+        'pa_schedule_rows',
+        'pa_employee_roster',
+        'pa_employee_capacity',
+        'pa_employee_totals',
+        'pa_ar_clients',
+        'pa_invoice_ledger',
+        'pa_bqe_sync_runs',
+      ] as AdminTable[]) {
+        try {
+          tableCounts.push({ table, count: await countTable(table) });
+        } catch {
+          tableCounts.push({ table, count: -1 });
+        }
+      }
+
+      const { data: profiles } = await sb.from('pa_profiles').select('role');
+      const roles: Record<string, number> = {};
+      for (const p of profiles || []) {
+        const r = String((p as { role: string }).role || 'unknown');
+        roles[r] = (roles[r] || 0) + 1;
+      }
+
+      const { data: lastSync } = await sb
+        .from('pa_bqe_sync_runs')
+        .select('sync_type, status, completed_at, entries_fetched, entries_inserted')
+        .order('completed_at', { ascending: false })
+        .limit(5);
+
+      const { count: schedAssigned } = await sb
+        .from('pa_schedules')
+        .select('*', { count: 'exact', head: true });
+      const { count: projectHeaders } = await sb
+        .from('pa_projects')
+        .select('*', { count: 'exact', head: true })
+        .eq('row_kind', 'project');
+      const { count: activeHeaders } = await sb
+        .from('pa_projects')
+        .select('*', { count: 'exact', head: true })
+        .eq('row_kind', 'project')
+        .eq('status', 'ACTIVE');
+
+      const { data: conn } = await sb
+        .from('pa_bqe_connection')
+        .select('connected_at, last_sync_at, last_sync_status, last_sync_message, api_endpoint')
+        .limit(1)
+        .maybeSingle();
+
+      res.status(200).json({
+        tableCounts,
+        roles,
+        lastSyncRuns: lastSync || [],
+        schedulesAssigned: schedAssigned ?? 0,
+        projectHeaders: projectHeaders ?? 0,
+        activeProjectHeaders: activeHeaders ?? 0,
+        bqeConnection: conn || null,
+      });
+      return;
+    }
+
+    if (action === 'employees_directory') {
+      type EmpAcc = {
+        name: string;
+        email: string | null;
+        profile_id: string | null;
+        role: string | null;
+        display_name: string | null;
+        team: string | null;
+        capacity_hours: number | null;
+        job_role: string | null;
+        discipline: string | null;
+        total_hours: number | null;
+        bill_hours: number | null;
+        member_projects: number;
+        lead_projects: number;
+        sources: string[];
+      };
+
+      const byNorm = new Map<string, EmpAcc>();
+      const ensure = (raw: string) => {
+        const name = raw.trim();
+        const key = norm(name);
+        if (!key) return null;
+        let row = byNorm.get(key);
+        if (!row) {
+          row = {
+            name,
+            email: null,
+            profile_id: null,
+            role: null,
+            display_name: null,
+            team: null,
+            capacity_hours: null,
+            job_role: null,
+            discipline: null,
+            total_hours: null,
+            bill_hours: null,
+            member_projects: 0,
+            lead_projects: 0,
+            sources: [],
+          };
+          byNorm.set(key, row);
+        }
+        return row;
+      };
+      const addSource = (row: EmpAcc, s: string) => {
+        if (!row.sources.includes(s)) row.sources.push(s);
+      };
+
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_profiles')
+          .select('id, email, role, display_name, employee_name')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const p of data) {
+          const empName = String(p.employee_name || '').trim();
+          if (empName) {
+            const row = ensure(empName);
+            if (row) {
+              row.profile_id = p.id as string;
+              row.email = (p.email as string) || row.email;
+              row.role = (p.role as string) || row.role;
+              row.display_name = (p.display_name as string) || row.display_name;
+              addSource(row, 'profile');
+            }
+          } else if (p.role && p.role !== 'customer') {
+            const row = ensure(String(p.display_name || p.email || p.id));
+            if (row) {
+              row.profile_id = p.id as string;
+              row.email = (p.email as string) || null;
+              row.role = p.role as string;
+              row.display_name = (p.display_name as string) || null;
+              addSource(row, 'profile');
+            }
+          }
+        }
+        if (data.length < 1000) break;
+      }
+
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_employee_roster')
+          .select('employee, team')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const row = ensure(String(r.employee || ''));
+          if (!row) continue;
+          row.team = (r.team as string) || row.team;
+          addSource(row, 'roster');
+        }
+        if (data.length < 1000) break;
+      }
+
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_employee_capacity')
+          .select('employee_name, weekly_capacity_hours, role, discipline, active')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const row = ensure(String(r.employee_name || ''));
+          if (!row) continue;
+          row.capacity_hours = Number(r.weekly_capacity_hours) || row.capacity_hours;
+          row.job_role = (r.role as string) || row.job_role;
+          row.discipline = (r.discipline as string) || row.discipline;
+          addSource(row, 'capacity');
+        }
+        if (data.length < 1000) break;
+      }
+
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_employee_totals')
+          .select('employee, total_hours, bill_hours')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const row = ensure(String(r.employee || ''));
+          if (!row) continue;
+          row.total_hours = Number(r.total_hours) || row.total_hours;
+          row.bill_hours = Number(r.bill_hours) || row.bill_hours;
+          addSource(row, 'totals');
+        }
+        if (data.length < 1000) break;
+      }
+
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_project_members')
+          .select('employee_name, role')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const row = ensure(String(r.employee_name || ''));
+          if (!row) continue;
+          row.member_projects += 1;
+          if (r.role === 'lead') row.lead_projects += 1;
+          addSource(row, 'members');
+        }
+        if (data.length < 1000) break;
+      }
+
+      // Distinct TE names (names only — full hour scan already covered by totals when present)
+      const teNames = new Set<string>();
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_time_entries')
+          .select('employee_name')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        for (const r of data) {
+          const n = String(r.employee_name || '').trim();
+          if (n) teNames.add(n);
+        }
+        if (data.length < 1000) break;
+        // Cap TE name discovery to avoid multi-minute scans on huge tables
+        if (f >= 100_000) break;
+      }
+      for (const n of teNames) {
+        const row = ensure(n);
+        if (row) addSource(row, 'time_entries');
+      }
+
+      const q = String(body.search?.value || '').trim().toLowerCase();
+      let rows = [...byNorm.values()].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      );
+      if (q) {
+        rows = rows.filter((r) => {
+          const blob = [r.name, r.email, r.role, r.team, r.job_role, r.discipline, r.display_name]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return blob.includes(q);
+        });
+      }
+
+      const from = Math.max(0, Number(body.from) || 0);
+      const limit = Math.min(500, Math.max(1, Number(body.limit) || 200));
+      res.status(200).json({
+        rows: rows.slice(from, from + limit),
+        count: rows.length,
+        from,
+        limit,
+        summary: {
+          people: rows.length,
+          with_profile: rows.filter((r) => r.profile_id).length,
+          with_te: rows.filter((r) => r.sources.includes('time_entries')).length,
+          with_capacity: rows.filter((r) => r.sources.includes('capacity')).length,
+        },
+      });
+      return;
+    }
+
+    if (action === 'members_overview') {
+      const q = String(body.search?.value || '').trim().toLowerCase();
+      const from = Math.max(0, Number(body.from) || 0);
+      const limit = Math.min(500, Math.max(1, Number(body.limit) || 100));
+
+      type Mem = { project_key: string; employee_name: string; role: string };
+      const members: Mem[] = [];
+      for (let f = 0; ; f += 1000) {
+        const { data, error } = await sb
+          .from('pa_project_members')
+          .select('project_key, employee_name, role')
+          .range(f, f + 999);
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+        members.push(...(data as Mem[]));
+        if (data.length < 1000) break;
+      }
+
+      const byProject = new Map<
+        string,
+        { project_key: string; members: number; leads: string[]; people: string[] }
+      >();
+      for (const m of members) {
+        let row = byProject.get(m.project_key);
+        if (!row) {
+          row = { project_key: m.project_key, members: 0, leads: [], people: [] };
+          byProject.set(m.project_key, row);
+        }
+        row.members += 1;
+        row.people.push(m.employee_name);
+        if (m.role === 'lead') row.leads.push(m.employee_name);
+      }
+
+      let rows = [...byProject.values()].sort((a, b) => b.members - a.members);
+      if (q) {
+        rows = rows.filter((r) => {
+          const blob = [r.project_key, ...r.leads, ...r.people].join(' ').toLowerCase();
+          return blob.includes(q);
+        });
+      }
+
+      res.status(200).json({
+        rows: rows.slice(from, from + limit).map((r) => ({
+          project_key: r.project_key,
+          members: r.members,
+          leads: r.leads,
+          lead_count: r.leads.length,
+        })),
+        count: rows.length,
+        from,
+        limit,
+        summary: {
+          projects_with_members: byProject.size,
+          total_memberships: members.length,
+          lead_memberships: members.filter((m) => m.role === 'lead').length,
+        },
+      });
+      return;
+    }
+
+    if (action === 'update_profile') {
+      const id = String((body as { profileId?: string }).profileId || body.ids?.[0] || '').trim();
+      if (!id) {
+        res.status(400).json({ error: 'profileId required' });
+        return;
+      }
+      const patch = body.patch || {};
+      const allowedKeys = ['role', 'display_name', 'employee_name', 'client_name', 'email'];
+      const clean: Record<string, unknown> = {};
+      for (const k of allowedKeys) {
+        if (k in patch) clean[k] = patch[k];
+      }
+      if (clean.role != null) {
+        const role = String(clean.role);
+        if (!['admin', 'exec', 'project_lead', 'employee', 'customer'].includes(role)) {
+          res.status(400).json({ error: 'Invalid role' });
+          return;
+        }
+      }
+      if (!Object.keys(clean).length) {
+        res.status(400).json({ error: 'No allowed fields to update' });
+        return;
+      }
+      const { data, error } = await sb
+        .from('pa_profiles')
+        .update(clean)
+        .eq('id', id)
+        .select('id, email, role, display_name, employee_name, client_name')
+        .single();
+      if (error) throw new Error(error.message);
+      res.status(200).json({ ok: true, profile: data });
+      return;
+    }
+
     res.status(400).json({
       error: 'Unknown action',
       allowed: [
@@ -425,6 +950,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'clear_schedules',
         'clear_projects',
         'sql_count',
+        'project_schedules',
+        'set_schedule_start',
+        'management_overview',
+        'employees_directory',
+        'members_overview',
+        'update_profile',
       ],
     });
   } catch (e) {

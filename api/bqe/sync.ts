@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   BqeHttpError,
+  bqeGet,
   bqeListAll,
   bqeSinceDate,
   serviceSupabase,
@@ -32,6 +33,13 @@ type SyncBody = {
   lookbackMonths?: number;
   /** When running aggregates, also persist raw time entries (incremental). */
   includeTimeEntries?: boolean;
+  /** 1-based page for mode=projects (omit / 0 = fetch all — local only). */
+  page?: number;
+  pageSize?: number;
+  /** Clear pa_projects before inserting this page (use on first page). */
+  reset?: boolean;
+  /** CORE where clause for /project (e.g. status = 4 for Active). */
+  projectWhere?: string;
 };
 
 async function clearTable(sb: Sb, table: string) {
@@ -146,40 +154,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // --- Projects-only (fast path for Vercel Hobby ~10s limit) ---
+    // --- Projects (paged on Vercel; full list locally) ---
     if (mode === 'projects') {
       const sb = serviceSupabase();
       try {
         const warnings: string[] = [];
-        const projects = await bqeListAll<BqeProject>('/project', 500);
-        const employees = await tryList(
-          'Employee',
-          () =>
-            bqeListAll<BqeEmployee>('/employee', 500, {
-              fields: 'id,firstName,lastName,status,department,title,displayName',
-            }),
-          warnings,
-        );
+        const page = Number(body.page) > 0 ? Math.floor(Number(body.page)) : 0;
+        const pageSize = Math.min(Math.max(Number(body.pageSize) || 100, 25), 200);
+        const projectWhere = (body.projectWhere || '').trim();
+        const query: Record<string, string> = {
+          fields:
+            'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,hasChild,address,percentComplete',
+        };
+        if (projectWhere) query.where = projectWhere;
+
+        let projects: BqeProject[] = [];
+        let hasMore = false;
+        if (page > 0) {
+          const payload = await bqeGet<unknown>('/project', {
+            ...query,
+            page: `${page},${pageSize}`,
+          });
+          projects = Array.isArray(payload) ? (payload as BqeProject[]) : [];
+          hasMore = projects.length >= pageSize;
+        } else {
+          projects = await bqeListAll<BqeProject>('/project', 500, query);
+        }
+
+        const employees =
+          page <= 1
+            ? await tryList(
+                'Employee',
+                () =>
+                  bqeListAll<BqeEmployee>('/employee', 500, {
+                    fields: 'id,firstName,lastName,status,department,title,displayName',
+                  }),
+                warnings,
+              )
+            : [];
+
         const mapped = mapCoreProjects(projects);
-        const roster = mapEmployeesToRoster(employees);
         if (mapped.excludedCount) {
           warnings.push(
-            `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list`,
+            `Excluded ${mapped.excludedCount} test / Internal Office rows from this page`,
           );
         }
 
-        await clearTable(sb, 'pa_projects');
-        await clearTable(sb, 'pa_employee_roster');
-        const insertedProjects = await insertChunks(
-          sb,
-          'pa_projects',
-          mapped.rows as unknown as Record<string, unknown>[],
-        );
-        await insertChunks(sb, 'pa_employee_roster', roster);
+        if (body.reset || page <= 1) {
+          await clearTable(sb, 'pa_projects');
+          if (page <= 1) await clearTable(sb, 'pa_employee_roster');
+        }
+
+        let insertedProjects = 0;
+        if (mapped.rows.length) {
+          if (page > 0) {
+            const { error: upErr } = await sb
+              .from('pa_projects')
+              .upsert(mapped.rows as unknown as Record<string, unknown>[], {
+                onConflict: 'project',
+              });
+            if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
+            insertedProjects = mapped.rows.length;
+          } else {
+            insertedProjects = await insertChunks(
+              sb,
+              'pa_projects',
+              mapped.rows as unknown as Record<string, unknown>[],
+            );
+          }
+        }
+        if (employees.length) {
+          const roster = mapEmployeesToRoster(employees);
+          await insertChunks(sb, 'pa_employee_roster', roster);
+        }
 
         const msg =
-          `Projects sync: ${projects.length} CORE → ${insertedProjects} rows · ${roster.length} employees` +
-          (warnings.length ? ` · ${warnings.join(' | ')}` : '');
+          page > 0
+            ? `Projects page ${page}: +${insertedProjects} rows` +
+              (hasMore ? ' (more…)' : ' (done)')
+            : `Projects sync: ${projects.length} CORE → ${insertedProjects} rows`;
 
         await sb
           .from('pa_bqe_connection')
@@ -194,6 +247,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({
           ok: true,
           mode: 'projects',
+          page: page || null,
+          pageSize: page > 0 ? pageSize : null,
+          hasMore,
           coreProjects: projects.length,
           insertedProjects,
           employees: employees.length,

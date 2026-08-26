@@ -164,20 +164,41 @@ export function BqeConnectPanel() {
     setErr(null);
     try {
       if (onVercel) {
-        setMsg('Step 1/3 — syncing projects…');
-        const pRes = await fetch('/api/bqe/sync', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({ mode: 'projects' }),
-        });
-        const pBody = await readApiJson<{ message?: string; error?: string }>(pRes);
-        if (!pRes.ok) throw new Error(pBody.error || 'Projects sync failed');
+        // Hobby ~10s: page projects (100/req), then TE by month (no project crawl), skip heavy aggregates
+        const projectWhere = 'status = 4'; // Active only — cuts payload vs full 5k tree
+        let page = 1;
+        let totalProjects = 0;
+        for (;;) {
+          setMsg(`Step 1 — projects page ${page}…`);
+          const pRes = await fetch('/api/bqe/sync', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+              mode: 'projects',
+              page,
+              pageSize: 80,
+              reset: page === 1,
+              projectWhere,
+            }),
+          });
+          const pBody = await readApiJson<{
+            message?: string;
+            error?: string;
+            hasMore?: boolean;
+            insertedProjects?: number;
+          }>(pRes);
+          if (!pRes.ok) throw new Error(pBody.error || `Projects page ${page} failed`);
+          totalProjects += pBody.insertedProjects || 0;
+          if (!pBody.hasMore) break;
+          page += 1;
+          if (page > 80) break;
+        }
 
         const months = lastNMonthWindows(3);
         let teFetched = 0;
         for (let i = 0; i < months.length; i += 1) {
           const m = months[i]!;
-          setMsg(`Step 2/3 — time ${m.label} (${i + 1}/${months.length})…`);
+          setMsg(`Step 2 — time ${m.label} (${i + 1}/${months.length})…`);
           const tRes = await fetch('/api/bqe/sync', {
             method: 'POST',
             headers: await authHeaders(),
@@ -192,20 +213,8 @@ export function BqeConnectPanel() {
           teFetched += tBody.fetched || 0;
         }
 
-        setMsg('Step 3/3 — rebuilding analytics (2-month lookback)…');
-        const aRes = await fetch('/api/bqe/sync', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            lookbackMonths: 2,
-            includeTimeEntries: false,
-          }),
-        });
-        const aBody = await readApiJson<{ message?: string; error?: string }>(aRes);
-        if (!aRes.ok) throw new Error(aBody.error || 'Analytics sync failed');
-
         setMsg(
-          `Vercel sync complete. ${pBody.message || 'Projects ok'} · TE fetched ~${teFetched} over 3 months · ${aBody.message || 'Analytics ok'}`,
+          `Vercel sync complete: ${totalProjects} project rows · ~${teFetched} time entries (3 months). Run local full sync for 36‑month analytics if needed.`,
         );
       } else {
         const res = await fetch('/api/bqe/sync', {

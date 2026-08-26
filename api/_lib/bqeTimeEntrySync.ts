@@ -443,10 +443,10 @@ export async function runTimeEntrySync(
   const runId = await startRun(sb, req, since, until);
 
   try {
-    // Project hierarchy for phase mapping (sequential — rate limit)
-    const projects = await bqeListAll<BqeProject>('/project', 500);
-    const mapped = mapCoreProjects(projects);
-    const phaseLookup = buildPhaseLookup(projects, mapped);
+    // Skip full /project crawl (5k+ rows) — exceeds Vercel Hobby limits.
+    // mapBqeTimeEntryToRow falls back to parsing "Parent - Phase" from te.project.
+    const phaseLookup = new Map<string, PhaseContext>();
+    warnings.push('Phase labels from time-entry project names (no full CORE project crawl)');
 
     let where = since ? `date >= '${since}'` : '';
     if (until) {

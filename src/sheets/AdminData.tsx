@@ -617,8 +617,13 @@ export function AdminData() {
           <h3>Seed project members from logged hours</h3>
           <p className="pd-muted">
             Scans <span className="mono">pa_time_entries</span>, matches job codes to Project List
-            headers, inserts missing members, and promotes Project List managers to leads. Same
-            logic as <span className="mono">npm run sync:project-members</span>.
+            headers, inserts missing rows into <span className="mono">pa_project_members</span>, and
+            promotes Project List managers to leads. Same logic as{' '}
+            <span className="mono">npm run sync:project-members</span>.
+          </p>
+          <p className="pd-muted">
+            Does <strong>not</strong> create, clear, or change schedules, schedule rows, or project
+            start dates. Use the Schedules tab (or Danger zone) for those.
           </p>
           <div className="admin-data-actions">
             <button

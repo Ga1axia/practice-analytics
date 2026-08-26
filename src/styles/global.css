@@ -701,6 +701,21 @@ footer{
   width:100%; box-sizing:border-box; font-family:'IBM Plex Mono',monospace; font-size:12px;
 }
 .admin-data-pager{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.admin-data .signout-btn{
+  color:var(--ink);
+  background:#fff;
+  border:1px solid var(--border);
+}
+.admin-data .signout-btn:hover{
+  color:var(--ink);
+  background:rgba(197,164,126,0.18);
+  border-color:var(--gold);
+}
+.admin-data .signout-btn:disabled{
+  opacity:0.45;
+  cursor:not-allowed;
+  color:var(--ink-soft);
+}
 .admin-data-grid-wrap{ overflow:auto; border:1px solid var(--border); max-height:70vh; }
 .admin-data-grid{ width:100%; border-collapse:collapse; font-size:12px; }
 .admin-data-grid th, .admin-data-grid td{

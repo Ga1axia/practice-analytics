@@ -202,7 +202,8 @@ export function AdminEmployeesPanel({
       <h3>Everyone in the system</h3>
       <p className="pd-muted">
         Merged from profiles, roster, capacity, hour totals, project memberships, and time-entry
-        names.
+        names. Rows with a portal profile can edit email here; others need a profile first (sign-in
+        or Profiles tab).
       </p>
       {summary ? (
         <div className="admin-data-sched-summary">
@@ -271,13 +272,28 @@ export function AdminEmployeesPanel({
               <th>Projects</th>
               <th>Leads</th>
               <th>Sources</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.name}-${r.profile_id || ''}`}>
                 <td title={r.name}>{r.name}</td>
-                <td className="mono">{cell(r.email)}</td>
+                <td>
+                  {r.profile_id ? (
+                    <input
+                      className="admin-data-start-input"
+                      style={{ width: 180 }}
+                      defaultValue={r.email || ''}
+                      id={`emp-em-${r.profile_id}`}
+                      type="email"
+                      placeholder="email@…"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="mono">{cell(r.email)}</span>
+                  )}
+                </td>
                 <td>{r.role ? roleLabel(r.role as UserRole) : '—'}</td>
                 <td>{cell(r.team)}</td>
                 <td>{r.capacity_hours != null ? r.capacity_hours : '—'}</td>
@@ -291,11 +307,47 @@ export function AdminEmployeesPanel({
                 <td>{r.member_projects || '—'}</td>
                 <td>{r.lead_projects || '—'}</td>
                 <td className="mono">{r.sources.join(', ')}</td>
+                <td>
+                  {r.profile_id ? (
+                    <button
+                      type="button"
+                      className="signout-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        const id = r.profile_id!;
+                        const email = (
+                          document.getElementById(`emp-em-${id}`) as HTMLInputElement | null
+                        )?.value;
+                        void (async () => {
+                          onBusy(true);
+                          onError(null);
+                          try {
+                            const trimmed = (email || '').trim().toLowerCase();
+                            if (!trimmed || !trimmed.includes('@')) {
+                              throw new Error('A valid email is required');
+                            }
+                            await updateProfile(id, { email: trimmed });
+                            onMsg(`Email updated → ${trimmed}`);
+                            await load();
+                          } catch (e) {
+                            onError(e instanceof Error ? e.message : 'Email update failed');
+                          } finally {
+                            onBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Save email
+                    </button>
+                  ) : (
+                    '—'
+                  )}
+                </td>
               </tr>
             ))}
             {!rows.length ? (
               <tr>
-                <td colSpan={10}>{busy ? 'Loading…' : 'No people found'}</td>
+                <td colSpan={11}>{busy ? 'Loading…' : 'No people found'}</td>
               </tr>
             ) : null}
           </tbody>
@@ -344,7 +396,10 @@ export function AdminProfilesPanel({
   return (
     <div className="admin-data-panel">
       <h3>Portal profiles &amp; roles</h3>
-      <p className="pd-muted">Change role / employee binding for signed-in accounts.</p>
+      <p className="pd-muted">
+        Edit email, role, and employee binding for signed-in portal accounts (people with a{' '}
+        <span className="mono">pa_profiles</span> row).
+      </p>
       <div className="admin-data-inline" style={{ marginBottom: 12 }}>
         <label>
           Search
@@ -372,7 +427,16 @@ export function AdminProfilesPanel({
           <tbody>
             {rows.map((r) => (
               <tr key={r.profile_id!}>
-                <td className="mono">{cell(r.email)}</td>
+                <td>
+                  <input
+                    className="admin-data-start-input"
+                    style={{ width: 200 }}
+                    defaultValue={r.email || ''}
+                    id={`em-${r.profile_id}`}
+                    type="email"
+                    placeholder="email@…"
+                  />
+                </td>
                 <td>
                   <input
                     className="admin-data-start-input"
@@ -409,6 +473,9 @@ export function AdminProfilesPanel({
                     disabled={busy}
                     onClick={() => {
                       const id = r.profile_id!;
+                      const email = (
+                        document.getElementById(`em-${id}`) as HTMLInputElement | null
+                      )?.value;
                       const display = (
                         document.getElementById(`dn-${id}`) as HTMLInputElement | null
                       )?.value;
@@ -421,12 +488,17 @@ export function AdminProfilesPanel({
                         onBusy(true);
                         onError(null);
                         try {
+                          const trimmed = (email || '').trim().toLowerCase();
+                          if (!trimmed || !trimmed.includes('@')) {
+                            throw new Error('A valid email is required');
+                          }
                           await updateProfile(id, {
+                            email: trimmed,
                             display_name: display?.trim() || null,
                             employee_name: employee?.trim() || null,
                             role: role || 'employee',
                           });
-                          onMsg(`Updated ${r.email || id}`);
+                          onMsg(`Updated ${trimmed}`);
                           await load();
                         } catch (e) {
                           onError(e instanceof Error ? e.message : 'Update failed');

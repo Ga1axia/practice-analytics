@@ -1,11 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { serviceSupabase } from '../_lib/bqe.js';
 import { requireAdmin } from '../_lib/requireAdmin.js';
-import {
-  hoursCutoffIso,
-  pruneProjectsWithoutRecentHours,
-} from '../_lib/projectHoursFilter.js';
-import { seedSchedulesFromTimeEntries } from '../_lib/seedSchedulesFromTe.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+export const config = { maxDuration: 60 };
 
 /** Whitelist — never accept arbitrary table names from the client. */
 export const ADMIN_TABLES = [
@@ -76,8 +74,7 @@ type Body = {
   profileId?: string;
 };
 
-async function countTable(table: AdminTable): Promise<number> {
-  const sb = serviceSupabase();
+async function countTable(sb: SupabaseClient, table: AdminTable): Promise<number> {
   const { count, error } = await sb.from(table).select('*', { count: 'exact', head: true });
   if (error) throw new Error(`${table}: ${error.message}`);
   return count ?? 0;
@@ -241,6 +238,17 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  try {
+    await handleAdminData(req, res);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Admin API failed';
+    if (!res.headersSent) {
+      res.status(500).json({ error: msg });
+    }
+  }
+}
+
+async function handleAdminData(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -263,20 +271,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sb = serviceSupabase();
 
     if (action === 'tables') {
-      const tables = [];
-      for (const table of ADMIN_TABLES) {
-        try {
-          const count = await countTable(table);
-          tables.push({ table, count, ok: true as const });
-        } catch (e) {
-          tables.push({
-            table,
-            count: 0,
-            ok: false as const,
-            error: e instanceof Error ? e.message : 'count failed',
-          });
-        }
-      }
+      const tables = await Promise.all(
+        ADMIN_TABLES.map(async (table) => {
+          try {
+            const count = await countTable(sb, table);
+            return { table, count, ok: true as const };
+          } catch (e) {
+            return {
+              table,
+              count: 0,
+              ok: false as const,
+              error: e instanceof Error ? e.message : 'count failed',
+            };
+          }
+        }),
+      );
       res.status(200).json({ tables });
       return;
     }
@@ -548,6 +557,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'seed_schedules_from_te') {
+      const { seedSchedulesFromTimeEntries } = await import('../_lib/seedSchedulesFromTe.js');
       const result = await seedSchedulesFromTimeEntries(sb, {
         dryRun: Boolean(body.dryRun),
         forceWipe: Boolean(body.forceWipe),
@@ -557,6 +567,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'prune_projects_without_te') {
+      const { hoursCutoffIso, pruneProjectsWithoutRecentHours } = await import(
+        '../_lib/projectHoursFilter.js'
+      );
       const since = hoursCutoffIso(3);
       const result = await pruneProjectsWithoutRecentHours(sb, since);
       res.status(200).json({ ok: true, since, ...result });
@@ -593,13 +606,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Table not allowed' });
         return;
       }
-      res.status(200).json({ table, count: await countTable(table) });
+      res.status(200).json({ table, count: await countTable(sb, table) });
       return;
     }
 
     if (action === 'management_overview') {
-      const tableCounts: { table: string; count: number }[] = [];
-      for (const table of [
+      const overviewTables: AdminTable[] = [
         'pa_projects',
         'pa_profiles',
         'pa_project_members',
@@ -612,54 +624,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'pa_ar_clients',
         'pa_invoice_ledger',
         'pa_bqe_sync_runs',
-      ] as AdminTable[]) {
-        try {
-          tableCounts.push({ table, count: await countTable(table) });
-        } catch {
-          tableCounts.push({ table, count: -1 });
-        }
-      }
+      ];
+      const [
+        tableCounts,
+        profilesRes,
+        lastSyncRes,
+        schedAssignedRes,
+        projectHeadersRes,
+        activeHeadersRes,
+        connRes,
+      ] = await Promise.all([
+        Promise.all(
+          overviewTables.map(async (table) => {
+            try {
+              return { table, count: await countTable(sb, table) };
+            } catch {
+              return { table, count: -1 };
+            }
+          }),
+        ),
+        sb.from('pa_profiles').select('role'),
+        sb
+          .from('pa_bqe_sync_runs')
+          .select('sync_type, status, completed_at, entries_fetched, entries_inserted')
+          .order('completed_at', { ascending: false })
+          .limit(5),
+        sb.from('pa_schedules').select('*', { count: 'exact', head: true }),
+        sb.from('pa_projects').select('*', { count: 'exact', head: true }).eq('row_kind', 'project'),
+        sb
+          .from('pa_projects')
+          .select('*', { count: 'exact', head: true })
+          .eq('row_kind', 'project')
+          .eq('status', 'ACTIVE'),
+        sb
+          .from('pa_bqe_connection')
+          .select('connected_at, last_sync_at, last_sync_status, last_sync_message, api_endpoint')
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
-      const { data: profiles } = await sb.from('pa_profiles').select('role');
       const roles: Record<string, number> = {};
-      for (const p of profiles || []) {
+      for (const p of profilesRes.data || []) {
         const r = String((p as { role: string }).role || 'unknown');
         roles[r] = (roles[r] || 0) + 1;
       }
 
-      const { data: lastSync } = await sb
-        .from('pa_bqe_sync_runs')
-        .select('sync_type, status, completed_at, entries_fetched, entries_inserted')
-        .order('completed_at', { ascending: false })
-        .limit(5);
-
-      const { count: schedAssigned } = await sb
-        .from('pa_schedules')
-        .select('*', { count: 'exact', head: true });
-      const { count: projectHeaders } = await sb
-        .from('pa_projects')
-        .select('*', { count: 'exact', head: true })
-        .eq('row_kind', 'project');
-      const { count: activeHeaders } = await sb
-        .from('pa_projects')
-        .select('*', { count: 'exact', head: true })
-        .eq('row_kind', 'project')
-        .eq('status', 'ACTIVE');
-
-      const { data: conn } = await sb
-        .from('pa_bqe_connection')
-        .select('connected_at, last_sync_at, last_sync_status, last_sync_message, api_endpoint')
-        .limit(1)
-        .maybeSingle();
-
       res.status(200).json({
         tableCounts,
         roles,
-        lastSyncRuns: lastSync || [],
-        schedulesAssigned: schedAssigned ?? 0,
-        projectHeaders: projectHeaders ?? 0,
-        activeProjectHeaders: activeHeaders ?? 0,
-        bqeConnection: conn || null,
+        lastSyncRuns: lastSyncRes.data || [],
+        schedulesAssigned: schedAssignedRes.count ?? 0,
+        projectHeaders: projectHeadersRes.count ?? 0,
+        activeProjectHeaders: activeHeadersRes.count ?? 0,
+        bqeConnection: connRes.data || null,
       });
       return;
     }
@@ -813,27 +830,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (data.length < 1000) break;
       }
 
-      // Distinct TE names (names only — full hour scan already covered by totals when present)
-      const teNames = new Set<string>();
-      for (let f = 0; ; f += 1000) {
-        const { data, error } = await sb
-          .from('pa_time_entries')
-          .select('employee_name')
-          .range(f, f + 999);
-        if (error) throw new Error(error.message);
-        if (!data?.length) break;
-        for (const r of data) {
-          const n = String(r.employee_name || '').trim();
-          if (n) teNames.add(n);
-        }
-        if (data.length < 1000) break;
-        // Cap TE name discovery to avoid multi-minute scans on huge tables
-        if (f >= 100_000) break;
-      }
-      for (const n of teNames) {
-        const row = ensure(n);
-        if (row) addSource(row, 'time_entries');
-      }
+      // Distinct TE names already live in totals/roster when those tables are filled.
+      // Skip paging 90k+ time-entry rows (that scan times out on Vercel hobby).
 
       const q = String(body.search?.value || '').trim().toLowerCase();
       let rows = [...byNorm.values()].sort((a, b) =>
@@ -859,7 +857,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         summary: {
           people: rows.length,
           with_profile: rows.filter((r) => r.profile_id).length,
-          with_te: rows.filter((r) => r.sources.includes('time_entries')).length,
+          with_te: rows.filter((r) => r.sources.includes('totals')).length,
           with_capacity: rows.filter((r) => r.sources.includes('capacity')).length,
         },
       });

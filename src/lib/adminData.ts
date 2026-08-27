@@ -56,7 +56,12 @@ async function adminData<T>(body: Record<string, unknown>): Promise<T> {
   try {
     json = JSON.parse(text) as T & { error?: string; detail?: string };
   } catch {
-    throw new Error(text.slice(0, 200) || `Request failed (${res.status})`);
+    if (/FUNCTION_INVOCATION_FAILED|FUNCTION_INVOCATION_TIMEOUT/i.test(text)) {
+      throw new Error(
+        'Admin API timed out or crashed on Vercel. Use http://localhost:5173 with npm run dev:api, or retry — overview counts are now lighter.',
+      );
+    }
+    throw new Error(text.replace(/\s+/g, ' ').trim().slice(0, 200) || `Request failed (${res.status})`);
   }
   if (!res.ok) {
     throw new Error([json.error, json.detail].filter(Boolean).join(' ') || `HTTP ${res.status}`);

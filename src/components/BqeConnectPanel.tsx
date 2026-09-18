@@ -31,18 +31,26 @@ function ymd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-/** Last N calendar months as [since, until] inclusive UTC ranges. */
-function lastNMonthWindows(n: number): { since: string; until: string; label: string }[] {
-  const out: { since: string; until: string; label: string }[] = [];
+/** Inclusive UTC day windows covering the last `monthsBack` months. */
+function dayWindows(
+  monthsBack: number,
+  chunkDays: number,
+): { since: string; until: string; label: string }[] {
   const now = new Date();
-  for (let i = n - 1; i >= 0; i -= 1) {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1));
+  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const out: { since: string; until: string; label: string }[] = [];
+  const cur = new Date(start);
+  while (cur.getTime() <= last.getTime()) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + chunkDays - 1);
+    if (chunkEnd.getTime() > last.getTime()) chunkEnd.setTime(last.getTime());
     out.push({
-      since: ymd(start),
-      until: ymd(end),
-      label: `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}`,
+      since: ymd(cur),
+      until: ymd(chunkEnd),
+      label: `${ymd(cur)}–${ymd(chunkEnd)}`,
     });
+    cur.setUTCDate(cur.getUTCDate() + chunkDays);
   }
   return out;
 }
@@ -201,7 +209,7 @@ export function BqeConnectPanel() {
     }
   }
 
-  /** Incremental time, then paged projects. Never dumps the full CORE catalog in one request. */
+  /** Incremental time (local), then paged CORE projects. On Vercel, projects only — Hobby ~10s. */
   async function sync() {
     setBusy(true);
     setMsg(null);
@@ -209,42 +217,51 @@ export function BqeConnectPanel() {
     try {
       const teCount = status?.timeEntryCount ?? 0;
       let teFetched = 0;
-      if (teCount < 1) {
-        const months = lastNMonthWindows(36);
-        for (let i = 0; i < months.length; i += 1) {
-          const m = months[i]!;
-          setMsg(`Step 1 — historical time ${m.label} (${i + 1}/${months.length})…`);
-          const tBody = await postSync<{ fetched?: number }>({
-            mode: 'historical',
-            since: m.since,
-            until: m.until,
+      if (!onVercel) {
+        if (teCount < 1) {
+          const months = dayWindows(36, 30);
+          for (let i = 0; i < months.length; i += 1) {
+            const m = months[i]!;
+            setMsg(`Step 1 — historical time ${m.label} (${i + 1}/${months.length})…`);
+            const tBody = await postSync<{ fetched?: number }>({
+              mode: 'historical',
+              since: m.since,
+              until: m.until,
+            });
+            teFetched += tBody.fetched || 0;
+          }
+        } else {
+          setMsg('Step 1 — incremental time entries…');
+          const tBody = await postSync<{ fetched?: number; message?: string }>({
+            mode: 'incremental',
           });
-          teFetched += tBody.fetched || 0;
+          teFetched = tBody.fetched || 0;
         }
-      } else {
-        setMsg('Step 1 — incremental time entries…');
-        const tBody = await postSync<{ fetched?: number; message?: string }>({
-          mode: 'incremental',
-        });
-        teFetched = tBody.fetched || 0;
       }
 
       let page = 1;
       let totalProjects = 0;
+      let projectWhere: string | undefined;
       for (;;) {
-        setMsg(`Step 2 — projects page ${page}…`);
+        setMsg(`Projects page ${page}…`);
         const pBody = await postSync<{
           hasMore?: boolean;
           insertedProjects?: number;
           message?: string;
+          usedUnfilteredFallback?: boolean;
+          projectWhere?: string;
         }>({
           mode: 'projects',
           page,
           pageSize: 80,
           reset: page === 1,
-          requireRecentHours: true,
+          requireRecentHours: false,
+          ...(projectWhere ? { projectWhere } : {}),
         });
         totalProjects += pBody.insertedProjects || 0;
+        if (pBody.usedUnfilteredFallback || pBody.projectWhere === '*') {
+          projectWhere = '*';
+        }
         if (!pBody.hasMore) break;
         page += 1;
         if (page > 120) break;
@@ -256,7 +273,7 @@ export function BqeConnectPanel() {
       await refreshStatus();
       await reload();
       setMsg(
-        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (library is additive; stale jobs marked inactive).`,
+        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (CORE statuses).`,
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Sync failed');
@@ -271,33 +288,65 @@ export function BqeConnectPanel() {
     setErr(null);
     try {
       if (mode === 'historical' && onVercel) {
-        // 36 months one-by-one so each request stays under Hobby timeout
-        const months = lastNMonthWindows(36);
+        const windows = dayWindows(36, 7);
         let fetched = 0;
         let inserted = 0;
         let updated = 0;
-        for (let i = 0; i < months.length; i += 1) {
-          const m = months[i]!;
-          setMsg(`Historical ${m.label} (${i + 1}/${months.length})…`);
-          const res = await fetch('/api/bqe/sync', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({ mode: 'historical', since: m.since, until: m.until }),
-          });
-          const body = await readApiJson<{
-            message?: string;
-            error?: string;
+        for (let i = 0; i < windows.length; i += 1) {
+          const m = windows[i]!;
+          let page = 1;
+          for (;;) {
+            setMsg(`Historical ${m.label} p${page} (${i + 1}/${windows.length})…`);
+            const body = await postSync<{
+              fetched?: number;
+              inserted?: number;
+              updated?: number;
+              hasMore?: boolean;
+            }>({
+              mode: 'historical',
+              since: m.since,
+              until: m.until,
+              page,
+              pageSize: 80,
+            });
+            fetched += body.fetched || 0;
+            inserted += body.inserted || 0;
+            updated += body.updated || 0;
+            if (!body.hasMore) break;
+            page += 1;
+            if (page > 30) break;
+          }
+        }
+        setMsg(
+          `Historical import done: fetched ${fetched}, inserted ${inserted}, updated ${updated} across ${windows.length} windows.`,
+        );
+      } else if (mode === 'incremental' && onVercel) {
+        let page = 1;
+        let fetched = 0;
+        let inserted = 0;
+        let updated = 0;
+        for (;;) {
+          setMsg(`Incremental time page ${page}…`);
+          const body = await postSync<{
             fetched?: number;
             inserted?: number;
             updated?: number;
-          }>(res);
-          if (!res.ok) throw new Error(body.error || `Failed ${m.label}`);
+            hasMore?: boolean;
+            message?: string;
+          }>({
+            mode: 'incremental',
+            page,
+            pageSize: 80,
+          });
           fetched += body.fetched || 0;
           inserted += body.inserted || 0;
           updated += body.updated || 0;
+          if (!body.hasMore) break;
+          page += 1;
+          if (page > 40) break;
         }
         setMsg(
-          `Historical import done: fetched ${fetched}, inserted ${inserted}, updated ${updated} across ${months.length} months.`,
+          `Incremental time done: fetched ${fetched}, inserted ${inserted}, updated ${updated}.`,
         );
       } else {
         const res = await fetch('/api/bqe/sync', {
@@ -341,8 +390,8 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync runs in small steps (incremental time → new projects) so it cannot
-            hang on the full CORE catalog. Set{' '}
+            Production sync updates projects only (does not re-import 96k time rows). Hobby
+            functions die after ~10s — Incremental time is a separate paged button. Set{' '}
             <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
             to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
           </>

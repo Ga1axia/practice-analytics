@@ -322,7 +322,10 @@ export async function bqeListAll<T>(
 }
 
 /** Fetch parent/root records missing from a filtered CORE page so phases still map. */
-export async function hydrateProjectParents(projects: BqeProject[]): Promise<BqeProject[]> {
+export async function hydrateProjectParents(
+  projects: BqeProject[],
+  maxExtra = 40,
+): Promise<BqeProject[]> {
   const byId = new Map<string, BqeProject>();
   for (const p of projects) {
     if (p?.id) byId.set(p.id, p);
@@ -335,7 +338,8 @@ export async function hydrateProjectParents(projects: BqeProject[]): Promise<Bqe
   }
   if (!missing.size) return projects;
   const extra: BqeProject[] = [];
-  for (const id of missing) {
+  const ids = [...missing].slice(0, Math.max(0, maxExtra));
+  for (const id of ids) {
     try {
       const one = await bqeGet<BqeProject | BqeProject[] | null>(`/project/${id}`);
       const row = Array.isArray(one) ? one[0] : one;
@@ -371,6 +375,9 @@ export function bqeWhereDateTime(d: Date): string {
  */
 export const BQE_PROJECT_LIST_FIELDS =
   'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,address,percentComplete,createdOn';
+
+/** CORE ProjectStatus Active = 0 (docs: /project?where=status=0). Spaces break the filter. */
+export const CORE_PROJECT_WHERE_ACTIVE = 'status=0';
 
 export type BqeProject = {
   id: string;
@@ -484,10 +491,17 @@ export type BqeEmployee = {
   title?: string | null;
 };
 
+/**
+ * CORE ProjectStatus: Active=0, Inactive=1, Completed=2.
+ * Unknown / empty defaults to ACTIVE (CORE's default).
+ */
 export function mapBqeStatus(status: string | number | null | undefined): string {
+  if (status === 0 || status === '0') return 'ACTIVE';
+  if (status === 1 || status === '1') return 'INACTIVE';
+  if (status === 2 || status === '2') return 'COMPLETED';
   const s = String(status ?? '').toLowerCase();
-  if (s.includes('complete') || s === '2') return 'COMPLETED';
-  if (s.includes('inactive') || s.includes('hold') || s === '1') return 'INACTIVE';
+  if (s.includes('complete')) return 'COMPLETED';
+  if (s.includes('inactive') || s.includes('hold')) return 'INACTIVE';
   if (s.includes('cancel')) return 'CANCELED';
   return 'ACTIVE';
 }

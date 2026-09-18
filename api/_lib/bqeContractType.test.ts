@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   contractTypeForPhase,
+  CORE_PROJECT_WHERE_ACTIVE,
   isMixedBillingPhase,
   mapBqeContractType,
+  mapBqeStatus,
 } from './bqe';
 import { mapCoreProjects } from './bqeSyncBuild';
 import type { BqeProject } from './bqe';
@@ -78,5 +80,36 @@ describe('mapCoreProjects billing type', () => {
     const cds = mapped.rows.find((r) => r.phase === 'Construction Documents');
     assert.equal(planning?.type, 'HOURLY');
     assert.equal(cds?.type, 'FIXED');
+  });
+});
+
+describe('mapBqeStatus', () => {
+  it('maps CORE numeric ProjectStatus', () => {
+    assert.equal(mapBqeStatus(0), 'ACTIVE');
+    assert.equal(mapBqeStatus(1), 'INACTIVE');
+    assert.equal(mapBqeStatus(2), 'COMPLETED');
+  });
+
+  it('filters Active with status=0 (no spaces — CORE where parser)', () => {
+    assert.equal(CORE_PROJECT_WHERE_ACTIVE, 'status=0');
+  });
+});
+
+describe('mapCoreProjects status', () => {
+  it('uses each CORE record status, not the parent', () => {
+    const mapped = mapCoreProjects([
+      proj({ id: 'root', name: '26-040 Deming', status: 0 }),
+      proj({
+        id: 'cd',
+        name: '26-040 Deming',
+        parentId: 'root',
+        phaseDescription: 'Construction Documents',
+        status: 2,
+      }),
+    ]);
+    const header = mapped.rows.find((r) => r.row_kind === 'project');
+    const cds = mapped.rows.find((r) => r.phase === 'Construction Documents');
+    assert.equal(header?.status, 'ACTIVE');
+    assert.equal(cds?.status, 'COMPLETED');
   });
 });

@@ -379,7 +379,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
       client: p.client || parent.client || null,
       city,
       manager: p.manager || parent.manager || null,
-      status: mapBqeStatus(p.status ?? parent.status),
+      status: mapBqeStatus(p.status),
       type: contractTypeForPhase(phaseName, p.contractType, parent.contractType),
       phase: phaseName,
       contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,

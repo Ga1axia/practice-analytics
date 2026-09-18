@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   BQE_TIME_ENTRY_PERSIST_FIELDS,
+  bqeGet,
   bqeListAll,
   bqeSinceDate,
   type BqeProject,
@@ -14,6 +15,9 @@ export type TimeEntrySyncRequest = {
   mode: TimeEntrySyncMode;
   since?: string;
   until?: string;
+  /** 1-based CORE page. On Vercel, omitted page defaults to 1 (Hobby ~10s). */
+  page?: number;
+  pageSize?: number;
   initiatedBy?: string | null;
 };
 
@@ -29,6 +33,8 @@ export type TimeEntrySyncResult = {
   skipped: number;
   cursor: string | null;
   lastUpdatedCursor: string | null;
+  hasMore: boolean;
+  page: number | null;
   warnings: string[];
   error: string | null;
 };
@@ -74,6 +80,21 @@ const SENSITIVE_KEYS = new Set([
 
 function ymd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function daysAgoYmd(days: number): string {
+  return ymd(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
+}
+
+function asTimeEntryList(payload: unknown): BqeTimeEntry[] {
+  if (Array.isArray(payload)) return payload as BqeTimeEntry[];
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    for (const key of ['value', 'data', 'items', 'results']) {
+      if (Array.isArray(obj[key])) return obj[key] as BqeTimeEntry[];
+    }
+  }
+  return [];
 }
 
 function parseIsoDate(raw: string | null | undefined): string | null {
@@ -259,6 +280,11 @@ export async function loadIncrementalSince(sb: SupabaseClient): Promise<string> 
     return ymd(new Date(t));
   }
 
+  // Hobby: ordering ~96k time rows can exceed the 10s cap by itself.
+  if (process.env.VERCEL === '1') {
+    return daysAgoYmd(7);
+  }
+
   const { data: maxRow } = await sb
     .from('pa_time_entries')
     .select('bqe_last_updated_at, work_date')
@@ -388,6 +414,8 @@ export async function persistFetchedTimeEntries(
       skipped,
       cursor,
       lastUpdatedCursor: maxUpdated || nowIso,
+      hasMore: false,
+      page: null,
       warnings,
       error: null,
     };
@@ -410,6 +438,8 @@ export async function persistFetchedTimeEntries(
       skipped: 0,
       cursor: null,
       lastUpdatedCursor: null,
+      hasMore: false,
+      page: null,
       warnings,
       error: msg,
     };
@@ -433,12 +463,25 @@ export async function runTimeEntrySync(
     since = req.since || (await loadIncrementalSince(sb));
   }
 
+  const onVercel = process.env.VERCEL === '1';
+  if (onVercel && req.mode === 'incremental') {
+    const floor = daysAgoYmd(7);
+    if (!since || since < floor) {
+      since = floor;
+      warnings.push(`Vercel incremental since capped to ${floor}`);
+    }
+  }
+
   if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
     throw new Error('since must be YYYY-MM-DD');
   }
   if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
     throw new Error('until must be YYYY-MM-DD');
   }
+
+  const pageRequested = Number(req.page) > 0;
+  const page = pageRequested ? Math.floor(Number(req.page)) : onVercel ? 1 : 0;
+  const pageSize = Math.min(Math.max(Number(req.pageSize) || (onVercel ? 80 : 500), 25), 200);
 
   const runId = await startRun(sb, req, since, until);
 
@@ -453,10 +496,22 @@ export async function runTimeEntrySync(
       where = where ? `${where} AND date <= '${until}'` : `date <= '${until}'`;
     }
 
-    const timeEntries = await bqeListAll<BqeTimeEntry>('/timeentry', 1000, {
-      where,
-      fields: BQE_TIME_ENTRY_PERSIST_FIELDS,
-    });
+    let timeEntries: BqeTimeEntry[] = [];
+    let hasMore = false;
+    if (page > 0) {
+      const payload = await bqeGet<unknown>('/timeentry', {
+        where,
+        fields: BQE_TIME_ENTRY_PERSIST_FIELDS,
+        page: `${page},${pageSize}`,
+      });
+      timeEntries = asTimeEntryList(payload);
+      hasMore = timeEntries.length >= pageSize;
+    } else {
+      timeEntries = await bqeListAll<BqeTimeEntry>('/timeentry', 1000, {
+        where,
+        fields: BQE_TIME_ENTRY_PERSIST_FIELDS,
+      });
+    }
 
     const nowIso = new Date().toISOString();
     const rows: TimeEntryRow[] = [];
@@ -518,6 +573,8 @@ export async function runTimeEntrySync(
       skipped,
       cursor,
       lastUpdatedCursor: maxUpdated || nowIso,
+      hasMore,
+      page: page || null,
       warnings,
       error: null,
     };
@@ -543,6 +600,8 @@ export async function runTimeEntrySync(
       skipped: 0,
       cursor: null,
       lastUpdatedCursor: null,
+      hasMore: false,
+      page: page || null,
       warnings,
       error: msg,
     };

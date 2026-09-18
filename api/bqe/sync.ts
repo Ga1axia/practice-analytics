@@ -5,7 +5,7 @@ import {
   bqeGet,
   bqeListAll,
   bqeSinceDate,
-  bqeWhereDateTime,
+  CORE_PROJECT_WHERE_ACTIVE,
   hydrateProjectParents,
   serviceSupabase,
   type BqeEmployee,
@@ -18,16 +18,9 @@ import {
   applyTimeAndInvoices,
   mapCoreProjects,
   mapEmployeesToRoster,
+  type ProjectInsert,
 } from '../_lib/bqeSyncBuild.js';
-import {
-  emptyRecentHoursIndex,
-  hoursCutoffIso,
-  loadExistingProjectKeys,
-  loadRecentHoursIndexFromDb,
-  markProjectsInactiveWithoutRecentHours,
-  mergeBqeTimeEntriesIntoHoursIndex,
-  selectMappedProjectsForLibrary,
-} from '../_lib/projectHoursFilter.js';
+import { loadExistingProjectKeys } from '../_lib/projectHoursFilter.js';
 import {
   persistFetchedTimeEntries,
   runTimeEntrySync,
@@ -50,11 +43,11 @@ type SyncBody = {
   pageSize?: number;
   /** Clear pa_projects before inserting this page (ignored once a library exists). */
   reset?: boolean;
-  /** CORE where clause for /project (e.g. status = 4 for Active). */
+  /** CORE where clause for /project (default: status=0 Active). */
   projectWhere?: string;
   /**
-   * When true (default), the initial library only includes projects with hours
-   * or createdOn in the last 2 years. Later syncs stay additive.
+   * Ignored. Project status comes from CORE (Active=0 / Inactive=1 / Completed=2).
+   * Kept so older clients that still send this flag do not fail.
    */
   requireRecentHours?: boolean;
 };
@@ -79,6 +72,49 @@ async function insertChunks<T extends Record<string, unknown>>(
     inserted += chunk.length;
   }
   return inserted;
+}
+
+/** Keep spent/billed/etc. when refreshing CORE status on existing library rows. */
+async function preserveExistingProjectFinancials(
+  sb: Sb,
+  rows: ProjectInsert[],
+): Promise<ProjectInsert[]> {
+  if (!rows.length) return rows;
+  const prevByKey = new Map<string, ProjectInsert>();
+  for (let i = 0; i < rows.length; i += 200) {
+    const keys = rows.slice(i, i + 200).map((r) => r.project);
+    const { data, error } = await sb
+      .from('pa_projects')
+      .select(
+        'project,spent,billed,pct_used,pct_billed,retainer_paid,retainer_balance,ar,profit,margin,billed_hours,spent_hours,contract_outstanding',
+      )
+      .in('project', keys);
+    if (error) throw new Error(`Load project financials failed: ${error.message}`);
+    for (const row of data || []) {
+      const rec = row as ProjectInsert;
+      if (rec.project) prevByKey.set(rec.project, rec);
+    }
+  }
+  if (!prevByKey.size) return rows;
+  return rows.map((r) => {
+    const prev = prevByKey.get(r.project);
+    if (!prev) return r;
+    return {
+      ...r,
+      spent: prev.spent ?? r.spent,
+      billed: prev.billed ?? r.billed,
+      pct_used: prev.pct_used ?? r.pct_used,
+      pct_billed: prev.pct_billed ?? r.pct_billed,
+      retainer_paid: prev.retainer_paid ?? r.retainer_paid,
+      retainer_balance: prev.retainer_balance ?? r.retainer_balance,
+      ar: prev.ar ?? r.ar,
+      profit: prev.profit ?? r.profit,
+      margin: prev.margin ?? r.margin,
+      billed_hours: prev.billed_hours ?? r.billed_hours,
+      spent_hours: prev.spent_hours ?? r.spent_hours,
+      contract_outstanding: prev.contract_outstanding ?? r.contract_outstanding,
+    };
+  });
 }
 
 async function tryList<T>(
@@ -107,17 +143,6 @@ async function tryList<T>(
     }
     throw e;
   }
-}
-
-function additiveCreatedOnWhere(lastSyncAt: string | null | undefined): string {
-  const overlapMs = 7 * 24 * 60 * 60 * 1000;
-  const from = lastSyncAt
-    ? new Date(new Date(lastSyncAt).getTime() - overlapMs)
-    : new Date(`${hoursCutoffIso()}T00:00:00.000Z`);
-  const iso = Number.isNaN(from.getTime())
-    ? `${hoursCutoffIso()}T00:00:00`
-    : bqeWhereDateTime(from);
-  return `createdOn >= '${iso}'`;
 }
 
 function asProjectList(payload: unknown): BqeProject[] {
@@ -167,6 +192,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mode: mode as TimeEntrySyncMode,
         since: body.since,
         until: body.until,
+        page: body.page,
+        pageSize: body.pageSize,
         initiatedBy: admin.userId,
       });
       const statusCode = result.status === 'failed' ? 500 : 200;
@@ -183,6 +210,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skipped: result.skipped,
         cursor: result.cursor,
         lastUpdatedCursor: result.lastUpdatedCursor,
+        hasMore: result.hasMore,
+        page: result.page,
         warnings: result.warnings,
         error: result.error,
         message:
@@ -202,42 +231,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const pageSize = Math.min(Math.max(Number(body.pageSize) || 100, 25), 200);
         const existingKeys = await loadExistingProjectKeys(sb);
         const libraryExists = existingKeys.size > 0;
-        const projectWhere = (body.projectWhere || '').trim();
+        const rawWhere = (body.projectWhere || '').trim();
         const query: Record<string, string> = {
           fields: BQE_PROJECT_LIST_FIELDS,
         };
-        if (projectWhere) {
-          query.where = projectWhere;
-        } else if (libraryExists) {
-          const { data: conn } = await sb
-            .from('pa_bqe_connection')
-            .select('last_sync_at')
-            .eq('id', 1)
-            .maybeSingle();
-          query.where = additiveCreatedOnWhere(
-            (conn as { last_sync_at?: string | null } | null)?.last_sync_at,
-          );
-          warnings.push(`Additive CORE fetch (${query.where}) — not paging older jobs`);
+        if (rawWhere && rawWhere !== '*') {
+          query.where = rawWhere;
+        } else if (!rawWhere) {
+          query.where = CORE_PROJECT_WHERE_ACTIVE;
         }
+        if (query.where) warnings.push(`CORE project fetch (${query.where})`);
+        else warnings.push('CORE project fetch (all statuses)');
 
         let projects: BqeProject[] = [];
         let hasMore = false;
+        let usedUnfilteredFallback = false;
+        const onVercel = process.env.VERCEL === '1';
         if (page > 0) {
           const payload = await bqeGet<unknown>('/project', {
             ...query,
             page: `${page},${pageSize}`,
           });
           projects = asProjectList(payload);
+          // Hobby-safe: if Active filter returns nothing, page the full catalog once.
+          if (
+            page === 1 &&
+            !rawWhere &&
+            projects.length === 0 &&
+            query.where === CORE_PROJECT_WHERE_ACTIVE
+          ) {
+            delete query.where;
+            usedUnfilteredFallback = true;
+            warnings.push('CORE status=0 returned 0 rows — paging all projects');
+            const retry = await bqeGet<unknown>('/project', {
+              ...query,
+              page: `${page},${pageSize}`,
+            });
+            projects = asProjectList(retry);
+          }
           hasMore = projects.length >= pageSize;
         } else {
           projects = await bqeListAll<BqeProject>('/project', 500, query);
         }
-        if (libraryExists && projects.length) {
-          projects = await hydrateProjectParents(projects);
+        if (projects.length) {
+          projects = await hydrateProjectParents(projects, onVercel ? 6 : 40);
         }
 
         const employees =
-          page <= 1
+          page <= 1 && !onVercel
             ? await tryList(
                 'Employee',
                 () =>
@@ -248,82 +289,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               )
             : [];
 
-        const mappedRaw = mapCoreProjects(projects);
-        if (mappedRaw.excludedCount) {
+        const mapped = mapCoreProjects(projects);
+        if (mapped.excludedCount) {
           warnings.push(
-            `Excluded ${mappedRaw.excludedCount} test / Internal Office rows from this page`,
+            `Excluded ${mapped.excludedCount} test / Internal Office rows from this page`,
           );
-        }
-
-        const requireRecentHours = body.requireRecentHours !== false;
-        const hoursSince = hoursCutoffIso();
-        let mapped = mappedRaw;
-        let hoursFilter: {
-          mode?: 'initial' | 'additive';
-          beforeRoots: number;
-          afterRoots: number;
-          beforeRows: number;
-          afterRows: number;
-          addedRoots?: number;
-        } | null = null;
-
-        if (libraryExists || requireRecentHours) {
-          const index = libraryExists
-            ? emptyRecentHoursIndex()
-            : await loadRecentHoursIndexFromDb(sb, hoursSince);
-          const selected = selectMappedProjectsForLibrary(mappedRaw, {
-            existingKeys,
-            hoursIndex: index,
-            sinceIso: hoursSince,
-            includeExistingLibraryRows: false,
-          });
-          mapped = selected.mapped;
-          hoursFilter = selected;
-          if (selected.mode === 'additive') {
-            warnings.push(
-              `Project library is additive: +${selected.addedRoots} new headers ` +
-                `(${selected.afterRows} rows) — older CORE jobs are not imported`,
-            );
-          } else {
-            warnings.push(
-              `Initial project library (≥${hoursSince}): kept ${selected.afterRoots}/${selected.beforeRoots} headers ` +
-                `(${index.codes.size} codes / ${index.projectIds.size} CORE ids with TE; scanned ${index.teRowsScanned} TE rows)`,
-            );
-          }
         }
 
         if (!libraryExists && (body.reset || page <= 1)) {
           await clearTable(sb, 'pa_projects');
         }
-        if (page <= 1) await clearTable(sb, 'pa_employee_roster');
+        if (page <= 1 && employees.length) await clearTable(sb, 'pa_employee_roster');
 
         let insertedProjects = 0;
         if (mapped.rows.length) {
+          const rows = await preserveExistingProjectFinancials(sb, mapped.rows);
           const { error: upErr } = await sb
             .from('pa_projects')
-            .upsert(mapped.rows as unknown as Record<string, unknown>[], {
+            .upsert(rows as unknown as Record<string, unknown>[], {
               onConflict: 'project',
             });
           if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
-          insertedProjects = mapped.rows.length;
+          insertedProjects = rows.length;
         }
         if (employees.length) {
           const roster = mapEmployeesToRoster(employees);
           await insertChunks(sb, 'pa_employee_roster', roster);
         }
 
-        let inactive: Awaited<ReturnType<typeof markProjectsInactiveWithoutRecentHours>> | null =
-          null;
-        if (page <= 0 || !hasMore) {
-          inactive = await markProjectsInactiveWithoutRecentHours(sb, hoursSince);
-          warnings.push(
-            `Inactive (no hours since ${hoursSince}): marked ${inactive.markedInactive}, restored ${inactive.restoredActive} (${inactive.staleHeaders} stale headers)`,
-          );
-        }
-
         const msg =
           page > 0
-            ? `Projects page ${page}: +${insertedProjects} rows` +
+            ? `Projects page ${page}: CORE ${projects.length} → +${insertedProjects} rows` +
               (hasMore ? ' (more…)' : ' (done)')
             : `Projects sync: ${projects.length} CORE → ${insertedProjects} rows`;
 
@@ -346,10 +342,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           coreProjects: projects.length,
           insertedProjects,
           employees: employees.length,
-          hoursSince,
-          hoursFilter,
           libraryExists,
-          inactive,
+          usedUnfilteredFallback,
+          projectWhere: query.where || '*',
           warnings,
           message: msg,
         });
@@ -378,22 +373,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const libraryExists = existingKeys.size > 0;
       const projectQuery: Record<string, string> = {
         fields: BQE_PROJECT_LIST_FIELDS,
+        where: CORE_PROJECT_WHERE_ACTIVE,
       };
-      if (libraryExists) {
-        const { data: conn } = await sb
-          .from('pa_bqe_connection')
-          .select('last_sync_at')
-          .eq('id', 1)
-          .maybeSingle();
-        projectQuery.where = additiveCreatedOnWhere(
-          (conn as { last_sync_at?: string | null } | null)?.last_sync_at,
-        );
-        warnings.push(`Additive CORE fetch (${projectQuery.where})`);
-      }
+      warnings.push(`CORE project fetch (${projectQuery.where})`);
 
       // Sequential on purpose — CORE rate limit is ~100 calls/min
       let projects = await bqeListAll<BqeProject>('/project', 500, projectQuery);
-      if (libraryExists && projects.length) {
+      if (projects.length) {
         projects = await hydrateProjectParents(projects);
       }
 
@@ -445,42 +431,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         warnings,
       );
 
-      const mappedRaw = mapCoreProjects(projects);
-      const requireRecentHours = body.requireRecentHours !== false;
-      const hoursSince = hoursCutoffIso();
-      const hoursIndex = libraryExists
-        ? emptyRecentHoursIndex()
-        : await loadRecentHoursIndexFromDb(sb, hoursSince);
-      mergeBqeTimeEntriesIntoHoursIndex(hoursIndex, timeEntries, hoursSince);
-
-      let mapped = mappedRaw;
-      let hoursFilter: {
-        mode?: 'initial' | 'additive';
-        beforeRoots: number;
-        afterRoots: number;
-        beforeRows: number;
-        afterRows: number;
-        addedRoots?: number;
-      } | null = null;
-      if (libraryExists || requireRecentHours) {
-        const selected = selectMappedProjectsForLibrary(mappedRaw, {
-          existingKeys,
-          hoursIndex,
-          sinceIso: hoursSince,
-          includeExistingLibraryRows: true,
-        });
-        mapped = selected.mapped;
-        hoursFilter = selected;
-        if (selected.mode === 'additive') {
-          warnings.push(
-            `Project library is additive: updating ${selected.afterRoots} headers, +${selected.addedRoots} new — older CORE jobs are not imported`,
-          );
-        } else {
-          warnings.push(
-            `Initial project library (≥${hoursSince}): kept ${selected.afterRoots}/${selected.beforeRoots} project headers`,
-          );
-        }
-      }
+      const mapped = mapCoreProjects(projects);
 
       const built = applyTimeAndInvoices(
         mapped,
@@ -489,7 +440,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expenseEntries,
       );
       const roster = mapEmployeesToRoster(employees);
-      if (mappedRaw.excludedCount) {
+      if (mapped.excludedCount) {
         warnings.push(
           `Excluded ${mappedRaw.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
         );
@@ -544,11 +495,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await insertChunks(sb, 'pa_monthly_revenue', built.monthlyRevenue);
       }
 
-      const inactive = await markProjectsInactiveWithoutRecentHours(sb, hoursSince);
-      warnings.push(
-        `Inactive (no hours since ${hoursSince}): marked ${inactive.markedInactive}, restored ${inactive.restoredActive} (${inactive.staleHeaders} stale headers)`,
-      );
-
       // Persist TE only when asked — default OFF on Vercel to stay under timeout
       let timeEntryPersist: Awaited<ReturnType<typeof persistFetchedTimeEntries>> | null = null;
       const shouldPersistTe =
@@ -594,10 +540,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mode: 'aggregates',
         since,
         lookbackMonths: lookback,
-        hoursSince,
-        hoursFilter,
         libraryExists,
-        inactive,
         coreProjects: projects.length,
         timeEntries: built.stats.timeEntries,
         invoices: built.stats.invoices,

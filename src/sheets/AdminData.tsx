@@ -711,9 +711,9 @@ export function AdminData() {
 
           <h3 style={{ marginTop: 28 }}>Mark stale projects inactive</h3>
           <p className="pd-muted">
-            Set Project List status to <span className="mono">INACTIVE</span> when a job has no
-            hours in the last 2 years (including never logged). Completed/canceled stay as-is.
-            Rows stay in the library. CORE sync does this automatically.
+            Optional overlay: set Project List status to <span className="mono">INACTIVE</span> when
+            a job has no hours in the last 2 years (including never logged). Completed/canceled stay
+            as-is. CORE sync writes CORE statuses directly and does not run this automatically.
           </p>
           <div className="admin-data-actions">
             <button

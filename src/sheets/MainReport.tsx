@@ -36,6 +36,7 @@ import {
   type AiMetricFilters,
   type ChatViewAction,
 } from '../lib/chatViewAction';
+import { compareEmployeeName } from '../lib/employeeRoster';
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
 import { timeEntryMatchesProject } from '../lib/projectHoursMatch';
 import { rowOutstanding, sumAmountReceivable } from '../lib/receivable';
@@ -365,7 +366,7 @@ export function MainReport({
 
   const managerOptions = useMemo(() => {
     if (Object.keys(data.employee_roster).length) {
-      return Object.values(data.employee_roster).flat().sort();
+      return Object.values(data.employee_roster).flat().sort(compareEmployeeName);
     }
     return data.managers;
   }, [data]);
@@ -650,8 +651,9 @@ export function MainReport({
     () => buildEfficiencyAnalysis(data.company_monthly),
     [data.company_monthly],
   );
+  const efficiencyScope = focus ? 'project' : 'firm';
   const efficiencyAnalysis = useMemo(() => {
-    if (!liveEfficiencyRows?.length) return snapshotEfficiency;
+    if (!liveEfficiencyRows?.length) return efficiencyScope === 'project' ? null : snapshotEfficiency;
     let rows = liveEfficiencyRows;
     if (focus) {
       const proj = filteredProjects.find((p) => p.key === focus.projectKey);
@@ -675,8 +677,12 @@ export function MainReport({
         }
       }
     }
-    return buildEfficiencyAnalysis(companyMonthlyFromTimeEntries(rows)) ?? snapshotEfficiency;
-  }, [liveEfficiencyRows, snapshotEfficiency, focus, filteredProjects]);
+    const live = buildEfficiencyAnalysis(
+      companyMonthlyFromTimeEntries(rows, { scope: efficiencyScope }),
+    );
+    if (efficiencyScope === 'project') return live;
+    return live ?? snapshotEfficiency;
+  }, [liveEfficiencyRows, snapshotEfficiency, focus, filteredProjects, efficiencyScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1214,6 +1220,7 @@ export function MainReport({
                   {efficiencyAnalysis ? (
                     <BillNbEfficiencyChart
                       key={focusLabel || 'firm'}
+                      scope={efficiencyScope}
                       analysis={efficiencyAnalysis}
                     />
                   ) : (

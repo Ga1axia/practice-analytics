@@ -446,6 +446,58 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
   };
 }
 
+/** CORE project/phase ids that belong to an Active project header in the library. */
+export function activeCoreProjectIds(mapped: MappedProjects): Set<string> {
+  const activeHeaders = new Set(
+    mapped.rows
+      .filter((r) => r.row_kind === 'project' && r.status === 'ACTIVE')
+      .map((r) => r.project),
+  );
+  const ids = new Set<string>();
+  for (const [coreId, key] of mapped.idToKey) {
+    const row = mapped.rows.find((r) => r.project === key);
+    if (!row) continue;
+    if (row.row_kind === 'project' && activeHeaders.has(key)) ids.add(coreId);
+    if (
+      row.row_kind === 'phase' &&
+      row.parent_project &&
+      activeHeaders.has(row.parent_project)
+    ) {
+      ids.add(coreId);
+    }
+  }
+  return ids;
+}
+
+function invoiceDetailProjectIds(d: {
+  projectId?: string | null;
+  rootProjectId?: string | null;
+}): string[] {
+  const out: string[] = [];
+  if (d.projectId) out.push(d.projectId);
+  if (d.rootProjectId && d.rootProjectId !== d.projectId) out.push(d.rootProjectId);
+  return out;
+}
+
+/** Keep invoices that touch at least one active project (any invoice date). */
+export function filterInvoicesForActiveProjects(
+  invoices: BqeInvoice[],
+  mapped: MappedProjects,
+): BqeInvoice[] {
+  const activeIds = activeCoreProjectIds(mapped);
+  if (!activeIds.size) return [];
+
+  return invoices.filter((inv) => {
+    if (inv.isVoid || inv.isDraft) return false;
+    const details = Array.isArray(inv.invoiceDetails) ? inv.invoiceDetails : [];
+    const usable = details.filter((d) => d.projectId || d.rootProjectId || d.client);
+    if (!usable.length) return false;
+    return usable.some((d) =>
+      invoiceDetailProjectIds(d).some((pid) => activeIds.has(pid)),
+    );
+  });
+}
+
 function resolveProjectKey(
   projectId: string | null | undefined,
   idToKey: Map<string, string>,
@@ -874,5 +926,10 @@ export function mapEmployeesToRoster(employees: BqeEmployee[]): RosterInsert[] {
     seen.add(k);
     out.push({ team, employee: name });
   }
+  out.sort((a, b) => {
+    const t = a.team.localeCompare(b.team, undefined, { sensitivity: 'base' });
+    if (t !== 0) return t;
+    return a.employee.localeCompare(b.employee, undefined, { sensitivity: 'base' });
+  });
   return out;
 }

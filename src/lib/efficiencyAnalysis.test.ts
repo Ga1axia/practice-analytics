@@ -76,6 +76,52 @@ describe('companyMonthlyFromTimeEntries', () => {
     assert.equal(jul.standard_hours, jul.capacity_hours! - 4);
   });
 
+  it('uses hours worked as std hours for a project, not firm capacity', () => {
+    const rows: EfficiencyTimeRow[] = ['Ada', 'Ben', 'Cam', 'Dee'].map((name, i) =>
+      row({
+        work_date: '2026-08-03',
+        actual_hours: i === 0 ? 37.5 : 20,
+        is_billable: true,
+        employee_name: name,
+        project_name: '25 Jordan Avenue - 26-029',
+      }),
+    );
+    const firm = companyMonthlyFromTimeEntries(rows);
+    const project = companyMonthlyFromTimeEntries(rows, { scope: 'project' });
+    const weekdays = networkDaysInMonth('2026-08');
+    assert.equal(firm[0]!.bill_hours, 97.5);
+    assert.equal(firm[0]!.standard_hours, weekdays * 8 * 4);
+    assert.equal(project[0]!.bill_hours, 97.5);
+    assert.equal(project[0]!.standard_hours, 97.5);
+    const analysis = buildEfficiencyAnalysis(project, new Date(2026, 8, 18));
+    assert.ok(analysis);
+    assert.equal(analysis!.efficiency, 1);
+  });
+
+  it('drops PTO from a project rollup', () => {
+    const monthly = companyMonthlyFromTimeEntries(
+      [
+        row({
+          work_date: '2026-08-03',
+          actual_hours: 8,
+          is_billable: true,
+          project_name: '26-029',
+        }),
+        row({
+          work_date: '2026-08-04',
+          actual_hours: 8,
+          project_name: '26-029',
+          activity: 'PTO',
+        }),
+      ],
+      { scope: 'project' },
+    );
+    assert.equal(monthly[0]!.bill_hours, 8);
+    assert.equal(monthly[0]!.nb_hours, 0);
+    assert.equal(monthly[0]!.pto_sick_hours, 0);
+    assert.equal(monthly[0]!.standard_hours, 8);
+  });
+
   it('treats written-off and extra hours as non-billable', () => {
     const monthly = companyMonthlyFromTimeEntries([
       row({ work_date: '2026-07-02', actual_hours: 8, is_billable: true, is_written_off: true }),

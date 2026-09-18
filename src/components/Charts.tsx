@@ -330,7 +330,9 @@ const EFF_PROBONO = '#C5A47E';
 /** Bill / NB / Probono efficiency donut with side stats (firm monthly). */
 export function BillNbEfficiencyChart({
   analysis,
+  scope = 'firm',
 }: {
+  scope?: 'firm' | 'project';
   analysis: {
     monthLabel: string;
     billHours: number;
@@ -364,20 +366,21 @@ export function BillNbEfficiencyChart({
   const leftStats = [
     { v: analysis.breakdown.clientNb, k: 'Client Hrs NB' },
     { v: analysis.breakdown.mbd, k: 'MBD' },
-    { v: analysis.breakdown.ptoSick, k: 'PTO | Sick' },
     { v: analysis.breakdown.others, k: 'Others' },
   ];
   const rightStats = [
     { v: analysis.billHours, k: 'Bill Hrs' },
     { v: analysis.nbHours, k: 'NB Hrs' },
     { v: analysis.hoursWorked, k: 'Hrs Worked' },
-    { v: analysis.stdHours, k: 'Std Hrs' },
+    ...(scope === 'firm' ? [{ v: analysis.stdHours, k: 'Std Hrs' }] : []),
   ];
 
   return (
     <div className="eff-analysis">
       <div className="eff-analysis-title mono">
-        Bill, NB Efficiency Analysis (Std Hrs){' '}
+        {scope === 'firm'
+          ? 'Bill, NB Efficiency Analysis (Std Hrs)'
+          : 'Bill, NB Efficiency Analysis'}{' '}
         <span className="eff-analysis-period">| {analysis.monthLabel}</span>
       </div>
       <div className="eff-analysis-body">

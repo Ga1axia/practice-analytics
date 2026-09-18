@@ -12,6 +12,7 @@ import type {
   ProjectRow,
   TopClient,
 } from './types';
+import { buildEmployeeRoster, type RosterRow } from './employeeRoster';
 import { rowOutstanding, sumAmountReceivable } from './receivable';
 import { supabase } from './supabase';
 
@@ -29,7 +30,6 @@ async function fetchAll<T>(table: string, pageSize = 1000): Promise<T[]> {
   return out;
 }
 
-type RosterRow = { team: string; employee: string };
 type PmbRow = { project: string; month: string; amount: number };
 type CmbRow = { client: string; month: string; amount: number };
 type InvDb = {
@@ -158,11 +158,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     fetchAll<CmbRow>('pa_client_monthly_billed'),
   ]);
 
-  const employee_roster: Record<string, string[]> = {};
-  roster.forEach((r) => {
-    if (!employee_roster[r.team]) employee_roster[r.team] = [];
-    employee_roster[r.team].push(r.employee);
-  });
+  const employee_roster = buildEmployeeRoster(roster, empTotals, empMonthly);
 
   const invoice_ledger: InvoiceRow[] = invoices.map((r) => ({
     c: r.client || '',

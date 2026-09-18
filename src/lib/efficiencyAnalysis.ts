@@ -25,6 +25,9 @@ export type EfficiencyAnalysis = {
   breakdown: NbBreakdown;
 };
 
+/** Firm uses calendar capacity as Std Hrs; a project uses hours on that job. */
+export type EfficiencyScope = 'firm' | 'project';
+
 /** Minimal time-entry shape for firm Bill/NB rollups. */
 export type EfficiencyTimeRow = {
   work_date: string;
@@ -187,7 +190,10 @@ function emptyMonth(): MonthAgg {
 }
 
 /** Roll raw time entries into the same firm-monthly shape the chart reads. */
-export function companyMonthlyFromTimeEntries(rows: EfficiencyTimeRow[]): CompanyMonthly[] {
+export function companyMonthlyFromTimeEntries(
+  rows: EfficiencyTimeRow[],
+  opts?: { scope?: EfficiencyScope },
+): CompanyMonthly[] {
   const map = new Map<string, MonthAgg>();
   for (const te of rows) {
     const hours = Number(te.actual_hours) || 0;
@@ -195,17 +201,19 @@ export function companyMonthlyFromTimeEntries(rows: EfficiencyTimeRow[]): Compan
     const month = String(te.work_date || '').slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) continue;
 
+    const billable = !!te.is_billable && !te.is_written_off && !te.is_extra;
+    const label = `${te.parent_project_name || ''} ${te.project_name || ''}`;
+    const bucket = billable ? null : classifyNbHours(label, te.activity);
+    if (opts?.scope === 'project' && bucket === 'ptoSick') continue;
+
     const cur = map.get(month) || emptyMonth();
     const emp = (te.employee_name || '').trim();
     if (emp) cur.employees.add(emp);
 
-    const billable = !!te.is_billable && !te.is_written_off && !te.is_extra;
     if (billable) {
       cur.bill += hours;
     } else {
       cur.nb += hours;
-      const label = `${te.parent_project_name || ''} ${te.project_name || ''}`;
-      const bucket = classifyNbHours(label, te.activity);
       if (bucket === 'clientNb') cur.clientNb += hours;
       else if (bucket === 'mbd') cur.mbd += hours;
       else if (bucket === 'ptoSick') cur.ptoSick += hours;
@@ -221,9 +229,14 @@ export function companyMonthlyFromTimeEntries(rows: EfficiencyTimeRow[]): Compan
       const networkDays = networkDaysInMonth(month);
       const empCount = v.employees.size || 1;
       const capacity_hours = networkDays * 8 * empCount;
-      const standard_hours = Math.max(0, capacity_hours - v.ptoSick);
       const bill_hours = v.bill;
       const nb_hours = v.nb;
+      const hoursWorked = Math.max(0, bill_hours + nb_hours - v.ptoSick);
+      // Firm Std Hrs = month capacity minus PTO. A single project cannot use
+      // that denominator — people split their month across jobs — so Std Hrs
+      // is hours actually worked on the filtered entries.
+      const standard_hours =
+        opts?.scope === 'project' ? hoursWorked : Math.max(0, capacity_hours - v.ptoSick);
       return {
         month,
         bill_hours,

@@ -16,6 +16,7 @@ import {
 } from '../_lib/bqe.js';
 import {
   applyTimeAndInvoices,
+  filterInvoicesForActiveProjects,
   mapCoreProjects,
   mapEmployeesToRoster,
   type ProjectInsert,
@@ -34,7 +35,7 @@ type SyncBody = {
   mode?: 'historical' | 'incremental' | 'dry_run' | 'aggregates' | 'projects';
   since?: string;
   until?: string;
-  /** Months of time/expense/invoice lookback for aggregates (default 36; use 1–3 on Vercel). */
+  /** Months of time/expense lookback for aggregates (default 2; invoices are all dates on active projects). */
   lookbackMonths?: number;
   /** When running aggregates, also persist raw time entries (incremental). */
   includeTimeEntries?: boolean;
@@ -168,7 +169,7 @@ export const config = { maxDuration: 300 };
 /**
  * BQE CORE sync.
  * - mode=projects: projects + employee roster only (Vercel-safe, ~seconds).
- * - mode omitted / aggregates: analytics replace (pass lookbackMonths:1–3 on Hobby).
+ * - mode omitted / aggregates: analytics replace (time/expense lookback; invoices all dates on active projects).
  * - mode=historical|incremental|dry_run: persist (or count) raw time entries;
  *   pass since+until (YYYY-MM-DD) to keep each call under serverless limits.
  * - includeTimeEntries on aggregates: also persist fetched TE rows.
@@ -403,23 +404,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         warnings,
       );
 
-      let invoices = await tryList(
-        'Invoice',
-        () =>
-          bqeListAll<BqeInvoice>('/invoice', 100, {
-            where: whereDate,
-            expand: 'invoiceDetails',
-          }),
-        warnings,
-      );
-      if (!invoices.length && !warnings.some((w) => w.startsWith('Invoice'))) {
-        invoices = await tryList(
-          'Invoice',
-          () => bqeListAll<BqeInvoice>('/invoice', 500, { where: whereDate }),
-          warnings,
-        );
-      }
-
       const employees = await tryList(
         'Employee',
         () =>
@@ -431,6 +415,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const mapped = mapCoreProjects(projects);
 
+      let invoicesFetched = await tryList(
+        'Invoice',
+        () =>
+          bqeListAll<BqeInvoice>('/invoice', 100, {
+            expand: 'invoiceDetails',
+          }),
+        warnings,
+      );
+      if (!invoicesFetched.length && !warnings.some((w) => w.startsWith('Invoice'))) {
+        invoicesFetched = await tryList(
+          'Invoice',
+          () => bqeListAll<BqeInvoice>('/invoice', 500, {}),
+          warnings,
+        );
+      }
+      const invoices = filterInvoicesForActiveProjects(invoicesFetched, mapped);
+      if (invoicesFetched.length) {
+        warnings.push(
+          `Invoices: ${invoices.length} on active projects (paged ${invoicesFetched.length} from CORE, all dates)`,
+        );
+      }
+
       const built = applyTimeAndInvoices(
         mapped,
         timeEntries,
@@ -440,7 +446,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const roster = mapEmployeesToRoster(employees);
       if (mapped.excludedCount) {
         warnings.push(
-          `Excluded ${mappedRaw.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
+          `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
         );
       }
 

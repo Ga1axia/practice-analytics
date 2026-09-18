@@ -40,6 +40,17 @@ export function isProjectCodeRow(name: string): boolean {
   return PROJECT_CODE_RE.test(name);
 }
 
+/** Firm job code anywhere in the label, e.g. 26-005 in "Name - 26-005". */
+export function extractJobCode(name: string | null | undefined): string | null {
+  const m = (name || '').match(/\b(\d{2}-\d{3})\b/);
+  return m ? m[1] : null;
+}
+
+/** Project List / library rows must belong to a header with a ##-### code (e.g. 26-005). */
+export function hasValidJobCode(name: string | null | undefined): boolean {
+  return extractJobCode(name) != null;
+}
+
 export { extractPhaseLabel } from './phaseAbbrev';
 
 function findSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {

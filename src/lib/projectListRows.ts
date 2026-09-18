@@ -1,5 +1,5 @@
 import { phaseDisplayName } from './phaseAbbrev';
-import { isProjectCodeRow } from './parseProjectList';
+import { extractJobCode, hasValidJobCode, isProjectCodeRow } from './parseProjectList';
 import { deterministicTextMatch } from './textSearch';
 import type { ProjectRow } from './types';
 
@@ -50,8 +50,17 @@ export function inferPlistRowKind(row: ProjectRow): PlistRowKind {
 }
 
 function projectCode(name: string): string | null {
-  const m = name.match(/\b(\d{2}-\d{3})\b/);
-  return m ? m[1] : null;
+  return extractJobCode(name);
+}
+
+/**
+ * Project List visibility: project headers need a job code; phases only show under a coded parent.
+ */
+export function isPlistJobCodedRow(row: ProjectRow): boolean {
+  const kind = inferPlistRowKind(row);
+  if (kind === 'project') return hasValidJobCode(row.project);
+  const parent = (row.parent_project || '').trim();
+  return !!parent && hasValidJobCode(parent);
 }
 
 function projectTitle(name: string): string {
@@ -65,7 +74,9 @@ export function buildPlistTableRows(projects: ProjectRow[]): PlistTableRow[] {
     return (a.project || '').localeCompare(b.project || '', undefined, { sensitivity: 'base' });
   });
 
-  return sorted.map((row) => {
+  const coded = sorted.filter(isPlistJobCodedRow);
+
+  return coded.map((row) => {
     const kind = inferPlistRowKind(row);
     const client = (row.client || 'Unassigned').trim() || 'Unassigned';
     const code = projectCode(row.project);

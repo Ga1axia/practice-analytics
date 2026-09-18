@@ -7,6 +7,7 @@ import {
 import { KpiRow } from '../components/KpiRow';
 import { QAPanel } from '../components/QAPanel';
 import { fmtPct } from '../lib/format';
+import { compareEmployeeName, compareTeamName } from '../lib/employeeRoster';
 import type { CompanyMonthly, DashboardData, EmpMonthly } from '../lib/types';
 
 type Bucket = {
@@ -183,7 +184,17 @@ export function WorkloadPerformance({
   const isIndividual = !!effectiveEmp && !effectiveEmp.startsWith('TEAM:');
 
   const filterText = empSearch.toLowerCase();
-  let empCount = 0;
+
+  const rosterEntries = useMemo(
+    () =>
+      Object.entries(data.employee_roster).sort(([a], [b]) => compareTeamName(a, b)),
+    [data.employee_roster],
+  );
+
+  const rosterPeopleCount = useMemo(
+    () => rosterEntries.reduce((n, [, names]) => n + names.length, 0),
+    [rosterEntries],
+  );
 
   return (
     <section className="sheet active">
@@ -200,7 +211,7 @@ export function WorkloadPerformance({
             }}
           >
             <option value="">Employee: Whole Firm</option>
-            {Object.entries(data.employee_roster).map(([team, names]) => (
+            {rosterEntries.map(([team, names]) => (
               <optgroup key={team} label={team}>
                 <option value={'TEAM:' + team}>All {team} (aggregate)</option>
                 {names.map((n) => (
@@ -256,7 +267,8 @@ export function WorkloadPerformance({
         {!lockedEmployee ? (
         <div className="panel" style={{ marginBottom: 0 }}>
           <h3>
-            Employees <span className="tag">{/* count filled below */}</span>
+            Employees{' '}
+            <span className="tag">Time loggers · A–Z · {rosterPeopleCount}</span>
           </h3>
           <input
             type="text"
@@ -283,10 +295,10 @@ export function WorkloadPerformance({
               <span className="name">— Whole Firm —</span>
               <span className="eff" />
             </div>
-            {Object.entries(data.employee_roster).map(([team, names]) => {
+            {rosterEntries.map(([team, names]) => {
               const visible = names.filter((n) => n.toLowerCase().includes(filterText));
               if (visible.length === 0 && !team.toLowerCase().includes(filterText)) return null;
-              const namesToShow = visible.length > 0 ? visible : names;
+              const namesToShow = (visible.length > 0 ? visible : names).slice().sort(compareEmployeeName);
               const tt = teamTotals(team);
               return (
                 <div key={team}>
@@ -302,7 +314,6 @@ export function WorkloadPerformance({
                     <span className="eff">{fmtPct(tt.efficiency)}</span>
                   </div>
                   {namesToShow.map((n) => {
-                    empCount++;
                     const t = totalsByName[n];
                     return (
                       <div
@@ -323,7 +334,9 @@ export function WorkloadPerformance({
               );
             })}
           </div>
-          <p style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>{empCount} people</p>
+          <p style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>
+            {rosterPeopleCount} people logging time
+          </p>
         </div>
         ) : null}
 

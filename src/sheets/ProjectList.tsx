@@ -234,6 +234,7 @@ export function ProjectList({
         <h3>
           Project list
           <span className="tag">
+            Job code ##-### on project header ·{' '}
             <span className="plist-kind-icon plist-kind-project" title="Project header">
               ▣
             </span>{' '}

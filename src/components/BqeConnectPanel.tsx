@@ -68,7 +68,7 @@ async function authHeaders(): Promise<HeadersInit> {
 }
 
 /** Parse JSON when possible; surface plain-text server crashes (e.g. Vercel). */
-async function readApiJson<T extends { error?: string; detail?: string }>(res: Response): Promise<T> {
+async function readApiJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) {
     throw new Error(res.ok ? 'Empty response from API' : `Request failed (${res.status})`);
@@ -94,10 +94,10 @@ async function readApiJson<T extends { error?: string; detail?: string }>(res: R
   }
 }
 
-async function postSync<T extends { error?: string; detail?: string; message?: string }>(
+async function postSync<T>(
   body: Record<string, unknown>,
   timeoutMs = 180_000,
-): Promise<T> {
+): Promise<T & { error?: string; detail?: string; message?: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -107,7 +107,7 @@ async function postSync<T extends { error?: string; detail?: string; message?: s
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
-    const parsed = await readApiJson<T>(res);
+    const parsed = await readApiJson<T & { error?: string; detail?: string; message?: string }>(res);
     if (!res.ok) throw new Error(apiErrorMessage(parsed, 'Sync step failed'));
     return parsed;
   } catch (e) {

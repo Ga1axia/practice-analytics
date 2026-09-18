@@ -1,5 +1,7 @@
 import {
   contractTypeForPhase,
+  coreProjectParentId,
+  coreProjectParentLabel,
   isCoreBilledStatus,
   mapBqeContractType,
   mapBqeStatus,
@@ -298,8 +300,13 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
   const idToCreatedOn = new Map<string, string | null>();
   const excludedIds = new Set<string>();
 
-  const roots = projects.filter((p) => !p.parentId || !byId.has(p.parentId));
-  const phases = projects.filter((p) => p.parentId && byId.has(p.parentId));
+  const roots: BqeProject[] = [];
+  const phases: BqeProject[] = [];
+  for (const p of projects) {
+    const pid = coreProjectParentId(p);
+    if (pid && pid !== p.id) phases.push(p);
+    else roots.push(p);
+  }
 
   for (const p of roots) {
     if (isExcludedSyncProject(p)) excludedIds.add(p.id);
@@ -310,7 +317,8 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     changed = false;
     for (const p of phases) {
       if (excludedIds.has(p.id)) continue;
-      const parentExcluded = !!(p.parentId && excludedIds.has(p.parentId));
+      const pid = coreProjectParentId(p);
+      const parentExcluded = !!(pid && excludedIds.has(pid));
       if (parentExcluded || isExcludedSyncProject(p)) {
         excludedIds.add(p.id);
         changed = true;
@@ -334,7 +342,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
       client: p.client || null,
       city,
       manager: p.manager || null,
-      status: mapBqeStatus(p.status),
+      status: mapBqeStatus(p.status, p.completedOn),
       type: mapBqeContractType(p.contractType),
       phase: 'Other',
       contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,
@@ -356,31 +364,27 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     });
   }
 
-  for (const p of phases) {
-    if (excludedIds.has(p.id)) continue;
-    const parent = byId.get(p.parentId!)!;
-    if (excludedIds.has(parent.id)) continue;
-    const parentKey = idToKey.get(parent.id);
-    if (!parentKey) continue;
+  const emitPhase = (p: BqeProject, parentKey: string, parent: BqeProject | undefined) => {
     const phaseName = (p.phaseDescription || p.phaseName || displayOf(p)).trim() || 'Phase';
     const base = `${parentKey} - ${phaseName}`;
     const key = allocateUnique(base, p.id, used);
+    const pid = coreProjectParentId(p);
     idToKey.set(p.id, key);
-    idToParentId.set(p.id, parent.id);
-    idToCreatedOn.set(p.id, coreCreatedOnDay(p.createdOn) || coreCreatedOnDay(parent.createdOn));
+    idToParentId.set(p.id, pid);
+    idToCreatedOn.set(p.id, coreCreatedOnDay(p.createdOn) || coreCreatedOnDay(parent?.createdOn));
     const city =
       Array.isArray(p.address) && p.address[0]?.city
         ? String(p.address[0].city)
-        : Array.isArray(parent.address) && parent.address[0]?.city
+        : parent?.address?.[0]?.city
           ? String(parent.address[0].city)
           : null;
     rows.push({
       project: key,
-      client: p.client || parent.client || null,
+      client: p.client || parent?.client || null,
       city,
-      manager: p.manager || parent.manager || null,
-      status: mapBqeStatus(p.status),
-      type: contractTypeForPhase(phaseName, p.contractType, parent.contractType),
+      manager: p.manager || parent?.manager || null,
+      status: mapBqeStatus(p.status, p.completedOn),
+      type: contractTypeForPhase(p.contractType, parent?.contractType),
       phase: phaseName,
       contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,
       spent: 0,
@@ -399,6 +403,37 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
       contract_outstanding: 0,
       sort_order: sort++,
     });
+  };
+
+  let queue = phases.filter((p) => !excludedIds.has(p.id));
+  while (queue.length) {
+    const next: BqeProject[] = [];
+    let progressed = false;
+    for (const p of queue) {
+      const pid = coreProjectParentId(p);
+      if (pid && excludedIds.has(pid)) continue;
+      const parent = pid ? byId.get(pid) : undefined;
+      if (parent && excludedIds.has(parent.id)) continue;
+      let parentKey = pid ? idToKey.get(pid) || null : null;
+      if (!parentKey && !parent) {
+        parentKey = coreProjectParentLabel(p);
+      }
+      if (!parentKey) {
+        next.push(p);
+        continue;
+      }
+      emitPhase(p, parentKey, parent);
+      progressed = true;
+    }
+    if (!progressed) {
+      for (const p of next) {
+        const parentKey = coreProjectParentLabel(p) || displayOf(p);
+        const pid = coreProjectParentId(p);
+        emitPhase(p, parentKey, pid ? byId.get(pid) : undefined);
+      }
+      break;
+    }
+    queue = next;
   }
 
   return {

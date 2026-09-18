@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { authHeaders } from './authToken';
 
 /** Keep in sync with api/admin/data.ts ADMIN_TABLES. */
 export const ADMIN_TABLES = [
@@ -31,20 +31,6 @@ export const ADMIN_TABLES = [
 
 export type AdminTable = (typeof ADMIN_TABLES)[number];
 
-async function authHeaders(): Promise<HeadersInit> {
-  const { data: refreshed } = await supabase.auth.refreshSession();
-  let token = refreshed.session?.access_token;
-  if (!token) {
-    const { data } = await supabase.auth.getSession();
-    token = data.session?.access_token;
-  }
-  if (!token) throw new Error('Sign in as admin required.');
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  };
-}
-
 async function adminData<T>(body: Record<string, unknown>): Promise<T> {
   const res = await fetch('/api/admin/data', {
     method: 'POST',
@@ -64,7 +50,11 @@ async function adminData<T>(body: Record<string, unknown>): Promise<T> {
     throw new Error(text.replace(/\s+/g, ' ').trim().slice(0, 200) || `Request failed (${res.status})`);
   }
   if (!res.ok) {
-    throw new Error([json.error, json.detail].filter(Boolean).join(' ') || `HTTP ${res.status}`);
+    const msg = [json.error, json.detail].filter(Boolean).join(' ');
+    if (/invalid or expired session|auth session missing/i.test(msg)) {
+      throw new Error('Your session expired. Sign out and sign back in, then retry.');
+    }
+    throw new Error(msg || `HTTP ${res.status}`);
   }
   return json;
 }

@@ -332,7 +332,7 @@ export async function hydrateProjectParents(
   }
   const missing = new Set<string>();
   for (const p of projects) {
-    for (const id of [p.parentId, p.rootProjectId]) {
+    for (const id of [coreProjectParentId(p), p.rootProjectId]) {
       if (id && !byId.has(id)) missing.add(id);
     }
   }
@@ -374,7 +374,7 @@ export function bqeWhereDateTime(d: Date): string {
  * 424 APISqlError when that column is requested.
  */
 export const BQE_PROJECT_LIST_FIELDS =
-  'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,address,percentComplete,createdOn';
+  'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,address,percentComplete,completedOn,createdOn';
 
 /** CORE ProjectStatus Active = 0 (docs: /project?where=status=0). Spaces break the filter. */
 export const CORE_PROJECT_WHERE_ACTIVE = 'status=0';
@@ -388,20 +388,22 @@ export type BqeProject = {
   clientId?: string | null;
   manager?: string | null;
   managerId?: string | null;
-  status?: string | number | null;
-  contractType?: string | number | null;
+  /** CORE sometimes returns enums as `{ value, name }`. */
+  status?: string | number | { value?: string | number; name?: string } | null;
+  contractType?: string | number | { value?: string | number; name?: string } | null;
   contractAmount?: number | null;
   serviceContract?: number | null;
   expenseContract?: number | null;
   phaseName?: string | null;
   phaseDescription?: string | null;
-  parent?: string | null;
+  parent?: string | { id?: string; name?: string; displayName?: string } | null;
   parentId?: string | null;
   rootProject?: string | null;
   rootProjectId?: string | null;
   hasChild?: boolean | null;
   address?: { city?: string | null }[] | null;
   percentComplete?: number | null;
+  completedOn?: string | null;
   createdOn?: string | null;
 };
 
@@ -492,27 +494,94 @@ export type BqeEmployee = {
 };
 
 /**
- * CORE ProjectStatus: Active=0, Inactive=1, Completed=2.
- * Unknown / empty defaults to ACTIVE (CORE's default).
+ * CORE ProjectStatus: Active=0, Inactive=1, Completed=2 (some tenants use 3).
+ * Named enum (`name: "Completed"`) wins over a numeric value when both exist.
+ * `completedOn` from CORE also marks Completed — phases under an Active parent
+ * are often Completed in CORE while the header stays Active.
  */
-export function mapBqeStatus(status: string | number | null | undefined): string {
-  if (status === 0 || status === '0') return 'ACTIVE';
-  if (status === 1 || status === '1') return 'INACTIVE';
-  if (status === 2 || status === '2') return 'COMPLETED';
-  const s = String(status ?? '').toLowerCase();
+export function mapBqeStatus(
+  status: unknown,
+  completedOn?: string | null,
+): string {
+  if (hasCoreCompletedOn(completedOn)) return 'COMPLETED';
+  const fromName = mapStatusToken(coreEnumName(status));
+  if (fromName) return fromName;
+  return mapStatusToken(unwrapCoreEnum(status)) || 'ACTIVE';
+}
+
+function mapStatusToken(raw: string | number | null | undefined): string | null {
+  if (raw == null || raw === '') return null;
+  if (raw === 0 || raw === '0') return 'ACTIVE';
+  if (raw === 1 || raw === '1') return 'INACTIVE';
+  if (raw === 2 || raw === '2' || raw === 3 || raw === '3') return 'COMPLETED';
+  if (raw === 4 || raw === '4') return 'CANCELED';
+  const s = String(raw).toLowerCase();
   if (s.includes('complete')) return 'COMPLETED';
   if (s.includes('inactive') || s.includes('hold')) return 'INACTIVE';
   if (s.includes('cancel')) return 'CANCELED';
-  return 'ACTIVE';
+  if (s.includes('active')) return 'ACTIVE';
+  return null;
+}
+
+function coreEnumName(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const name = (value as { name?: string }).name;
+  return name != null && String(name).trim() ? String(name).trim() : null;
+}
+
+function unwrapCoreEnum(value: unknown): string | number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' || typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    const o = value as { value?: string | number; name?: string; id?: string | number };
+    if (o.value != null && o.value !== '') return o.value;
+    if (o.name != null && o.name !== '') return o.name;
+    if (o.id != null && o.id !== '') return o.id;
+  }
+  return null;
+}
+
+function hasCoreCompletedOn(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) return false;
+  return t > Date.parse('1971-01-01T00:00:00Z');
+}
+
+/** CORE parent id — `parentId` or nested `parent.id`. */
+export function coreProjectParentId(p: Pick<BqeProject, 'parentId' | 'parent'>): string | null {
+  if (p.parentId) return String(p.parentId);
+  const parent = p.parent;
+  if (parent && typeof parent === 'object' && parent.id) return String(parent.id);
+  return null;
+}
+
+/** Parent display name when the parent record is not on this CORE page. */
+export function coreProjectParentLabel(p: BqeProject): string | null {
+  const parent = p.parent;
+  if (typeof parent === 'string' && parent.trim()) return parent.trim();
+  if (parent && typeof parent === 'object') {
+    const label = (parent.displayName || parent.name || '').trim();
+    if (label) return label;
+  }
+  const name = (p.name || '').trim();
+  return name || null;
 }
 
 /**
  * CORE ProjectContractType numeric values (Hourly is 0).
  * Named strings from the API are matched first so "Hourly Not to Exceed" is not
- * collapsed into HOURLY.
+ * collapsed into HOURLY, and `{ value, name }` objects unwrap correctly.
  */
-export function mapBqeContractType(t: string | number | null | undefined): string | null {
-  const s = String(t ?? '').trim();
+export function mapBqeContractType(t: unknown): string | null {
+  const fromName = mapContractToken(coreEnumName(t));
+  if (fromName) return fromName;
+  return mapContractToken(unwrapCoreEnum(t));
+}
+
+function mapContractToken(raw: string | number | null | undefined): string | null {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
   if (!s) return null;
   if (/hnte|hourly\s*not\s*to\s*exceed|not\s*to\s*exceed/i.test(s) || s === '2') return 'HNTE';
   if (/hour/i.test(s) || s === '0') return 'HOURLY';
@@ -522,48 +591,10 @@ export function mapBqeContractType(t: string | number | null | undefined): strin
   return s.toUpperCase();
 }
 
-function phaseBlob(phase: string): string {
-  return phase.trim().toLowerCase();
-}
-
-/** Planning and Pre-Design vary by job — copy CORE instead of assuming. */
-export function isMixedBillingPhase(phase: string | null | undefined): boolean {
-  const p = phaseBlob(phase || '');
-  if (!p) return false;
-  if (/pre[-\s]*des|predesign/.test(p)) return true;
-  if (/planning|\b08\s*plannin/.test(p)) return true;
-  return false;
-}
-
-function isHourlyBillingPhase(phase: string): boolean {
-  const p = phaseBlob(phase);
-  if (!p || isMixedBillingPhase(p)) return false;
-  if (/contractor\s*selection|\b05\s*contrac/.test(p)) return true;
-  if (/construction\s*support|construction\s*admin|\b06\s*constru|\bca\b/.test(p)) return true;
-  if (/additional\s*service|add\.?\s*serv|ad-ser/.test(p)) return true;
-  if (/reimburs|\b12\s*reimbur/.test(p)) return true;
-  if (/project\s*manag|\b09\s*project/.test(p)) return true;
-  return false;
-}
-
-function isFixedBillingPhase(phase: string): boolean {
-  const p = phaseBlob(phase);
-  if (!p || isMixedBillingPhase(p)) return false;
-  if (/design\s*dev|designs\s*dev|\b03\s*design/.test(p)) return true;
-  if (/construction\s*document|\b04\s*constru/.test(p)) return true;
-  return false;
-}
-
-/** Known phases use the firm default; mixed (Planning / Pre-Design) copy CORE. */
+/** Copy CORE hourly/fixed on the phase; parent type only if the phase has none. */
 export function contractTypeForPhase(
-  phaseName: string | null | undefined,
-  coreType: string | number | null | undefined,
-  parentCoreType?: string | number | null,
+  coreType: unknown,
+  parentCoreType?: unknown,
 ): string | null {
-  const fromCore = mapBqeContractType(coreType ?? parentCoreType ?? null);
-  const phase = (phaseName || '').trim();
-  if (!phase) return fromCore;
-  if (isHourlyBillingPhase(phase)) return 'HOURLY';
-  if (isFixedBillingPhase(phase)) return 'FIXED';
-  return fromCore;
+  return mapBqeContractType(coreType) ?? mapBqeContractType(parentCoreType ?? null);
 }

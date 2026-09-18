@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 import { useDashboard } from '../hooks/useDashboard';
+import { authHeaders } from '../lib/authToken';
 
 type BqeStatus = {
   configured: boolean;
@@ -55,27 +56,6 @@ function dayWindows(
   return out;
 }
 
-async function authHeaders(): Promise<HeadersInit> {
-  // Prefer a fresh access token — expired JWTs cause 401 on /api/bqe/*
-  const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
-  let token = refreshed.session?.access_token;
-  if (!token) {
-    const { data } = await supabase.auth.getSession();
-    token = data.session?.access_token;
-  }
-  if (!token) {
-    throw new Error(
-      refreshErr?.message ||
-        'Not signed in (no session token). Sign out, sign back in as admin, then retry Connect.',
-    );
-  }
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  };
-}
-
-/** Parse JSON when possible; surface plain-text server crashes (e.g. Vercel). */
 async function readApiJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) {
@@ -131,6 +111,10 @@ async function postSync<T>(
 }
 
 function apiErrorMessage(body: { error?: string; detail?: string }, fallback: string): string {
+  const err = body.error || '';
+  if (/invalid or expired session/i.test(err) || /auth session missing/i.test(err + (body.detail || ''))) {
+    return 'Your session expired. Sign out and sign back in, then retry.';
+  }
   if (body.error && body.detail) return `${body.error} ${body.detail}`;
   return body.error || body.detail || fallback;
 }
@@ -146,6 +130,7 @@ function fmtWhen(iso: string | null): string {
 
 export function BqeConnectPanel() {
   const { reload } = useDashboard();
+  const { session, loading: authLoading } = useAuth();
   const onVercel = isVercelHost();
   const [status, setStatus] = useState<BqeStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -154,6 +139,11 @@ export function BqeConnectPanel() {
   const [err, setErr] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
+    if (!session?.access_token) {
+      setLoading(false);
+      setStatus(null);
+      return;
+    }
     setLoading(true);
     setErr(null);
     try {
@@ -167,11 +157,12 @@ export function BqeConnectPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
+    if (authLoading) return;
     void refreshStatus();
-  }, [refreshStatus]);
+  }, [authLoading, refreshStatus]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -241,27 +232,20 @@ export function BqeConnectPanel() {
 
       let page = 1;
       let totalProjects = 0;
-      let projectWhere: string | undefined;
       for (;;) {
         setMsg(`Projects page ${page}…`);
         const pBody = await postSync<{
           hasMore?: boolean;
           insertedProjects?: number;
           message?: string;
-          usedUnfilteredFallback?: boolean;
-          projectWhere?: string;
         }>({
           mode: 'projects',
           page,
           pageSize: 80,
           reset: page === 1,
           requireRecentHours: false,
-          ...(projectWhere ? { projectWhere } : {}),
         });
         totalProjects += pBody.insertedProjects || 0;
-        if (pBody.usedUnfilteredFallback || pBody.projectWhere === '*') {
-          projectWhere = '*';
-        }
         if (!pBody.hasMore) break;
         page += 1;
         if (page > 120) break;
@@ -273,7 +257,7 @@ export function BqeConnectPanel() {
       await refreshStatus();
       await reload();
       setMsg(
-        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (CORE statuses).`,
+        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (CORE status and billing type).`,
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Sync failed');
@@ -390,8 +374,9 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync updates projects only (does not re-import 96k time rows). Hobby
-            functions die after ~10s — Incremental time is a separate paged button. Set{' '}
+            Production sync copies the CORE project list (status and hourly/fixed on every
+            phase). It does not re-import 96k time rows. Hobby functions die after ~10s —
+            Incremental time is a separate paged button. Set{' '}
             <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
             to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
           </>

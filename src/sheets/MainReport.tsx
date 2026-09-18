@@ -64,6 +64,50 @@ function isCompletedStatus(status: string | null | undefined): boolean {
   return s === 'COMPLETED' || s === 'COMPLETE' || s === 'DONE';
 }
 
+const STATUS_FILTER_OPTIONS = ['ACTIVE', 'INACTIVE', 'COMPLETED'] as const;
+
+function toggleStatusValue(prev: Set<string>, value: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
+/** Empty set = all statuses. Matches the row’s own status (no parent rollup). */
+function matchesStatusFilter(selected: Set<string>, raw: string | null | undefined): boolean {
+  if (!selected.size) return true;
+  return selected.has(String(raw || 'ACTIVE').toUpperCase());
+}
+
+function StatusCheckboxes({
+  selected,
+  onToggle,
+  extra = [],
+}: {
+  selected: Set<string>;
+  onToggle: (value: string) => void;
+  extra?: string[];
+}) {
+  const extras = extra
+    .map((s) => String(s || '').toUpperCase())
+    .filter((s) => s && !(STATUS_FILTER_OPTIONS as readonly string[]).includes(s));
+  const options = [...STATUS_FILTER_OPTIONS, ...extras];
+  return (
+    <div className="mr-status-checks">
+      {options.map((s) => (
+        <label key={s} className="mr-status-check">
+          <input
+            type="checkbox"
+            checked={selected.has(s)}
+            onChange={() => onToggle(s)}
+          />
+          {s.charAt(0) + s.slice(1).toLowerCase()}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /** Spent/contract colors for Budget analysis (incomplete vs completed). */
 function budgetFillColor(pct: number, completed: boolean): string {
   if (completed) {
@@ -76,21 +120,6 @@ function budgetFillColor(pct: number, completed: boolean): string {
   if (Math.abs(pct - 1) < 0.005) return '#9EC9E8'; // light blue — exact
   if (pct >= 0.9) return '#E8D48A'; // yellow — 90% up to exact
   return '#A8D4B8'; // light green — below 90%
-}
-
-/**
- * Project status — COMPLETED only when explicitly marked (header or every phase).
- * Never inferred from billing / outstanding.
- */
-function reportProjectStatus(p: Pick<ReportProject, 'row' | 'phases'>): string {
-  if (isCompletedStatus(p.row?.status)) return 'COMPLETED';
-  if (p.phases.length) {
-    const statuses = p.phases.map((ph) => (ph.row.status || 'ACTIVE').toUpperCase());
-    if (statuses.every((s) => isCompletedStatus(s))) return 'COMPLETED';
-    if (statuses.some((s) => s === 'ACTIVE')) return 'ACTIVE';
-    return statuses.find((s) => !isCompletedStatus(s)) || p.row?.status || 'ACTIVE';
-  }
-  return p.row?.status || 'ACTIVE';
 }
 
 const LAYOUT_IDS = new Set(DEFAULT_LAYOUT.map((l) => l.i));
@@ -173,8 +202,12 @@ export function MainReport({
 }) {
   const [projectFilter, setProjectFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
-  const [projectStatus, setProjectStatus] = useState('ACTIVE');
-  const [phaseStatus, setPhaseStatus] = useState('');
+  const [selectedProjectStatuses, setSelectedProjectStatuses] = useState<Set<string>>(
+    () => new Set(['ACTIVE']),
+  );
+  const [selectedPhaseStatuses, setSelectedPhaseStatuses] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [phase, setPhase] = useState('');
   const [manager, setManager] = useState(lockedEmployee || '');
   const [selectedManagers, setSelectedManagers] = useState<Set<string>>(new Set());
@@ -272,8 +305,8 @@ export function MainReport({
     if (a.clear) {
       setProjectFilter('');
       setClientFilter('');
-      setProjectStatus('');
-      setPhaseStatus('');
+      setSelectedProjectStatuses(new Set());
+      setSelectedPhaseStatuses(new Set());
       setPhase('');
       setAiFilters(EMPTY_AI_FILTERS);
       if (!lockedEmployee) {
@@ -288,9 +321,18 @@ export function MainReport({
       setClientFilter(a.client);
       if (a.project == null) setProjectFilter('');
     }
-    if (a.projectStatus != null) setProjectStatus(a.projectStatus);
-    else if (a.status != null) setProjectStatus(a.status);
-    if (a.phaseStatus != null) setPhaseStatus(a.phaseStatus);
+    if (a.projectStatus != null) {
+      setSelectedProjectStatuses(
+        a.projectStatus ? new Set([a.projectStatus.toUpperCase()]) : new Set(),
+      );
+    } else if (a.status != null) {
+      setSelectedProjectStatuses(a.status ? new Set([a.status.toUpperCase()]) : new Set());
+    }
+    if (a.phaseStatus != null) {
+      setSelectedPhaseStatuses(
+        a.phaseStatus ? new Set([a.phaseStatus.toUpperCase()]) : new Set(),
+      );
+    }
     if (a.phase != null) setPhase(a.phase);
     if (a.manager != null && !lockedEmployee) {
       setManager(a.manager);
@@ -378,18 +420,14 @@ export function MainReport({
       if (projectFilter && p.key !== projectFilter) continue;
       if (clientFilter && clientByProject.get(p.key) !== clientFilter) continue;
 
-      // Explicit project pick wins over status (dropdown lists all statuses).
+      // Project status is the header row only — phases keep their own CORE status.
       const statusLocked = !!projectFilter && p.key === projectFilter;
-      if (projectStatus && !statusLocked) {
-        const pst = reportProjectStatus(p);
-        if ((pst || 'ACTIVE').toUpperCase() !== projectStatus.toUpperCase()) continue;
+      if (!statusLocked && !matchesStatusFilter(selectedProjectStatuses, p.row?.status)) {
+        continue;
       }
 
       const phases = p.phases.filter((ph) => {
-        if (
-          phaseStatus &&
-          (ph.row.status || 'ACTIVE').toUpperCase() !== phaseStatus.toUpperCase()
-        ) {
+        if (!matchesStatusFilter(selectedPhaseStatuses, ph.row.status)) {
           return false;
         }
         if (phase && (ph.row.phase || '') !== phase) return false;
@@ -398,13 +436,17 @@ export function MainReport({
         return true;
       });
 
-      const hasPhaseFilters = !!(manager || selectedManagers.size || phaseStatus || phase);
+      const hasPhaseFilters = !!(
+        manager ||
+        selectedManagers.size ||
+        selectedPhaseStatuses.size ||
+        phase
+      );
       const shownPhases = hasPhaseFilters ? phases : p.phases;
       if (hasPhaseFilters && !shownPhases.length) {
         if (!p.row) continue;
         const hdrOk =
-          (!phaseStatus ||
-            (p.row.status || 'ACTIVE').toUpperCase() === phaseStatus.toUpperCase()) &&
+          matchesStatusFilter(selectedPhaseStatuses, p.row.status) &&
           (!manager || p.row.manager === manager) &&
           (!selectedManagers.size || selectedManagers.has(p.row.manager || ''));
         if (!hdrOk || phase) continue;
@@ -467,8 +509,8 @@ export function MainReport({
     projectFilter,
     clientFilter,
     clientByProject,
-    projectStatus,
-    phaseStatus,
+    selectedProjectStatuses,
+    selectedPhaseStatuses,
     phase,
     manager,
     selectedManagers,
@@ -521,8 +563,8 @@ export function MainReport({
     const filtersIdle =
       !projectFilter &&
       !clientFilter &&
-      !projectStatus &&
-      !phaseStatus &&
+      !selectedProjectStatuses.size &&
+      !selectedPhaseStatuses.size &&
       !phase &&
       !manager &&
       !selectedManagers.size &&
@@ -533,8 +575,8 @@ export function MainReport({
     data.projects,
     projectFilter,
     clientFilter,
-    projectStatus,
-    phaseStatus,
+    selectedProjectStatuses,
+    selectedPhaseStatuses,
     phase,
     manager,
     selectedManagers,
@@ -892,9 +934,7 @@ export function MainReport({
                             return false;
                           }
                           if (
-                            projectStatus &&
-                            (reportProjectStatus(p) || 'ACTIVE').toUpperCase() !==
-                              projectStatus.toUpperCase()
+                            !matchesStatusFilter(selectedProjectStatuses, p.row?.status)
                           ) {
                             return false;
                           }
@@ -908,38 +948,26 @@ export function MainReport({
                       ))}
                     </select>
                   </label>
-                  <label>
+                  <div className="mr-filters-field">
                     <span>Project status</span>
-                    <select
-                      value={projectStatus}
-                      onChange={(e) => setProjectStatus(e.target.value)}
-                    >
-                      <option value="">All</option>
-                      {(data.statuses.length ? data.statuses : ['ACTIVE', 'COMPLETED']).map(
-                        (s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ),
-                      )}
-                    </select>
-                  </label>
-                  <label>
+                    <StatusCheckboxes
+                      selected={selectedProjectStatuses}
+                      extra={data.statuses}
+                      onToggle={(s) =>
+                        setSelectedProjectStatuses((prev) => toggleStatusValue(prev, s))
+                      }
+                    />
+                  </div>
+                  <div className="mr-filters-field">
                     <span>Phase status</span>
-                    <select
-                      value={phaseStatus}
-                      onChange={(e) => setPhaseStatus(e.target.value)}
-                    >
-                      <option value="">All</option>
-                      {(data.statuses.length ? data.statuses : ['ACTIVE', 'COMPLETED']).map(
-                        (s) => (
-                          <option key={`ph-${s}`} value={s}>
-                            {s}
-                          </option>
-                        ),
-                      )}
-                    </select>
-                  </label>
+                    <StatusCheckboxes
+                      selected={selectedPhaseStatuses}
+                      extra={data.statuses}
+                      onToggle={(s) =>
+                        setSelectedPhaseStatuses((prev) => toggleStatusValue(prev, s))
+                      }
+                    />
+                  </div>
                   <label>
                     <span>Phase</span>
                     <select value={phase} onChange={(e) => setPhase(e.target.value)}>
@@ -1019,8 +1047,8 @@ export function MainReport({
                       {displayProjects.length === 0 ? (
                         <tr>
                           <td colSpan={15} className="plist-empty">
-                            No projects match the current filters. Clear a filter or set Project
-                            status to All.
+                            No projects match the current filters. Clear a filter or uncheck
+                            statuses to show all.
                           </td>
                         </tr>
                       ) : null}

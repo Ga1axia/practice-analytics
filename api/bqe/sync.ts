@@ -235,13 +235,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const query: Record<string, string> = {
           fields: BQE_PROJECT_LIST_FIELDS,
         };
-        if (rawWhere && rawWhere !== '*') {
+        // '*' / 'all' mean unfiltered — CORE WHERE cannot be `*`.
+        if (rawWhere && rawWhere !== '*' && !/^all$/i.test(rawWhere)) {
           query.where = rawWhere;
-        } else if (!rawWhere) {
-          query.where = CORE_PROJECT_WHERE_ACTIVE;
         }
         if (query.where) warnings.push(`CORE project fetch (${query.where})`);
-        else warnings.push('CORE project fetch (all statuses)');
+        else warnings.push('CORE project fetch (all statuses — phase Completed included)');
 
         let projects: BqeProject[] = [];
         let hasMore = false;
@@ -344,7 +343,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           employees: employees.length,
           libraryExists,
           usedUnfilteredFallback,
-          projectWhere: query.where || '*',
+          projectWhere: query.where || null,
           warnings,
           message: msg,
         });
@@ -373,9 +372,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const libraryExists = existingKeys.size > 0;
       const projectQuery: Record<string, string> = {
         fields: BQE_PROJECT_LIST_FIELDS,
-        where: CORE_PROJECT_WHERE_ACTIVE,
       };
-      warnings.push(`CORE project fetch (${projectQuery.where})`);
+      warnings.push('CORE project fetch (all statuses)');
 
       // Sequential on purpose — CORE rate limit is ~100 calls/min
       let projects = await bqeListAll<BqeProject>('/project', 500, projectQuery);

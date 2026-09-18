@@ -155,6 +155,17 @@ export function seedSchedulesFromTimeEntries(dryRun = false, forceWipe = false) 
   }>({ action: 'seed_schedules_from_te', dryRun, forceWipe });
 }
 
+export function markProjectsInactiveWithoutRecentHours() {
+  return adminData<{
+    ok: boolean;
+    since: string;
+    markedInactive: number;
+    restoredActive: number;
+    keptHeaders: number;
+    staleHeaders: number;
+  }>({ action: 'mark_projects_inactive_without_te' });
+}
+
 export function pruneProjectsWithoutRecentHours() {
   return adminData<{
     ok: boolean;

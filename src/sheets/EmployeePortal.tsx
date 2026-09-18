@@ -5,7 +5,13 @@ import { EmployeeToday } from '../components/EmployeeToday';
 import { KpiRow } from '../components/KpiRow';
 import { ProjectSchedulePulse } from '../components/ProjectSchedulePulse';
 import { processPhaseLabel } from '../lib/architecturalProcess';
-import { extractProjectCode } from '../lib/projectLoggedHours';
+import {
+  compareEmployeeProjects,
+  readEmployeeProjectSort,
+  writeEmployeeProjectSort,
+  type EmployeeProjectSort,
+} from '../lib/employeeProjectSort';
+import { extractProjectCode, loadEmployeeLastHoursByProject } from '../lib/projectLoggedHours';
 import { fmtPct, fmtUSD, monthLabel } from '../lib/format';
 import {
   ensureMyMembershipsFromTimeEntries,
@@ -86,11 +92,15 @@ export function EmployeePortal({
   const [page, setPage] = useState<PageId>('today');
   const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['today']));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [projectSort, setProjectSort] = useState<EmployeeProjectSort>(() =>
+    readEmployeeProjectSort(employeeName),
+  );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [memberRoles, setMemberRoles] = useState<Map<string, ProjectMemberRole>>(
     () => new Map(),
   );
+  const [lastHoursByKey, setLastHoursByKey] = useState<Map<string, string>>(() => new Map());
   const [roleDefaultApplied, setRoleDefaultApplied] = useState(false);
 
   function go(next: PageId) {
@@ -101,6 +111,15 @@ export function EmployeePortal({
       return copy;
     });
     setPage(next);
+  }
+
+  useEffect(() => {
+    setProjectSort(readEmployeeProjectSort(employeeName));
+  }, [employeeName]);
+
+  function setAndPersistProjectSort(next: EmployeeProjectSort) {
+    setProjectSort(next);
+    writeEmployeeProjectSort(employeeName, next);
   }
 
   const totals = useMemo(
@@ -125,9 +144,11 @@ export function EmployeePortal({
       c.projects.map((p) => ({ key: p.key, title: p.title, code: p.code })),
     );
     void (async () => {
-      // Claim projects this employee has logged hours on, then refresh memberships.
-      await ensureMyMembershipsFromTimeEntries({ employeeName, projects });
+      const first = await loadMembershipsForEmployee(employeeName);
       if (cancelled) return;
+      setMemberRoles(first.byKey);
+      const claimed = await ensureMyMembershipsFromTimeEntries({ employeeName, projects });
+      if (cancelled || !claimed.added) return;
       const res = await loadMembershipsForEmployee(employeeName);
       if (cancelled) return;
       setMemberRoles(res.byKey);
@@ -147,7 +168,7 @@ export function EmployeePortal({
     [data.managers, data.employee_roster, employeeName],
   );
 
-  const allProjects = useMemo(() => {
+  const assignedProjects = useMemo(() => {
     return hierarchy
       .flatMap((c) =>
         c.projects
@@ -156,9 +177,37 @@ export function EmployeePortal({
           )
           .filter((p) => isDemo || !isDemoSeedProject(p))
           .map((p) => ({ ...p, clientName: c.client })),
-      )
-      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+      );
   }, [hierarchy, employeeName, memberRoles, isDemo]);
+
+  const assignedKey = useMemo(
+    () => assignedProjects.map((p) => p.key).join('|'),
+    [assignedProjects],
+  );
+
+  useEffect(() => {
+    if (projectSort !== 'recent' || !assignedProjects.length) return;
+    let cancelled = false;
+    void loadEmployeeLastHoursByProject({
+      employeeName,
+      projects: assignedProjects.map((p) => ({ key: p.key, title: p.title, code: p.code })),
+    }).then((map) => {
+      if (!cancelled) setLastHoursByKey(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // assignedKey tracks project identity without rerunning on array identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeName, projectSort, assignedKey]);
+
+  const allProjects = useMemo(
+    () =>
+      [...assignedProjects].sort((a, b) =>
+        compareEmployeeProjects(a, b, projectSort, lastHoursByKey),
+      ),
+    [assignedProjects, projectSort, lastHoursByKey],
+  );
 
   const activeProjects = useMemo(
     () => allProjects.filter(projectIsActive),
@@ -440,9 +489,28 @@ export function EmployeePortal({
               <h1 className="display">My projects</h1>
               <p className="emp-lede">
                 Open a project for its task list, calendar, meetings, and schedule.
+                {projectSort === 'recent'
+                  ? ' Sorted by your most recent hours — switch to A–Z anytime.'
+                  : ' Sorted A–Z by project name — switch to recent hours anytime.'}
               </p>
             </div>
             <div className="emp-filter-bar">
+              <div className="emp-status-toggle" role="group" aria-label="Project sort">
+                <button
+                  type="button"
+                  className={projectSort === 'recent' ? 'on' : ''}
+                  onClick={() => setAndPersistProjectSort('recent')}
+                >
+                  Recent hours
+                </button>
+                <button
+                  type="button"
+                  className={projectSort === 'name' ? 'on' : ''}
+                  onClick={() => setAndPersistProjectSort('name')}
+                >
+                  A–Z
+                </button>
+              </div>
               <div className="emp-status-toggle" role="group" aria-label="Project status filter">
                 <button
                   type="button"

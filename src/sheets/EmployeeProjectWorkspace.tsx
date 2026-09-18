@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClientBoxLinks } from '../components/ClientBoxLinks';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
 import { KpiRow } from '../components/KpiRow';
@@ -630,55 +629,39 @@ export function EmployeeProjectWorkspace({
         </aside>
       </div>
 
-      <div className="emp-detail-pair">
-        <section className="panel">
-          <h3>
-            Client Box files <span className="tag">Files tab</span>
-          </h3>
-          <ClientBoxLinks
-            projectKey={project.key}
-            clientName={project.clientName}
-            authorName={authorName}
-            mode="pm"
-            compact
-          />
-        </section>
+      <section className="panel pd-meetings-panel">
+        <ClientMeetingsPanel
+          projectKey={project.key}
+          clientName={project.clientName}
+          seedMeetings={usingDemo && demo ? demo.meetings : null}
+        />
+      </section>
 
-        <section className="panel">
-          <h3>
-            Schedule deliverables <span className="tag">{deliverables.length}</span>
-          </h3>
-          {!deliverables.length ? (
-            <p className="pd-muted">No deliverables on the schedule yet.</p>
-          ) : (
-            <ul className="emp-doc-mini">
-              {deliverables.map((d) => (
-                <li key={d.id}>
-                  <div>
-                    <strong>{d.task}</strong>
-                    <span className="mono">
-                      {d.section}
-                      {d.isDocument ? ' · document' : ''}
-                    </span>
-                  </div>
-                  <span className={`emp-status-pill ${statusTone(d.status)}`}>
-                    {d.status === '—' ? d.targetEnd : d.status}
+      <section className="panel">
+        <h3>
+          Schedule deliverables <span className="tag">{deliverables.length}</span>
+        </h3>
+        {!deliverables.length ? (
+          <p className="pd-muted">No deliverables on the schedule yet.</p>
+        ) : (
+          <ul className="emp-doc-mini">
+            {deliverables.map((d) => (
+              <li key={d.id}>
+                <div>
+                  <strong>{d.task}</strong>
+                  <span className="mono">
+                    {d.section}
+                    {d.isDocument ? ' · document' : ''}
                   </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="panel pd-meetings-panel">
-          <ClientMeetingsPanel
-            projectKey={project.key}
-            clientName={project.clientName}
-            compact
-            seedMeetings={usingDemo && demo ? demo.meetings : null}
-          />
-        </section>
-      </div>
+                </div>
+                <span className={`emp-status-pill ${statusTone(d.status)}`}>
+                  {d.status === '—' ? d.targetEnd : d.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="panel">
         <h3>

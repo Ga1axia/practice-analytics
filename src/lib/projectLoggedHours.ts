@@ -1,5 +1,23 @@
 import { phaseDisplayName } from './phaseAbbrev';
+import {
+  extractProjectCode,
+  isPtoOrSickTimeEntry,
+  timeEntryMatchesProject,
+  titleTokens,
+  buildTimeEntryProjectIndex,
+  projectKeysForTimeEntry,
+} from './projectHoursMatch';
 import { supabase } from './supabase';
+
+export {
+  extractProjectCode,
+  isPtoOrSickTimeEntry,
+  stripJobCodes,
+  timeEntryMatchesProject,
+  buildTimeEntryProjectIndex,
+  projectKeysForTimeEntry,
+} from './projectHoursMatch';
+export type { ProjectMatchRef } from './projectHoursMatch';
 
 export type ProjectHoursSlice = {
   label: string;
@@ -15,55 +33,70 @@ export type ProjectLoggedHours = {
   error: string | null;
 };
 
-function norm(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+const LAST_HOURS_YEARS = 2;
+const LAST_HOURS_PAGE = 500;
+const LAST_HOURS_MAX_ROWS = 8_000;
+
+function hoursSinceIso(years: number): string {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d.toISOString().slice(0, 10);
 }
 
-function titleTokens(title: string): string[] {
-  return norm(title)
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 4 && !/^\d{2}-\d{3}$/.test(t));
+/**
+ * Latest CORE work_date per library project for this employee.
+ * Newest-first over the last two years; stops once every assigned key is dated.
+ */
+export async function loadEmployeeLastHoursByProject(input: {
+  employeeName: string;
+  projects: { key: string; title: string; code?: string | null }[];
+}): Promise<Map<string, string>> {
+  const byKey = new Map<string, string>();
+  const emp = input.employeeName.trim();
+  if (!emp || !input.projects.length) return byKey;
+
+  const index = buildTimeEntryProjectIndex(input.projects);
+  const wanted = new Set(input.projects.map((p) => p.key));
+  const since = hoursSinceIso(LAST_HOURS_YEARS);
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('pa_time_entries')
+      .select('project_name, parent_project_name, activity, phase, phase_name, work_date')
+      .eq('employee_name', emp)
+      .gte('work_date', since)
+      .order('work_date', { ascending: false })
+      .range(from, from + LAST_HOURS_PAGE - 1);
+    if (error) return byKey;
+    const chunk = data || [];
+    for (const row of chunk) {
+      if (isPtoOrSickTimeEntry(row)) continue;
+      const workDate = String(row.work_date || '').slice(0, 10);
+      if (!workDate) continue;
+      for (const key of projectKeysForTimeEntry(row, index)) {
+        if (!wanted.has(key) || byKey.has(key)) continue;
+        byKey.set(key, workDate);
+      }
+    }
+    if (byKey.size >= wanted.size) break;
+    if (chunk.length < LAST_HOURS_PAGE) break;
+    from += LAST_HOURS_PAGE;
+    if (from >= LAST_HOURS_MAX_ROWS) break;
+  }
+  return byKey;
 }
 
-/** Extract `22-004`-style job code from a project label. */
-export function extractProjectCode(name: string | null | undefined): string | null {
-  const m = (name || '').match(/\b(\d{2}-\d{3})\b/);
-  return m ? m[1] : null;
-}
-
-/** True when a TE project label belongs to this Project List project. */
-export function timeEntryMatchesProject(
-  row: { project_name?: string | null; parent_project_name?: string | null },
-  opts: { fullName?: string | null; title?: string | null; code?: string | null },
-): boolean {
-  const parent = norm(row.parent_project_name || '');
-  const project = norm(row.project_name || '');
-  const blob = `${parent} ${project}`;
-  if (!blob.trim()) return false;
-
-  // Firm job codes are unique in BQE — prefer this over fuzzy title matching.
-  const code = norm(opts.code || extractProjectCode(opts.fullName) || extractProjectCode(opts.title) || '');
-  if (code && /^\d{2}-\d{3}$/.test(code) && blob.includes(code)) {
-    return true;
+/** ASCII ilike token so PostgREST `.or()` isn't broken by `&` / commas. */
+function teNamePrefilter(code: string, title: string): string | null {
+  const parts: string[] = [];
+  if (/^\d{2}-\d{3}$/.test(code)) {
+    parts.push(`parent_project_name.ilike.%${code}%`, `project_name.ilike.%${code}%`);
   }
-
-  const full = norm(opts.fullName || '');
-  if (full.length >= 5 && (parent.includes(full) || project.includes(full) || blob.includes(full))) {
-    return true;
+  const tok = titleTokens(title)[0] || '';
+  if (/^[a-z0-9]{4,}$/i.test(tok)) {
+    parts.push(`parent_project_name.ilike.%${tok}%`, `project_name.ilike.%${tok}%`);
   }
-
-  const title = norm(opts.title || '');
-  if (title.length >= 5 && (parent.includes(title) || project.includes(title) || blob.includes(title))) {
-    return true;
-  }
-
-  // Last resort: overlap of significant title tokens (no code available).
-  const tokens = titleTokens(opts.title || opts.fullName || '');
-  if (tokens.length >= 2 && tokens.filter((t) => blob.includes(t)).length >= 2) {
-    return true;
-  }
-
-  return false;
+  return parts.length ? parts.join(',') : null;
 }
 
 /**
@@ -101,7 +134,7 @@ export async function loadProjectLoggedHours(input: {
     extractProjectCode(input.projectTitle) ||
     ''
   ).trim();
-  const codeOk = /^\d{2}-\d{3}$/.test(code);
+  const prefilter = teNamePrefilter(code, input.projectTitle || input.projectFullName || '');
 
   let yourHours = 0;
   let yourBillable = 0;
@@ -114,15 +147,14 @@ export async function loadProjectLoggedHours(input: {
     let q = supabase
       .from('pa_time_entries')
       .select(
-        'actual_hours,is_billable,project_name,parent_project_name,phase,phase_name,work_date',
+        'actual_hours,is_billable,project_name,parent_project_name,phase,phase_name,activity,work_date',
       )
       .eq('employee_name', emp)
       .order('work_date', { ascending: true })
       .range(from, from + pageSize - 1);
 
-    if (codeOk) {
-      // ASCII-only DB prefilter — final match is client-side
-      q = q.or(`parent_project_name.ilike.%${code}%,project_name.ilike.%${code}%`);
+    if (prefilter) {
+      q = q.or(prefilter);
     }
 
     const { data, error } = await q;
@@ -134,6 +166,7 @@ export async function loadProjectLoggedHours(input: {
     }
     const chunk = data || [];
     for (const r of chunk) {
+      if (isPtoOrSickTimeEntry(r)) continue;
       if (!timeEntryMatchesProject(r, matchOpts)) continue;
       const hrs = Number(r.actual_hours) || 0;
       yourHours += hrs;
@@ -215,11 +248,14 @@ export async function loadProjectHoursBreakdown(input: {
     extractProjectCode(input.projectTitle) ||
     ''
   ).trim();
-  const codeOk = /^\d{2}-\d{3}$/.test(code);
-  const titleToks = titleTokens(input.projectTitle || input.projectFullName || '').filter((t) =>
-    /^[a-z0-9]+$/i.test(t),
-  );
-  const titleTok = titleToks[0] || '';
+  const prefilter = teNamePrefilter(code, input.projectTitle || input.projectFullName || '');
+  if (!prefilter) {
+    return {
+      ...empty,
+      error:
+        'Could not identify this project for time-entry matching (missing job code like 22-004).',
+    };
+  }
 
   let totalHours = 0;
   let billableHours = 0;
@@ -233,25 +269,14 @@ export async function loadProjectHoursBreakdown(input: {
     let q = supabase
       .from('pa_time_entries')
       .select(
-        'employee_name,actual_hours,is_billable,project_name,parent_project_name,phase,phase_name,work_date',
+        'employee_name,actual_hours,is_billable,project_name,parent_project_name,phase,phase_name,activity,work_date',
       )
       .order('work_date', { ascending: true })
       .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
 
-    if (codeOk) {
-      // ASCII job code only — final match is client-side (avoids &/, in names).
-      q = q.or(`parent_project_name.ilike.%${code}%,project_name.ilike.%${code}%`);
-    } else if (titleTok.length >= 4) {
-      q = q.or(
-        `parent_project_name.ilike.%${titleTok}%,project_name.ilike.%${titleTok}%`,
-      );
-    } else {
-      return {
-        ...empty,
-        error:
-          'Could not identify this project for time-entry matching (missing job code like 22-004).',
-      };
+    if (prefilter) {
+      q = q.or(prefilter);
     }
 
     const { data, error } = await q;
@@ -263,6 +288,7 @@ export async function loadProjectHoursBreakdown(input: {
     }
     const chunk = data || [];
     for (const r of chunk) {
+      if (isPtoOrSickTimeEntry(r)) continue;
       if (!timeEntryMatchesProject(r, matchOpts)) continue;
       const hrs = Number(r.actual_hours) || 0;
       if (!hrs) continue;

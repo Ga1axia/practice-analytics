@@ -1,4 +1,10 @@
-import { extractProjectCode, loadProjectHoursBreakdown } from './projectLoggedHours';
+import {
+  extractProjectCode,
+  isPtoOrSickTimeEntry,
+  loadProjectHoursBreakdown,
+  buildTimeEntryProjectIndex,
+  projectKeysForTimeEntry,
+} from './projectLoggedHours';
 import { supabase } from './supabase';
 
 export type ProjectMemberRole = 'lead' | 'member';
@@ -270,32 +276,27 @@ export async function ensureMyMembershipsFromTimeEntries(input: {
   const emp = input.employeeName.trim();
   if (!emp || !input.projects.length) return { added: 0 };
 
-  const byCode = new Map<string, string>();
-  for (const p of input.projects) {
-    const code = (p.code || extractProjectCode(p.key) || '').trim();
-    if (/^\d{2}-\d{3}$/.test(code)) byCode.set(code, p.key);
-  }
-  if (!byCode.size) return { added: 0 };
+  const index = buildTimeEntryProjectIndex(input.projects);
+  if (!index.byCode.size && !index.byBare.size) return { added: 0 };
 
   const memberships = await loadMembershipsForEmployee(emp);
   if (memberships.error) return { added: 0, error: memberships.error };
 
-  const codesWithHours = new Set<string>();
+  const keysWithHours = new Set<string>();
   let from = 0;
   const pageSize = 1000;
   for (;;) {
     const { data, error } = await supabase
       .from('pa_time_entries')
-      .select('project_name, parent_project_name')
+      .select('project_name, parent_project_name, activity, phase, phase_name')
       .eq('employee_name', emp)
       .order('work_date', { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) return { added: 0, error: error.message };
     const chunk = data || [];
     for (const row of chunk) {
-      const blob = `${row.parent_project_name || ''} ${row.project_name || ''}`;
-      const m = blob.match(/\b(\d{2}-\d{3})\b/);
-      if (m) codesWithHours.add(m[1]!);
+      if (isPtoOrSickTimeEntry(row)) continue;
+      for (const key of projectKeysForTimeEntry(row, index)) keysWithHours.add(key);
     }
     if (chunk.length < pageSize) break;
     from += pageSize;
@@ -303,9 +304,8 @@ export async function ensureMyMembershipsFromTimeEntries(input: {
   }
 
   let added = 0;
-  for (const code of codesWithHours) {
-    const projectKey = byCode.get(code);
-    if (!projectKey || memberships.byKey.has(projectKey)) continue;
+  for (const projectKey of keysWithHours) {
+    if (memberships.byKey.has(projectKey)) continue;
     const res = await addProjectMember({
       projectKey,
       employeeName: emp,

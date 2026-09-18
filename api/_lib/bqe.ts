@@ -313,11 +313,41 @@ export async function bqeListAll<T>(
     const batch = asList<T>(payload);
     if (!batch.length) break;
     out.push(...batch);
+    console.log(`[bqe] ${path} page ${page} +${batch.length} total=${out.length}`);
     if (batch.length < size) break;
     page += 1;
     if (page > 500) break; // safety
   }
   return out;
+}
+
+/** Fetch parent/root records missing from a filtered CORE page so phases still map. */
+export async function hydrateProjectParents(projects: BqeProject[]): Promise<BqeProject[]> {
+  const byId = new Map<string, BqeProject>();
+  for (const p of projects) {
+    if (p?.id) byId.set(p.id, p);
+  }
+  const missing = new Set<string>();
+  for (const p of projects) {
+    for (const id of [p.parentId, p.rootProjectId]) {
+      if (id && !byId.has(id)) missing.add(id);
+    }
+  }
+  if (!missing.size) return projects;
+  const extra: BqeProject[] = [];
+  for (const id of missing) {
+    try {
+      const one = await bqeGet<BqeProject | BqeProject[] | null>(`/project/${id}`);
+      const row = Array.isArray(one) ? one[0] : one;
+      if (row && typeof row === 'object' && row.id) {
+        extra.push(row);
+        byId.set(row.id, row);
+      }
+    } catch {
+      /* parent may have been deleted in CORE */
+    }
+  }
+  return extra.length ? [...projects, ...extra] : projects;
 }
 
 /** ISO date (YYYY-MM-DD) for CORE where filters — lookback months from today. */
@@ -329,6 +359,18 @@ export function bqeSinceDate(monthsBack = 36): string {
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/** CORE where datetime: YYYY-MM-DDThh:mm:ss (no trailing Z — that triggers APISqlError). */
+export function bqeWhereDateTime(d: Date): string {
+  return d.toISOString().slice(0, 19);
+}
+
+/**
+ * Project list fields. Do not include `hasChild` — CORE GET /project returns
+ * 424 APISqlError when that column is requested.
+ */
+export const BQE_PROJECT_LIST_FIELDS =
+  'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,address,percentComplete,createdOn';
 
 export type BqeProject = {
   id: string;
@@ -353,6 +395,7 @@ export type BqeProject = {
   hasChild?: boolean | null;
   address?: { city?: string | null }[] | null;
   percentComplete?: number | null;
+  createdOn?: string | null;
 };
 
 export type BqeTimeEntry = {
@@ -449,10 +492,64 @@ export function mapBqeStatus(status: string | number | null | undefined): string
   return 'ACTIVE';
 }
 
+/**
+ * CORE ProjectContractType numeric values (Hourly is 0).
+ * Named strings from the API are matched first so "Hourly Not to Exceed" is not
+ * collapsed into HOURLY.
+ */
 export function mapBqeContractType(t: string | number | null | undefined): string | null {
-  const s = String(t ?? '');
+  const s = String(t ?? '').trim();
   if (!s) return null;
-  if (/fixed/i.test(s) || s === '0') return 'FIXED';
-  if (/hour/i.test(s) || s === '1') return 'HOURLY';
+  if (/hnte|hourly\s*not\s*to\s*exceed|not\s*to\s*exceed/i.test(s) || s === '2') return 'HNTE';
+  if (/hour/i.test(s) || s === '0') return 'HOURLY';
+  if (/fixed|stated/i.test(s) || s === '1') return 'FIXED';
+  if (/market/i.test(s) || s === '3') return 'MARKETING';
+  if (/overhead/i.test(s) || s === '4') return 'OVERHEAD';
   return s.toUpperCase();
+}
+
+function phaseBlob(phase: string): string {
+  return phase.trim().toLowerCase();
+}
+
+/** Planning and Pre-Design vary by job — copy CORE instead of assuming. */
+export function isMixedBillingPhase(phase: string | null | undefined): boolean {
+  const p = phaseBlob(phase || '');
+  if (!p) return false;
+  if (/pre[-\s]*des|predesign/.test(p)) return true;
+  if (/planning|\b08\s*plannin/.test(p)) return true;
+  return false;
+}
+
+function isHourlyBillingPhase(phase: string): boolean {
+  const p = phaseBlob(phase);
+  if (!p || isMixedBillingPhase(p)) return false;
+  if (/contractor\s*selection|\b05\s*contrac/.test(p)) return true;
+  if (/construction\s*support|construction\s*admin|\b06\s*constru|\bca\b/.test(p)) return true;
+  if (/additional\s*service|add\.?\s*serv|ad-ser/.test(p)) return true;
+  if (/reimburs|\b12\s*reimbur/.test(p)) return true;
+  if (/project\s*manag|\b09\s*project/.test(p)) return true;
+  return false;
+}
+
+function isFixedBillingPhase(phase: string): boolean {
+  const p = phaseBlob(phase);
+  if (!p || isMixedBillingPhase(p)) return false;
+  if (/design\s*dev|designs\s*dev|\b03\s*design/.test(p)) return true;
+  if (/construction\s*document|\b04\s*constru/.test(p)) return true;
+  return false;
+}
+
+/** Known phases use the firm default; mixed (Planning / Pre-Design) copy CORE. */
+export function contractTypeForPhase(
+  phaseName: string | null | undefined,
+  coreType: string | number | null | undefined,
+  parentCoreType?: string | number | null,
+): string | null {
+  const fromCore = mapBqeContractType(coreType ?? parentCoreType ?? null);
+  const phase = (phaseName || '').trim();
+  if (!phase) return fromCore;
+  if (isHourlyBillingPhase(phase)) return 'HOURLY';
+  if (isFixedBillingPhase(phase)) return 'FIXED';
+  return fromCore;
 }

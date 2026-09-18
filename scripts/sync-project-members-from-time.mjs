@@ -28,10 +28,32 @@ function extractCode(s) {
   return m ? m[1] : null;
 }
 
+function stripJobCodes(s) {
+  return String(s || '')
+    .replace(CODE_RE, ' ')
+    .replace(/\s*[-–]\s*$/g, '')
+    .replace(/^\s*[-–]\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parentLabelOf(s) {
+  const stripped = stripJobCodes(s);
+  const cut = stripped.match(/^(.*)\s[-–]\s.+$/);
+  return (cut ? cut[1] : stripped).trim();
+}
+
 function norm(s) {
   return String(s || '')
     .trim()
     .toLowerCase();
+}
+
+function isPtoOrSick(row) {
+  const blob = `${row.activity || ''} ${row.project_name || ''} ${row.parent_project_name || ''} ${row.phase || ''} ${row.phase_name || ''}`.toLowerCase();
+  return /\b(pto|sick(?:\s*time)?|vacation|holiday|bereavement|leave without pay|\blwp\b|time\s*off)\b/.test(
+    blob,
+  );
 }
 
 async function fetchAll(table, cols, pageSize = 1000) {
@@ -55,6 +77,8 @@ async function main() {
   const byCode = new Map();
   /** @type {Map<string, { key: string, leads: Set<string> }>} */
   const byKey = new Map();
+  /** @type {Map<string, { key: string, leads: Set<string> }[]>} */
+  const byBare = new Map();
 
   for (const row of projects) {
     if (row.row_kind === 'project') {
@@ -63,6 +87,12 @@ async function main() {
       if (row.manager?.trim()) entry.leads.add(row.manager.trim());
       byKey.set(row.project, entry);
       if (code) byCode.set(code, entry);
+      const bare = norm(stripJobCodes(row.project));
+      if (bare.length >= 4) {
+        const list = byBare.get(bare) || [];
+        list.push(entry);
+        byBare.set(bare, list);
+      }
     }
   }
   for (const row of projects) {
@@ -79,13 +109,13 @@ async function main() {
   console.log(`Project headers: ${byKey.size}, coded: ${byCode.size}`);
 
   console.log('Scanning time entries…');
-  /** @type {Map<string, Set<string>>} code -> employee names */
-  const peopleByCode = new Map();
+  /** @type {Map<string, Set<string>>} project key -> employee names */
+  const peopleByKey = new Map();
   let teCount = 0;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
       .from('pa_time_entries')
-      .select('employee_name, project_name, parent_project_name')
+      .select('employee_name, project_name, parent_project_name, activity, phase, phase_name')
       .range(from, from + 999);
     if (error) throw error;
     if (!data?.length) break;
@@ -93,17 +123,23 @@ async function main() {
     for (const row of data) {
       const name = (row.employee_name || '').trim();
       if (!name) continue;
-      const codes = new Set();
+      if (isPtoOrSick(row)) continue;
+      /** @type {Set<{ key: string, leads: Set<string> }>} */
+      const hits = new Set();
       const c1 = extractCode(row.parent_project_name);
       const c2 = extractCode(row.project_name);
-      if (c1) codes.add(c1);
-      if (c2) codes.add(c2);
-      for (const code of codes) {
-        if (!byCode.has(code)) continue;
-        let set = peopleByCode.get(code);
+      if (c1 && byCode.has(c1)) hits.add(byCode.get(c1));
+      if (c2 && byCode.has(c2)) hits.add(byCode.get(c2));
+      for (const label of [stripJobCodes(row.parent_project_name), parentLabelOf(row.project_name)]) {
+        const bare = norm(label);
+        if (bare.length < 4) continue;
+        for (const entry of byBare.get(bare) || []) hits.add(entry);
+      }
+      for (const entry of hits) {
+        let set = peopleByKey.get(entry.key);
         if (!set) {
           set = new Set();
-          peopleByCode.set(code, set);
+          peopleByKey.set(entry.key, set);
         }
         set.add(name);
       }
@@ -111,7 +147,7 @@ async function main() {
     if (data.length < 1000) break;
     if (from && from % 20000 === 0) console.log(`  … TEs ${teCount}`);
   }
-  console.log(`TEs scanned: ${teCount}; codes with people: ${peopleByCode.size}`);
+  console.log(`TEs scanned: ${teCount}; jobs with people: ${peopleByKey.size}`);
 
   console.log('Loading existing members…');
   const existing = await fetchAll('pa_project_members', 'project_key, employee_name, role');
@@ -131,8 +167,8 @@ async function main() {
   /** @type {{ project_key: string, employee_name: string }[]} */
   const promoteLeads = [];
 
-  for (const [code, entry] of byCode) {
-    const names = peopleByCode.get(code) || new Set();
+  for (const entry of byKey.values()) {
+    const names = peopleByKey.get(entry.key) || new Set();
     const current = have.get(entry.key) || new Map();
 
     for (const lead of entry.leads) {

@@ -126,6 +126,7 @@ export function typeAbbrev(type: string | null | undefined): string {
   if (!type) return '—';
   const t = type.toUpperCase();
   if (t.includes('FIXED') || t === 'FX') return 'FX';
+  if (t.includes('HNTE') || t.includes('NTE')) return 'NTE';
   if (t.includes('HOUR') || t === 'HR') return 'HR';
   return t.slice(0, 3);
 }

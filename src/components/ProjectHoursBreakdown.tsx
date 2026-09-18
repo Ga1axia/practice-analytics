@@ -47,6 +47,7 @@ export function ProjectHoursBreakdown({
 
   useEffect(() => {
     let cancelled = false;
+    setData(null);
     setLoading(true);
     setError(null);
     void loadProjectHoursBreakdown({

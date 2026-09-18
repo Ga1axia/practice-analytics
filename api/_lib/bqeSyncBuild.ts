@@ -1,4 +1,5 @@
 import {
+  contractTypeForPhase,
   isCoreBilledStatus,
   mapBqeContractType,
   mapBqeStatus,
@@ -235,10 +236,18 @@ export type MappedProjects = {
   idToKey: Map<string, string>;
   /** CORE id → parent CORE id (for rolling phase → root when needed) */
   idToParentId: Map<string, string | null>;
+  /** CORE id → createdOn calendar day (YYYY-MM-DD) when CORE sent one. */
+  idToCreatedOn: Map<string, string | null>;
   /** CORE project/phase ids dropped entirely (no projects, hours, or money). */
   excludedIds: Set<string>;
   excludedCount: number;
 };
+
+export function coreCreatedOnDay(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const day = String(raw).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+}
 
 /** Drop test + Internal Office from sync entirely (projects, hours, spent/billed). */
 export function isExcludedSyncProject(
@@ -286,6 +295,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
   const used = new Set<string>();
   const idToKey = new Map<string, string>();
   const idToParentId = new Map<string, string | null>();
+  const idToCreatedOn = new Map<string, string | null>();
   const excludedIds = new Set<string>();
 
   const roots = projects.filter((p) => !p.parentId || !byId.has(p.parentId));
@@ -316,6 +326,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     const key = allocateUnique(displayOf(p), p.id, used);
     idToKey.set(p.id, key);
     idToParentId.set(p.id, null);
+    idToCreatedOn.set(p.id, coreCreatedOnDay(p.createdOn));
     const city =
       Array.isArray(p.address) && p.address[0]?.city ? String(p.address[0].city) : null;
     rows.push({
@@ -356,6 +367,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     const key = allocateUnique(base, p.id, used);
     idToKey.set(p.id, key);
     idToParentId.set(p.id, parent.id);
+    idToCreatedOn.set(p.id, coreCreatedOnDay(p.createdOn) || coreCreatedOnDay(parent.createdOn));
     const city =
       Array.isArray(p.address) && p.address[0]?.city
         ? String(p.address[0].city)
@@ -368,7 +380,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
       city,
       manager: p.manager || parent.manager || null,
       status: mapBqeStatus(p.status ?? parent.status),
-      type: mapBqeContractType(p.contractType ?? parent.contractType),
+      type: contractTypeForPhase(phaseName, p.contractType, parent.contractType),
       phase: phaseName,
       contract: Number(p.contractAmount ?? p.serviceContract ?? 0) || 0,
       spent: 0,
@@ -393,6 +405,7 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     rows,
     idToKey,
     idToParentId,
+    idToCreatedOn,
     excludedIds,
     excludedCount: excludedIds.size,
   };

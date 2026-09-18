@@ -116,15 +116,19 @@ export function buildEfficiencyAnalysis(
   if (!row) return null;
 
   const billHours = row.bill_hours || 0;
-  const nbHours = row.nb_hours || 0;
-  const hoursWorked = row.total_hours || billHours + nbHours;
+  const ptoSick = row.pto_sick_hours || 0;
+  const rawNb = row.nb_hours || 0;
+  const rawTotal = row.total_hours || billHours + rawNb;
+  // PTO | sick is tracked as a side stat, not hours worked / NB.
+  const nbHours = Math.max(0, rawNb - ptoSick);
+  const hoursWorked = Math.max(0, rawTotal - ptoSick);
   const stdHours = row.standard_hours || 0;
   const probonoHours = row.probono_hours || 0;
 
   const breakdown: NbBreakdown = {
     clientNb: row.client_nb_hours || 0,
     mbd: row.mbd_hours || 0,
-    ptoSick: row.pto_sick_hours || 0,
+    ptoSick,
     others: row.others_nb_hours || 0,
     probono: probonoHours,
   };

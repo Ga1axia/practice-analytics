@@ -51,19 +51,31 @@ async function fetchTimeEntriesForWindow(
 }
 
 /**
+ * Recent time entries for live Bill/NB efficiency (last ~3 calendar months).
+ * Returns null when the table is empty or unreadable so callers can fall back.
+ */
+export async function loadLiveEfficiencyTimeEntries(
+  now = new Date(),
+): Promise<EfficiencyTimeRow[] | null> {
+  try {
+    const { fromDate, toDate } = liveEfficiencyWindow(now);
+    const { rows, error } = await fetchTimeEntriesForWindow(fromDate, toDate);
+    if (error || !rows.length) return null;
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Firm Bill/NB efficiency from live `pa_time_entries` (not the stale monthly snapshot).
  * Returns null when the table is empty or unreadable so callers can fall back.
  */
 export async function loadLiveEfficiencyAnalysis(
   now = new Date(),
 ): Promise<EfficiencyAnalysis | null> {
-  try {
-    const { fromDate, toDate } = liveEfficiencyWindow(now);
-    const { rows, error } = await fetchTimeEntriesForWindow(fromDate, toDate);
-    if (error || !rows.length) return null;
-    const monthly = companyMonthlyFromTimeEntries(rows);
-    return buildEfficiencyAnalysis(monthly, now);
-  } catch {
-    return null;
-  }
+  const rows = await loadLiveEfficiencyTimeEntries(now);
+  if (!rows?.length) return null;
+  const monthly = companyMonthlyFromTimeEntries(rows);
+  return buildEfficiencyAnalysis(monthly, now);
 }

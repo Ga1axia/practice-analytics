@@ -499,9 +499,9 @@ export async function runTimeEntrySync(
       last_cursor: cursor,
       last_updated_cursor: maxUpdated || nowIso,
       metadata: {
-        projectCount: projects.length,
-        mappedRows: mapped.rows.length,
+        mappedRows: rows.length,
         overlapHours: req.mode === 'incremental' ? 48 : 0,
+        phaseLookup: 'time-entry-name-fallback',
       },
       error: null,
     });

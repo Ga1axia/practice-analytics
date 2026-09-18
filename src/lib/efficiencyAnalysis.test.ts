@@ -137,5 +137,7 @@ describe('buildEfficiencyAnalysis', () => {
     assert.equal(analysis!.billHours, 2524.25);
     assert.ok(Math.abs(analysis!.efficiency - 2524.25 / 3286) < 1e-9);
     assert.equal(analysis!.breakdown.ptoSick, 210);
+    assert.equal(analysis!.nbHours, 1172.25 - 210);
+    assert.equal(analysis!.hoursWorked, 3696.5 - 210);
   });
 });

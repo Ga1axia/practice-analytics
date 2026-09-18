@@ -115,6 +115,8 @@ async function main() {
     }
 
     try {
+      const t0 = Date.now();
+      console.log(`[api] ${req.method} ${pathName}`);
       const body = ['POST', 'PUT', 'PATCH'].includes(req.method || '')
         ? await readBody(req)
         : undefined;
@@ -124,6 +126,7 @@ async function main() {
         cookies: {},
       }) as VercelRequest;
       await handler(vReq, wrapRes(res));
+      console.log(`[api] ${pathName} ${res.statusCode} ${Date.now() - t0}ms`);
     } catch (e) {
       console.error('[api]', pathName, e);
       if (!res.headersSent) {

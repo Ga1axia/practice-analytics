@@ -7,7 +7,7 @@ import {
   deleteAdminRows,
   listAdminTables,
   listProjectSchedules,
-  pruneProjectsWithoutRecentHours,
+  markProjectsInactiveWithoutRecentHours,
   queryAdminTable,
   seedMembersFromTimeEntries,
   seedSchedulesFromTimeEntries,
@@ -618,10 +618,10 @@ export function AdminData() {
         <div className="admin-data-panel">
           <h3>Seed project members from logged hours</h3>
           <p className="pd-muted">
-            Scans <span className="mono">pa_time_entries</span>, matches job codes to Project List
-            headers, inserts missing rows into <span className="mono">pa_project_members</span>, and
-            promotes Project List managers to leads. Same logic as{' '}
-            <span className="mono">npm run sync:project-members</span>.
+            Scans <span className="mono">pa_time_entries</span>, matches job codes <em>or</em> CORE
+            project names (without codes) to Project List headers, inserts missing rows into{' '}
+            <span className="mono">pa_project_members</span>, and promotes Project List managers to
+            leads. Same logic as <span className="mono">npm run sync:project-members</span>.
           </p>
           <p className="pd-muted">
             Does <strong>not</strong> create, clear, or change schedules, schedule rows, or project
@@ -709,10 +709,11 @@ export function AdminData() {
             </button>
           </div>
 
-          <h3 style={{ marginTop: 28 }}>Prune projects without recent hours</h3>
+          <h3 style={{ marginTop: 28 }}>Mark stale projects inactive</h3>
           <p className="pd-muted">
-            Delete Project List rows (and orphan schedules) with no time entries in the last 3 years.
-            CORE sync also applies this filter automatically.
+            Set Project List status to <span className="mono">INACTIVE</span> when a job has no
+            hours in the last 2 years (including never logged). Completed/canceled stay as-is.
+            Rows stay in the library. CORE sync does this automatically.
           </p>
           <div className="admin-data-actions">
             <button
@@ -722,15 +723,15 @@ export function AdminData() {
               onClick={() => {
                 if (
                   !window.confirm(
-                    'Delete all projects (and their schedules) with no hours in the last 3 years?',
+                    'Mark projects INACTIVE when they have no hours in the last 2 years? This does not delete rows.',
                   )
                 ) {
                   return;
                 }
-                void run('Prune projects', async () => pruneProjectsWithoutRecentHours());
+                void run('Mark inactive', async () => markProjectsInactiveWithoutRecentHours());
               }}
             >
-              Prune now
+              Mark inactive now
             </button>
           </div>
 

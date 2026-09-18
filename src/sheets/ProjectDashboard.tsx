@@ -429,7 +429,11 @@ export function ProjectDashboard({
                 % Billed <span className="tag">of contract</span>
               </h3>
               <div className="pd-gauge-wrap">
-                <GaugeRing pct={pctBilled} color={palette.gold} />
+                <GaugeRing
+                  pct={pctBilled}
+                  color={palette.gold}
+                  chartKey={`pd-bill-${project.key}-${pctBilled}`}
+                />
               </div>
               <p className="pd-gauge-sub mono">{fmtPct(pctBilled)}</p>
             </div>
@@ -438,7 +442,11 @@ export function ProjectDashboard({
                 % Spent <span className="tag">of contract</span>
               </h3>
               <div className="pd-gauge-wrap">
-                <GaugeRing pct={pctUsed} color={palette.teal} />
+                <GaugeRing
+                  pct={pctUsed}
+                  color={palette.teal}
+                  chartKey={`pd-spent-${project.key}-${pctUsed}`}
+                />
               </div>
               <p className="pd-gauge-sub mono">{fmtPct(pctUsed)}</p>
             </div>
@@ -450,6 +458,7 @@ export function ProjectDashboard({
                 <GaugeRing
                   pct={margin == null ? 0 : Math.max(0, margin)}
                   color={margin != null && margin < 0 ? palette.rust : palette.green}
+                  chartKey={`pd-margin-${project.key}-${margin ?? 0}`}
                 />
               </div>
               <p className="pd-gauge-sub mono">
@@ -557,6 +566,7 @@ export function ProjectDashboard({
                     {phaseChart && phaseChart.labels.length ? (
                       <div className="chart-wrap pd-doughnut-wrap">
                         <DoughnutChart
+                          chartKey={`pd-phase-${project.key}`}
                           labels={phaseChart.labels}
                           values={phaseChart.contract}
                           colors={[
@@ -609,6 +619,7 @@ export function ProjectDashboard({
                     {monthlyLabels.length ? (
                       <div className="chart-wrap pd-chart-bar">
                         <VBarChart
+                          key={`pd-monthly-${project.key}`}
                           labels={monthlyLabels.map(monthLabel)}
                           datasets={[
                             {
@@ -629,6 +640,7 @@ export function ProjectDashboard({
           </div>
 
           <ProjectHoursBreakdown
+            key={project.key}
             projectTitle={project.title}
             projectFullName={project.key || project.row?.project || project.title}
             projectCode={project.code}

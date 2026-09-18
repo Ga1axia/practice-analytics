@@ -47,6 +47,21 @@ function extractCode(s: string | null | undefined): string | null {
   return m ? m[1]! : null;
 }
 
+function stripJobCodes(s: string | null | undefined): string {
+  return String(s || '')
+    .replace(CODE_RE, ' ')
+    .replace(/\s*[-–]\s*$/g, '')
+    .replace(/^\s*[-–]\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parentLabelOf(s: string | null | undefined): string {
+  const stripped = stripJobCodes(s);
+  const cut = stripped.match(/^(.*)\s[-–]\s.+$/);
+  return (cut ? cut[1]! : stripped).trim();
+}
+
 function norm(s: string): string {
   return s.trim().toLowerCase();
 }
@@ -109,6 +124,7 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
 
   const byCode = new Map<string, { key: string; leads: Set<string> }>();
   const byKey = new Map<string, { key: string; leads: Set<string> }>();
+  const byBare = new Map<string, { key: string; leads: Set<string> }[]>();
 
   for (const row of projects) {
     if (row.row_kind === 'project') {
@@ -117,6 +133,12 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
       byKey.set(row.project, entry);
       const code = extractCode(row.project);
       if (code) byCode.set(code, entry);
+      const bare = norm(stripJobCodes(row.project));
+      if (bare.length >= 4) {
+        const list = byBare.get(bare) || [];
+        list.push(entry);
+        byBare.set(bare, list);
+      }
     }
   }
   for (const row of projects) {
@@ -142,12 +164,23 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
     for (const row of data) {
       const name = String(row.employee_name || '').trim();
       if (!name) continue;
+      const entries = new Set<{ key: string; leads: Set<string> }>();
       for (const code of [extractCode(row.parent_project_name), extractCode(row.project_name)]) {
-        if (!code || !byCode.has(code)) continue;
-        let set = peopleByCode.get(code);
+        if (code && byCode.has(code)) entries.add(byCode.get(code)!);
+      }
+      for (const label of [
+        stripJobCodes(row.parent_project_name),
+        parentLabelOf(row.project_name),
+      ]) {
+        const bare = norm(label);
+        if (bare.length < 4) continue;
+        for (const entry of byBare.get(bare) || []) entries.add(entry);
+      }
+      for (const entry of entries) {
+        let set = peopleByCode.get(entry.key);
         if (!set) {
           set = new Set();
-          peopleByCode.set(code, set);
+          peopleByCode.set(entry.key, set);
         }
         set.add(name);
       }
@@ -180,8 +213,8 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
   const inserts: { project_key: string; employee_name: string; role: string }[] = [];
   const promoteLeads: { project_key: string; employee_name: string }[] = [];
 
-  for (const [code, entry] of byCode) {
-    const names = peopleByCode.get(code) || new Set();
+  for (const entry of byKey.values()) {
+    const names = peopleByCode.get(entry.key) || new Set();
     const current = have.get(entry.key) || new Map();
 
     for (const lead of entry.leads) {
@@ -566,11 +599,21 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'mark_projects_inactive_without_te') {
+      const { hoursCutoffIso, markProjectsInactiveWithoutRecentHours } = await import(
+        '../_lib/projectHoursFilter.js'
+      );
+      const since = hoursCutoffIso();
+      const result = await markProjectsInactiveWithoutRecentHours(sb, since);
+      res.status(200).json({ ok: true, since, ...result });
+      return;
+    }
+
     if (action === 'prune_projects_without_te') {
       const { hoursCutoffIso, pruneProjectsWithoutRecentHours } = await import(
         '../_lib/projectHoursFilter.js'
       );
-      const since = hoursCutoffIso(3);
+      const since = hoursCutoffIso();
       const result = await pruneProjectsWithoutRecentHours(sb, since);
       res.status(200).json({ ok: true, since, ...result });
       return;

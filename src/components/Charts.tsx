@@ -36,14 +36,17 @@ export function DoughnutChart({
   values,
   colors,
   borderWidths,
+  chartKey,
 }: {
   labels: string[];
   values: number[];
   colors: string[];
   borderWidths?: number[];
+  chartKey?: string;
 }) {
   return (
     <Chart
+      key={chartKey || labels.join('|')}
       type="doughnut"
       data={{
         labels,
@@ -281,10 +284,13 @@ export function GaugeRing({
   pct,
   color,
   track = '#E4E8EE',
+  chartKey,
 }: {
   pct: number;
   color: string;
   track?: string;
+  /** Remount when the scoped project/values change (Chart.js doughnut otherwise sticks). */
+  chartKey?: string;
 }) {
   const clamped = Math.max(0, Math.min(pct, 1.5));
   const filled = Math.min(clamped, 1);
@@ -293,6 +299,7 @@ export function GaugeRing({
   return (
     <div className="gauge-ring">
       <Chart
+        key={chartKey ?? `${color}-${Math.round(filled * 1000)}`}
         type="doughnut"
         data={{
           labels: ['Value', 'Rest'],
@@ -387,6 +394,7 @@ export function BillNbEfficiencyChart({
           <div className="eff-donut-wrap">
             {hasData ? (
               <Chart
+                key={`${analysis.monthLabel}-${billSlice}-${nbSlice}-${proSlice}`}
                 type="doughnut"
                 data={{
                   labels: ['Bill Hrs', 'NB Hrs', 'Probono Hrs'],

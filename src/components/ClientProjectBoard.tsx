@@ -37,13 +37,12 @@ import { buildDeadlineEvents, startOfDay } from '../lib/scheduleDates';
 import { groupScheduleSections, sectionStatus } from '../lib/scheduleSections';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { supabase } from '../lib/supabase';
-import { ClientBoxLinks } from './ClientBoxLinks';
 import { ClientMeetingsPanel } from './ClientMeetingsPanel';
 import { ClientMessageThread } from './ClientMessageThread';
 import { CustomerComms } from './CustomerComms';
 import { ScheduleDeadlineCalendar } from './ScheduleDeadlineCalendar';
 
-type CenterTab = 'overview' | 'documents' | 'budget' | 'notes';
+type CenterTab = 'overview' | 'meetings' | 'budget' | 'notes';
 
 function stageState(i: number, currentIdx: number): 'done' | 'current' | 'upcoming' {
   if (currentIdx < 0) return 'upcoming';
@@ -322,6 +321,12 @@ export function ClientProjectBoard({
   }
 
   const switcher = projects.filter((p) => p.projectKey !== project.projectKey).length > 0;
+  const centerTabs: { id: CenterTab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    ...(mode === 'pm' ? [{ id: 'meetings' as const, label: 'Meetings' }] : []),
+    { id: 'budget', label: 'Budget' },
+    { id: 'notes', label: mode === 'customer' ? 'Schedule notes' : 'Notes' },
+  ];
 
   return (
     <div className={`cp-board mode-${mode}`}>
@@ -522,14 +527,7 @@ export function ClientProjectBoard({
 
         <div className="cp-dash-main" id="cp-center">
           <div className="cp-center-tabs" role="tablist" aria-label="Project details">
-            {(
-              [
-                ['overview', 'Overview'],
-                ['documents', 'Files'],
-                ['budget', 'Budget'],
-                ['notes', mode === 'customer' ? 'Schedule notes' : 'Notes'],
-              ] as const
-            ).map(([id, label]) => (
+            {centerTabs.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
@@ -601,11 +599,6 @@ export function ClientProjectBoard({
                                 {feeLine ? <em className="cp-fee-line">{feeLine}</em> : null}
                               </span>
                             </label>
-                            {kind === 'approve' ? (
-                              <button type="button" className="cp-text-btn" onClick={() => goTab('documents')}>
-                                Review &amp; Approve
-                              </button>
-                            ) : null}
                             {kind === 'upload' && contact?.email ? (
                               <a
                                 className="cp-text-btn"
@@ -631,11 +624,6 @@ export function ClientProjectBoard({
                           <Glossed text={item} />
                         </span>
                         <span className="mono cp-est-chip">Expected {targetDate}</span>
-                        {/drawing|spec|document|package|board|plan/i.test(item) ? (
-                          <button type="button" className="cp-text-btn" onClick={() => goTab('documents')}>
-                            View files
-                          </button>
-                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -644,25 +632,16 @@ export function ClientProjectBoard({
             </section>
           ) : null}
 
-          {tab === 'documents' ? (
+          {tab === 'meetings' && mode === 'pm' ? (
             <section
               className="cp-card"
-              id="cp-panel-documents"
+              id="cp-panel-meetings"
               role="tabpanel"
-              aria-labelledby="cp-tab-documents"
+              aria-labelledby="cp-tab-meetings"
             >
-              <p className="customer-kicker">Shared with you</p>
-              <h2 className="display">Files</h2>
-              <p className="cp-phase-summary">
-                Design drawings, renderings, and packages from your project team. Open a file in
-                Box to view or download.
-              </p>
-              <ClientBoxLinks
+              <ClientMeetingsPanel
                 projectKey={project.projectKey}
                 clientName={project.clientName}
-                authorName={authorName}
-                mode={mode}
-                embedded
               />
             </section>
           ) : null}
@@ -767,12 +746,8 @@ export function ClientProjectBoard({
                   <p className="cp-phase-summary">
                     Edit firm notes and task status on the Project Schedule section of this dashboard
                     (below when you close preview). Direct messages are what the client sees first.
+                    Meeting recaps live on the Meetings tab.
                   </p>
-                  <ClientMeetingsPanel
-                    projectKey={project.projectKey}
-                    clientName={project.clientName}
-                    compact
-                  />
                 </>
               )}
             </section>

@@ -16,9 +16,10 @@ import 'react-grid-layout/css/styles.css';
 import { BillNbEfficiencyChart, GaugeRing, HBarChart, VBarChart } from '../components/Charts';
 import {
   buildEfficiencyAnalysis,
-  type EfficiencyAnalysis,
+  companyMonthlyFromTimeEntries,
+  type EfficiencyTimeRow,
 } from '../lib/efficiencyAnalysis';
-import { loadLiveEfficiencyAnalysis } from '../lib/loadEfficiencyLive';
+import { loadLiveEfficiencyTimeEntries } from '../lib/loadEfficiencyLive';
 import { fmtUSD, fmtUSDk, palette } from '../lib/format';
 import {
   managerInitials,
@@ -36,6 +37,7 @@ import {
   type ChatViewAction,
 } from '../lib/chatViewAction';
 import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
+import { timeEntryMatchesProject } from '../lib/projectHoursMatch';
 import { rowOutstanding, sumAmountReceivable } from '../lib/receivable';
 import type { DashboardData, ProjectRow } from '../lib/types';
 
@@ -181,7 +183,9 @@ export function MainReport({
   const [focus, setFocus] = useState<Focus>(null);
   const [layout, setLayout] = useState<Layout>(() => loadLayout());
   const [gridH, setGridH] = useState(0);
-  const [liveEfficiency, setLiveEfficiency] = useState<EfficiencyAnalysis | null>(null);
+  const [liveEfficiencyRows, setLiveEfficiencyRows] = useState<EfficiencyTimeRow[] | null>(
+    null,
+  );
   const { width, containerRef, mounted, measureWidth } = useContainerWidth({
     measureBeforeMount: false,
     initialWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -604,12 +608,38 @@ export function MainReport({
     () => buildEfficiencyAnalysis(data.company_monthly),
     [data.company_monthly],
   );
-  const efficiencyAnalysis = liveEfficiency ?? snapshotEfficiency;
+  const efficiencyAnalysis = useMemo(() => {
+    if (!liveEfficiencyRows?.length) return snapshotEfficiency;
+    let rows = liveEfficiencyRows;
+    if (focus) {
+      const proj = filteredProjects.find((p) => p.key === focus.projectKey);
+      if (proj) {
+        const matchOpts = {
+          title: proj.title,
+          fullName: proj.key || proj.row?.project || proj.title,
+          code: proj.code,
+        };
+        rows = rows.filter((r) => timeEntryMatchesProject(r, matchOpts));
+        if (focus.kind === 'phase') {
+          const ph = proj.phases.find((x) => x.row.project === focus.phaseKey);
+          const needle = (ph?.label || '').trim().toLowerCase();
+          if (needle.length >= 3) {
+            rows = rows.filter((r) =>
+              `${r.project_name || ''} ${r.parent_project_name || ''}`
+                .toLowerCase()
+                .includes(needle),
+            );
+          }
+        }
+      }
+    }
+    return buildEfficiencyAnalysis(companyMonthlyFromTimeEntries(rows)) ?? snapshotEfficiency;
+  }, [liveEfficiencyRows, snapshotEfficiency, focus, filteredProjects]);
 
   useEffect(() => {
     let cancelled = false;
-    void loadLiveEfficiencyAnalysis().then((live) => {
-      if (!cancelled && live) setLiveEfficiency(live);
+    void loadLiveEfficiencyTimeEntries().then((rows) => {
+      if (!cancelled && rows?.length) setLiveEfficiencyRows(rows);
     });
     return () => {
       cancelled = true;
@@ -1099,12 +1129,16 @@ export function MainReport({
             </div>
 
             <div key="gauges">
-              <Tile title="Performance" tag="rings + efficiency">
+              <Tile title="Performance" tag={focusLabel ? focusLabel : 'rings + efficiency'}>
                 <div className="mr-perf fill">
                   <div className="mr-gauges mr-gauges-compact">
                     <div className="mr-gauge">
                       <div className="mr-gauge-label mono">Billing</div>
-                      <GaugeRing pct={kpis.billingPct} color={palette.gold} />
+                      <GaugeRing
+                        pct={kpis.billingPct}
+                        color={palette.gold}
+                        chartKey={`bill-${focusLabel || 'all'}-${kpis.billingPct}`}
+                      />
                       <dl className="mr-gauge-stats">
                         <div>
                           <dt>Billed</dt>
@@ -1121,6 +1155,7 @@ export function MainReport({
                       <GaugeRing
                         pct={kpis.earnedPct}
                         color={kpis.earnedPct > 1 ? palette.rust : palette.teal}
+                        chartKey={`earn-${focusLabel || 'all'}-${kpis.earnedPct}`}
                       />
                       <dl className="mr-gauge-stats">
                         <div>
@@ -1135,7 +1170,11 @@ export function MainReport({
                     </div>
                     <div className="mr-gauge">
                       <div className="mr-gauge-label mono">Margin</div>
-                      <GaugeRing pct={kpis.marginPct} color={palette.green} />
+                      <GaugeRing
+                        pct={kpis.marginPct}
+                        color={palette.green}
+                        chartKey={`margin-${focusLabel || 'all'}-${kpis.marginPct}`}
+                      />
                       <dl className="mr-gauge-stats">
                         <div>
                           <dt>Profit</dt>
@@ -1145,7 +1184,10 @@ export function MainReport({
                     </div>
                   </div>
                   {efficiencyAnalysis ? (
-                    <BillNbEfficiencyChart analysis={efficiencyAnalysis} />
+                    <BillNbEfficiencyChart
+                      key={focusLabel || 'firm'}
+                      analysis={efficiencyAnalysis}
+                    />
                   ) : (
                     <div className="plist-empty">No firm hours for efficiency analysis yet.</div>
                   )}

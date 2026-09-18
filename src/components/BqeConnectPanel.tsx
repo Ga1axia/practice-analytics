@@ -94,6 +94,34 @@ async function readApiJson<T extends { error?: string; detail?: string }>(res: R
   }
 }
 
+async function postSync<T extends { error?: string; detail?: string; message?: string }>(
+  body: Record<string, unknown>,
+  timeoutMs = 180_000,
+): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch('/api/bqe/sync', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const parsed = await readApiJson<T>(res);
+    if (!res.ok) throw new Error(apiErrorMessage(parsed, 'Sync step failed'));
+    return parsed;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(
+        'That sync step timed out after 3 minutes. Refresh the page to cancel the old request, then retry. Use Incremental time entries instead of a full CORE dump.',
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function apiErrorMessage(body: { error?: string; detail?: string }, fallback: string): string {
   if (body.error && body.detail) return `${body.error} ${body.detail}`;
   return body.error || body.detail || fallback;
@@ -173,77 +201,63 @@ export function BqeConnectPanel() {
     }
   }
 
-  /** Production: projects → recent months TE → short aggregates. Local: one full sync. */
+  /** Incremental time, then paged projects. Never dumps the full CORE catalog in one request. */
   async function sync() {
     setBusy(true);
     setMsg(null);
     setErr(null);
     try {
-      if (onVercel) {
-        // 1) Time first (needed for 3-year hours filter on projects)
+      const teCount = status?.timeEntryCount ?? 0;
+      let teFetched = 0;
+      if (teCount < 1) {
         const months = lastNMonthWindows(36);
-        let teFetched = 0;
         for (let i = 0; i < months.length; i += 1) {
           const m = months[i]!;
-          setMsg(`Step 1 — time ${m.label} (${i + 1}/${months.length})…`);
-          const tRes = await fetch('/api/bqe/sync', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({ mode: 'historical', since: m.since, until: m.until }),
+          setMsg(`Step 1 — historical time ${m.label} (${i + 1}/${months.length})…`);
+          const tBody = await postSync<{ fetched?: number }>({
+            mode: 'historical',
+            since: m.since,
+            until: m.until,
           });
-          const tBody = await readApiJson<{
-            message?: string;
-            error?: string;
-            fetched?: number;
-          }>(tRes);
-          if (!tRes.ok) throw new Error(tBody.error || `Time sync failed for ${m.label}`);
           teFetched += tBody.fetched || 0;
         }
-
-        // 2) Projects — keep only those with hours in the past 3 years (no Active-only filter)
-        let page = 1;
-        let totalProjects = 0;
-        for (;;) {
-          setMsg(`Step 2 — projects page ${page}…`);
-          const pRes = await fetch('/api/bqe/sync', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              mode: 'projects',
-              page,
-              pageSize: 80,
-              reset: page === 1,
-              requireRecentHours: true,
-            }),
-          });
-          const pBody = await readApiJson<{
-            message?: string;
-            error?: string;
-            hasMore?: boolean;
-            insertedProjects?: number;
-          }>(pRes);
-          if (!pRes.ok) throw new Error(pBody.error || `Projects page ${page} failed`);
-          totalProjects += pBody.insertedProjects || 0;
-          if (!pBody.hasMore) break;
-          page += 1;
-          if (page > 120) break;
-        }
-
-        setMsg(
-          `Vercel sync complete: ~${teFetched} time entries (36 mo) · ${totalProjects} project rows with hours in the last 3 years.`,
-        );
       } else {
-        const res = await fetch('/api/bqe/sync', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({ includeTimeEntries: true }),
+        setMsg('Step 1 — incremental time entries…');
+        const tBody = await postSync<{ fetched?: number; message?: string }>({
+          mode: 'incremental',
         });
-        const body = await readApiJson<{ message?: string; error?: string }>(res);
-        if (!res.ok) throw new Error(body.error || 'Sync failed');
-        setMsg(body.message || 'Sync complete.');
+        teFetched = tBody.fetched || 0;
       }
+
+      let page = 1;
+      let totalProjects = 0;
+      for (;;) {
+        setMsg(`Step 2 — projects page ${page}…`);
+        const pBody = await postSync<{
+          hasMore?: boolean;
+          insertedProjects?: number;
+          message?: string;
+        }>({
+          mode: 'projects',
+          page,
+          pageSize: 80,
+          reset: page === 1,
+          requireRecentHours: true,
+        });
+        totalProjects += pBody.insertedProjects || 0;
+        if (!pBody.hasMore) break;
+        page += 1;
+        if (page > 120) break;
+      }
+
+      setMsg(
+        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written. Dashboard is refreshing…`,
+      );
       await refreshStatus();
       await reload();
+      setMsg(
+        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (library is additive; stale jobs marked inactive).`,
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Sync failed');
     } finally {
@@ -327,15 +341,16 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync runs in small steps (projects → recent months of time → analytics) so
-            Vercel Hobby does not time out. Set{' '}
+            Production sync runs in small steps (incremental time → new projects) so it cannot
+            hang on the full CORE catalog. Set{' '}
             <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
             to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
           </>
         ) : (
           <>
             Connect with a CORE admin login, then sync. Locally also run{' '}
-            <span className="mono">npm run dev:api</span>.
+            <span className="mono">npm run dev:api</span>. Sync shows step progress (time, then
+            project pages) instead of one long “Working…” wait.
           </>
         )}
       </p>

@@ -136,6 +136,8 @@ Dashboard **admins** get an **ADMIN · Data Console** sheet to browse/edit white
 
 ## Manual test plan
 
+Staff onboarding (Avery / Arnita): [`docs/onboarding-avery-arnita.md`](docs/onboarding-avery-arnita.md)
+
 - Sign in as admin → sheets A-1–A-6 including BQE Connect on Executive
 - Sign in as exec (Malika demo) → firm sheets, no BQE Connect
 - Sign in as Avery → employee workspace with lead financials on managed projects

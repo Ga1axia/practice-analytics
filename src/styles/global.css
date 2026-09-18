@@ -1613,9 +1613,23 @@ footer{
   border:1px solid var(--border); background:color-mix(in srgb, var(--gold) 6%, #fff);
   padding:14px; margin-bottom:14px;
 }
+.pd-meeting-form.paste{ background:color-mix(in srgb, var(--teal) 6%, #fff); }
+.pd-meeting-form.paste > label.wide{ display:flex; flex-direction:column; gap:5px; }
+.pd-meeting-form.paste > label.wide span{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
+  color:var(--ink-soft);
+}
+.pd-meeting-form.paste textarea{
+  min-height:140px; resize:vertical; border:1px solid var(--border); background:#fff;
+  padding:10px 12px; font:inherit; font-size:14px; line-height:1.5; color:var(--ink);
+}
+.pd-meeting-paste-hint{
+  margin:8px 0 0; font-size:12px; color:var(--ink-soft);
+}
 .pd-meeting-form-grid{
   display:grid; grid-template-columns:1fr 1fr; gap:12px;
 }
+.pd-meeting-form.paste .pd-meeting-form-grid{ margin-top:12px; }
 .pd-meeting-form-grid label{ display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--ink-soft); }
 .pd-meeting-form-grid label.wide{ grid-column:1 / -1; }
 .pd-meeting-form-grid label span{
@@ -1626,7 +1640,7 @@ footer{
   border:1px solid var(--border); background:#fff; padding:8px 10px;
   font:inherit; font-size:13.5px; color:var(--ink);
 }
-.pd-meeting-form-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+.pd-meeting-form-actions{ display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .pd-meetings-layout{
   display:grid; grid-template-columns:minmax(220px, 0.9fr) minmax(0, 1.4fr); gap:12px;
 }

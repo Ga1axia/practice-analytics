@@ -2,144 +2,45 @@ import { useMemo, useState } from 'react';
 import { KpiRow } from '../components/KpiRow';
 import { fmtUSD, fmtUSDk } from '../lib/format';
 import {
-  buildClientHierarchy,
-  type ClientNode,
-  type ProjectNode,
-} from '../lib/projectListHierarchy';
+  buildPlistTableRows,
+  filterPlistRows,
+  plistScopeRows,
+  type PlistHierarchyFilter,
+  type ProjectStatusFilter,
+} from '../lib/projectListRows';
 import { rowOutstanding } from '../lib/receivable';
-import type { DashboardData, ProjectRow } from '../lib/types';
+import { statusAbbrev } from '../lib/phaseAbbrev';
+import type { DashboardData } from '../lib/types';
 
-function PhaseTable({ phases }: { phases: { row: ProjectRow; label: string }[] }) {
-  if (!phases.length) {
-    return <div className="plist-empty">No phases for this project.</div>;
-  }
-  return (
-    <div className="table-scroll plist-phase-scroll">
-      <table className="data">
-        <thead>
-          <tr>
-            <th>Phase / Task</th>
-            <th>Manager</th>
-            <th className="num">Billed Hrs</th>
-            <th className="num">Spent Hrs</th>
-            <th className="num">Net Billed</th>
-            <th className="num">Contract</th>
-            <th className="num">Outstanding</th>
-          </tr>
-        </thead>
-        <tbody>
-          {phases.map(({ row, label }) => (
-            <tr key={row.project}>
-              <td title={row.project}>{label}</td>
-              <td>{row.manager || '—'}</td>
-              <td className="num">{(row.billed_hours ?? 0).toFixed(2)}</td>
-              <td className="num">{(row.spent_hours ?? 0).toFixed(2)}</td>
-              <td className="num">{fmtUSD(row.billed || 0)}</td>
-              <td className="num">{fmtUSD(row.contract || 0)}</td>
-              <td className="num">{fmtUSD(rowOutstanding(row))}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+const STATUS_OPTIONS: { value: ProjectStatusFilter; label: string }[] = [
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'INACTIVE', label: 'Inactive' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'ALL', label: 'All' },
+];
 
-function ProjectBlock({
-  project,
-  open,
-  onToggle,
-  showHeader,
+const HIERARCHY_OPTIONS: { value: PlistHierarchyFilter; label: string }[] = [
+  { value: 'all', label: 'All levels' },
+  { value: 'project', label: 'Projects only' },
+  { value: 'phase', label: 'Phases only' },
+];
+
+export function ProjectList({
+  data,
+  globalSearch = '',
 }: {
-  project: ProjectNode;
-  open: boolean;
-  onToggle: () => void;
-  showHeader: boolean;
+  data: DashboardData;
+  /** Top-header global search (deterministic, all row fields). */
+  globalSearch?: string;
 }) {
-  if (!showHeader) {
-    return <PhaseTable phases={project.phases} />;
-  }
-
-  return (
-    <div className={`plist-project ${open ? 'open' : ''}`}>
-      <button type="button" className="plist-project-head" onClick={onToggle}>
-        <span className="plist-chevron" aria-hidden="true">
-          {open ? '▾' : '▸'}
-        </span>
-        <span className="plist-project-title">
-          {project.title}
-          {project.code ? <span className="plist-code mono">{project.code}</span> : null}
-        </span>
-        <span className="plist-meta mono">
-          {project.phases.length} phase{project.phases.length === 1 ? '' : 's'}
-        </span>
-        <span className="plist-amt mono">{fmtUSDk(project.contract)}</span>
-      </button>
-      {open ? <PhaseTable phases={project.phases} /> : null}
-    </div>
-  );
-}
-
-function ClientBlock({
-  node,
-  open,
-  onToggle,
-  openProjects,
-  toggleProject,
-}: {
-  node: ClientNode;
-  open: boolean;
-  onToggle: () => void;
-  openProjects: Set<string>;
-  toggleProject: (key: string) => void;
-}) {
-  return (
-    <div className={`plist-client ${open ? 'open' : ''}`}>
-      <button type="button" className="plist-client-head" onClick={onToggle}>
-        <span className="plist-chevron" aria-hidden="true">
-          {open ? '▾' : '▸'}
-        </span>
-        <span className="plist-client-name">{node.client}</span>
-        <span className="plist-meta mono">
-          {node.singleProject
-            ? `${node.phaseCount} phase${node.phaseCount === 1 ? '' : 's'}`
-            : `${node.projects.length} projects · ${node.phaseCount} phases`}
-        </span>
-        <span className="plist-amt mono">{fmtUSDk(node.contract)}</span>
-      </button>
-      {open ? (
-        <div className="plist-client-body">
-          {node.singleProject ? (
-            <ProjectBlock
-              project={node.projects[0]!}
-              open
-              onToggle={() => undefined}
-              showHeader={false}
-            />
-          ) : (
-            node.projects.map((p) => (
-              <ProjectBlock
-                key={p.key}
-                project={p}
-                open={openProjects.has(p.key)}
-                onToggle={() => toggleProject(p.key)}
-                showHeader
-              />
-            ))
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export function ProjectList({ data }: { data: DashboardData }) {
-  const [search, setSearch] = useState('');
+  const [localSearch, setLocalSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>('ACTIVE');
+  const [hierarchyFilter, setHierarchyFilter] = useState<PlistHierarchyFilter>('all');
   const [manager, setManager] = useState('');
-  const [openClients, setOpenClients] = useState<Set<string>>(new Set());
-  const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionOnly, setSelectionOnly] = useState(false);
 
-  const hierarchy = useMemo(() => buildClientHierarchy(data.projects), [data.projects]);
+  const allRows = useMemo(() => buildPlistTableRows(data.projects), [data.projects]);
 
   const managers = useMemo(() => {
     const set = new Set<string>();
@@ -149,144 +50,284 @@ export function ProjectList({ data }: { data: DashboardData }) {
     return [...set].sort();
   }, [data.projects]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return hierarchy.filter((c) => {
-      if (manager) {
-        const hasMgr = c.projects.some(
-          (p) =>
-            p.row?.manager === manager ||
-            p.phases.some((ph) => ph.row.manager === manager),
-        );
-        if (!hasMgr) return false;
-      }
-      if (!q) return true;
-      if (c.client.toLowerCase().includes(q)) return true;
-      return c.projects.some(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.key.toLowerCase().includes(q) ||
-          p.phases.some(
-            (ph) =>
-              ph.label.toLowerCase().includes(q) ||
-              ph.row.project.toLowerCase().includes(q),
-          ),
-      );
-    });
-  }, [hierarchy, search, manager]);
+  const scopeRows = useMemo(
+    () => plistScopeRows(allRows, statusFilter, hierarchyFilter),
+    [allRows, statusFilter, hierarchyFilter],
+  );
+
+  const visibleRows = useMemo(
+    () =>
+      filterPlistRows(allRows, {
+        status: statusFilter,
+        hierarchy: hierarchyFilter,
+        localSearch,
+        globalSearch,
+        manager,
+        selectedIds,
+        selectionOnly,
+      }),
+    [
+      allRows,
+      statusFilter,
+      hierarchyFilter,
+      localSearch,
+      globalSearch,
+      manager,
+      selectedIds,
+      selectionOnly,
+    ],
+  );
 
   const totals = useMemo(() => {
-    const clients = filtered.length;
-    const projects = filtered.reduce((a, c) => a + c.projects.length, 0);
-    const phases = filtered.reduce((a, c) => a + c.phaseCount, 0);
-    const contract = filtered.reduce((a, c) => a + c.contract, 0);
-    const billed = filtered.reduce((a, c) => a + c.billed, 0);
-    return { clients, projects, phases, contract, billed };
-  }, [filtered]);
+    let contract = 0;
+    let billed = 0;
+    const clients = new Set<string>();
+    for (const entry of visibleRows) {
+      clients.add(entry.client);
+      contract += entry.row.contract || 0;
+      billed += entry.row.billed || 0;
+    }
+    return {
+      clients: clients.size,
+      rows: visibleRows.length,
+      contract,
+      billed,
+    };
+  }, [visibleRows]);
 
-  function toggleClient(client: string) {
-    setOpenClients((prev) => {
+  const visibleIds = useMemo(() => visibleRows.map((r) => r.id), [visibleRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+  function toggleRow(id: string) {
+    setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(client)) next.delete(client);
-      else next.add(client);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
-  function toggleProject(key: string) {
-    setOpenProjects((prev) => {
+  function toggleAllVisible() {
+    setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
       return next;
     });
   }
 
-  function expandAll() {
-    setOpenClients(new Set(filtered.map((c) => c.client)));
-    const keys = new Set<string>();
-    filtered.forEach((c) => {
-      if (!c.singleProject) c.projects.forEach((p) => keys.add(p.key));
-    });
-    setOpenProjects(keys);
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionOnly(false);
   }
 
-  function collapseAll() {
-    setOpenClients(new Set());
-    setOpenProjects(new Set());
+  function resetFilters() {
+    setLocalSearch('');
+    setStatusFilter('ACTIVE');
+    setHierarchyFilter('all');
+    setManager('');
+    clearSelection();
   }
 
   return (
-    <section className="sheet active">
-      <div className="filters">
-        <span className="f-label">Filter</span>
-        <input
-          type="text"
-          placeholder="Search client, project, or phase…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select value={manager} onChange={(e) => setManager(e.target.value)}>
-          <option value="">All managers</option>
-          {managers.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-        <button type="button" className="reset-btn" onClick={expandAll}>
-          Expand all
-        </button>
-        <button type="button" className="reset-btn" onClick={collapseAll}>
-          Collapse all
-        </button>
-        <button
-          type="button"
-          className="reset-btn"
-          onClick={() => {
-            setSearch('');
-            setManager('');
-          }}
-        >
-          Reset
-        </button>
+    <section className="sheet active plist-sheet">
+      <div className="plist-toolbar">
+        <div className="plist-toolbar-group">
+          <label className="plist-field">
+            <span className="plist-field-label">Project status</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as ProjectStatusFilter)}
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="plist-field">
+            <span className="plist-field-label">Hierarchy</span>
+            <select
+              value={hierarchyFilter}
+              onChange={(e) => setHierarchyFilter(e.target.value as PlistHierarchyFilter)}
+              title="Filter project headers vs phase rows"
+            >
+              {HIERARCHY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="plist-field plist-field-grow">
+            <span className="plist-field-label">Search</span>
+            <input
+              type="search"
+              placeholder="Search…"
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+
+          <label className="plist-field">
+            <span className="plist-field-label">Manager</span>
+            <select value={manager} onChange={(e) => setManager(e.target.value)}>
+              <option value="">All</option>
+              {managers.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="plist-toolbar-actions">
+          <label className="plist-selection-toggle">
+            <input
+              type="checkbox"
+              checked={selectionOnly}
+              disabled={selectedIds.size === 0}
+              onChange={(e) => setSelectionOnly(e.target.checked)}
+            />
+            Limit to selection ({selectedIds.size})
+          </label>
+          <button
+            type="button"
+            className="reset-btn"
+            disabled={selectedIds.size === 0}
+            onClick={clearSelection}
+          >
+            Clear selection
+          </button>
+          <button type="button" className="reset-btn" onClick={resetFilters}>
+            Reset filters
+          </button>
+        </div>
       </div>
+
+      <p className="plist-scope mono">
+        Showing {visibleRows.length.toLocaleString()} of {scopeRows.length.toLocaleString()}{' '}
+        projects and phases in view
+        {globalSearch.trim() ? ' · header search active' : ''}
+      </p>
 
       <KpiRow
         items={[
           { k: 'Clients', v: String(totals.clients) },
-          { k: 'Projects', v: String(totals.projects), cls: 'accent-teal' },
-          { k: 'Phases', v: String(totals.phases), cls: 'accent-gold' },
+          { k: 'Rows', v: String(totals.rows), cls: 'accent-teal' },
           { k: 'Contract', v: fmtUSDk(totals.contract), cls: 'accent-green' },
           { k: 'Net Billed', v: fmtUSDk(totals.billed), cls: 'accent-rust' },
         ]}
       />
 
-      <div className="panel">
+      <div className="panel plist-panel-fill">
         <h3>
-          Projects by client
+          Project list
           <span className="tag">
-            Click a client to expand phases
-            {filtered.some((c) => !c.singleProject)
-              ? ' · multi-project clients show projects first'
-              : ''}
+            <span className="plist-kind-icon plist-kind-project" title="Project header">
+              ▣
+            </span>{' '}
+            project ·{' '}
+            <span className="plist-kind-icon plist-kind-phase" title="Phase / sub-project">
+              ◦
+            </span>{' '}
+            phase
           </span>
         </h3>
-        <div className="plist-tree">
-          {filtered.length === 0 ? (
-            <div className="plist-empty">No clients match the current filters.</div>
-          ) : (
-            filtered.map((c) => (
-              <ClientBlock
-                key={c.client}
-                node={c}
-                open={openClients.has(c.client)}
-                onToggle={() => toggleClient(c.client)}
-                openProjects={openProjects}
-                toggleProject={toggleProject}
-              />
-            ))
-          )}
+        <div className="table-scroll plist-table-scroll">
+          <table className="data plist-table">
+            <thead>
+              <tr>
+                <th className="plist-col-check">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible rows"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                  />
+                </th>
+                <th className="plist-col-kind" title="Hierarchy level">
+                  Lvl
+                </th>
+                <th>Name</th>
+                <th>Client</th>
+                <th>Manager</th>
+                <th>Sts</th>
+                <th className="num">Billed Hrs</th>
+                <th className="num">Spent Hrs</th>
+                <th className="num">Net Billed</th>
+                <th className="num">Contract</th>
+                <th className="num">Outstanding</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="plist-empty">
+                    No projects or phases match the current filters.
+                  </td>
+                </tr>
+              ) : (
+                visibleRows.map((entry) => {
+                  const r = entry.row;
+                  const isProject = entry.kind === 'project';
+                  return (
+                    <tr
+                      key={entry.id}
+                      className={isProject ? 'plist-row-project' : 'plist-row-phase'}
+                    >
+                      <td className="plist-col-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(entry.id)}
+                          aria-label={`Select ${r.project}`}
+                          onChange={() => toggleRow(entry.id)}
+                        />
+                      </td>
+                      <td className="plist-col-kind">
+                        <span
+                          className={`plist-kind-icon ${isProject ? 'plist-kind-project' : 'plist-kind-phase'}`}
+                          title={isProject ? 'Project header' : 'Phase / sub-project'}
+                          aria-hidden="true"
+                        >
+                          {isProject ? '▣' : '◦'}
+                        </span>
+                      </td>
+                      <td className="plist-name-cell">
+                        <span className={isProject ? 'plist-name-project' : 'plist-name-phase'}>
+                          {isProject ? entry.title : entry.phaseLabel || r.project}
+                        </span>
+                        {entry.code ? (
+                          <span className="plist-code mono">{entry.code}</span>
+                        ) : null}
+                        {!isProject ? (
+                          <span className="plist-phase-parent mono">{entry.title}</span>
+                        ) : null}
+                      </td>
+                      <td>{entry.client}</td>
+                      <td>{r.manager || '—'}</td>
+                      <td className="mono">{statusAbbrev(r.status || 'ACTIVE')}</td>
+                      <td className="num">{(r.billed_hours ?? 0).toFixed(2)}</td>
+                      <td className="num">{(r.spent_hours ?? 0).toFixed(2)}</td>
+                      <td className="num">{fmtUSD(r.billed || 0)}</td>
+                      <td className="num">{fmtUSD(r.contract || 0)}</td>
+                      <td className="num">{fmtUSD(rowOutstanding(r))}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

@@ -27,6 +27,7 @@ function StaffShell() {
   const { profile, realProfile, signOut } = useAuth();
   const { data, loading, error } = useDashboard();
   const [sheet, setSheet] = useState<SheetId>('exec');
+  const [globalSearch, setGlobalSearch] = useState('');
   const [chatOpen, setChatOpen] = useState(false);
   const [viewAction, setViewAction] = useState<{ seq: number; action: ChatViewAction } | null>(
     null,
@@ -51,7 +52,7 @@ function StaffShell() {
     );
   }
 
-  const fillViewport = sheet === 'main';
+  const fillViewport = sheet === 'main' || sheet === 's5';
 
   return (
     <div className={`app-shell${fillViewport ? ' fill-viewport' : ''}`}>
@@ -79,6 +80,20 @@ function StaffShell() {
             <div className="k">Total Contract Value</div>
             <div className="v">{fmtUSDk(data.kpi_all.contract_amount)}</div>
           </div>
+          {sheet === 's5' ? (
+            <div className="tb-cell tb-cell-search">
+              <div className="k">Global search</div>
+              <input
+                type="search"
+                className="tb-global-search"
+                placeholder='All fields · "exact phrase"'
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          ) : null}
           <div className="tb-cell">
             <div className="k">Signed in</div>
             <div className="v" style={{ fontSize: 12 }}>
@@ -172,7 +187,9 @@ function StaffShell() {
         {sheet === 's1' ? <ProjectAnalysis data={data} /> : null}
         {sheet === 's2' ? <WorkloadPerformance data={data} /> : null}
         {sheet === 's4' ? <ProjectDashboard data={data} /> : null}
-        {sheet === 's5' ? <ProjectList data={data} /> : null}
+        {sheet === 's5' ? (
+          <ProjectList data={data} globalSearch={globalSearch} />
+        ) : null}
         {sheet === 's6' ? <Staffing /> : null}
         {sheet === 'admin' && showAdminConsole ? <AdminData /> : null}
       </main>

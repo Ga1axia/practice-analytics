@@ -30,7 +30,12 @@ import {
   staffNameOptions,
   type ProjectMemberRole,
 } from '../lib/projectMembers';
-import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
+import {
+  buildClientHierarchy,
+  isActiveProjectNode,
+  type ProjectNode,
+} from '../lib/projectListHierarchy';
+import { normalizeProjectStatus } from '../lib/projectStatus';
 import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
 import { useDemoMode } from '../hooks/useDemoMode';
@@ -72,22 +77,11 @@ function resolveProjectKey(
 }
 
 function projectStatus(p: ProjectNode): string {
-  return (
+  const raw =
     p.row?.status ||
     p.phases.find((ph) => ph.row.status)?.row.status ||
-    'ACTIVE'
-  );
-}
-
-function projectIsActive(p: ProjectNode): boolean {
-  const statuses = [p.row?.status, ...p.phases.map((ph) => ph.row.status)]
-    .map((s) => (s || '').trim().toUpperCase())
-    .filter(Boolean);
-  // No status on header or phases → treat as active (same as Project List defaults)
-  if (!statuses.length) return true;
-  return statuses.some(
-    (s) => s === 'ACTIVE' || s === 'IN PROGRESS' || s === 'IN-PROGRESS' || s === 'OPEN',
-  );
+    null;
+  return raw ? normalizeProjectStatus(raw) : 'UNKNOWN';
 }
 
 export function EmployeePortal({
@@ -270,7 +264,7 @@ export function EmployeePortal({
   );
 
   const activeProjects = useMemo(
-    () => allProjects.filter(projectIsActive),
+    () => allProjects.filter(isActiveProjectNode),
     [allProjects],
   );
 
@@ -833,7 +827,7 @@ export function EmployeePortal({
                 {allProjects.length > activeProjects.length ? (
                   <optgroup label={`Inactive / other (${allProjects.length - activeProjects.length})`}>
                     {allProjects
-                      .filter((p) => !projectIsActive(p))
+                      .filter((p) => !isActiveProjectNode(p))
                       .map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.title} — {p.clientName}

@@ -436,6 +436,8 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     queue = next;
   }
 
+  rollupProjectHeaderStatuses(rows);
+
   return {
     rows,
     idToKey,
@@ -444,6 +446,31 @@ export function mapCoreProjects(projects: BqeProject[]): MappedProjects {
     excludedIds,
     excludedCount: excludedIds.size,
   };
+}
+
+/**
+ * CORE often leaves the project header at Active=0 while every phase is Canceled.
+ * Align the header with phases when all children share a terminal status.
+ */
+export function rollupProjectHeaderStatuses(rows: ProjectInsert[]): void {
+  const phasesByParent = new Map<string, ProjectInsert[]>();
+  for (const r of rows) {
+    if (r.row_kind !== 'phase' || !r.parent_project) continue;
+    const list = phasesByParent.get(r.parent_project) ?? [];
+    list.push(r);
+    phasesByParent.set(r.parent_project, list);
+  }
+
+  for (const header of rows) {
+    if (header.row_kind !== 'project') continue;
+    const phases = phasesByParent.get(header.project);
+    if (!phases?.length) continue;
+
+    if (header.status !== 'ACTIVE') continue;
+    const statuses = phases.map((p) => String(p.status || '').toUpperCase());
+    const allCanceled = statuses.every((s) => s === 'CANCELED' || s === 'CANCELLED');
+    if (allCanceled) header.status = 'CANCELED';
+  }
 }
 
 /** CORE project/phase ids that belong to an Active project header in the library. */

@@ -494,43 +494,100 @@ export type BqeEmployee = {
 };
 
 /**
- * CORE ProjectStatus: Active=0, Inactive=1, Completed=2 (some tenants use 3).
- * Named enum (`name: "Completed"`) wins over a numeric value when both exist.
- * `completedOn` from CORE also marks Completed — phases under an Active parent
- * are often Completed in CORE while the header stays Active.
+ * CORE ProjectStatus (typical): Active=0, Inactive=1, Completed=2, Hold=3, Canceled=4.
+ * CORE may return `{ name, value }` or PascalCase `{ Name, Value }`. Textual labels
+ * (especially Canceled) must win over a stale numeric `0` on the same object.
+ * `completedOn` marks Completed for finished phases, but not when status is Canceled/Hold.
  */
 export function mapBqeStatus(
   status: unknown,
   completedOn?: string | null,
 ): string {
+  const fromStatus = resolveStatusFromCoreField(status);
+  if (fromStatus === 'CANCELED' || fromStatus === 'HOLD' || fromStatus === 'INACTIVE') {
+    return fromStatus;
+  }
+  if (fromStatus === 'DRAFT') return fromStatus;
+  if (fromStatus === 'COMPLETED') return fromStatus;
+  if (fromStatus === 'ACTIVE') {
+    if (hasCoreCompletedOn(completedOn)) return 'COMPLETED';
+    return 'ACTIVE';
+  }
   if (hasCoreCompletedOn(completedOn)) return 'COMPLETED';
-  return (
-    mapStatusToken(coreEnumName(status)) ||
-    mapStatusToken(unwrapCoreEnum(status)) ||
-    mapStatusToken(typeof status === 'string' ? status : null) ||
-    'UNKNOWN'
-  );
+  return fromStatus || 'UNKNOWN';
 }
 
-function mapStatusToken(raw: string | number | null | undefined): string | null {
-  if (raw == null || raw === '') return null;
-  if (raw === 0 || raw === '0') return 'ACTIVE';
-  if (raw === 1 || raw === '1') return 'INACTIVE';
-  if (raw === 2 || raw === '2' || raw === 3 || raw === '3') return 'COMPLETED';
-  if (raw === 4 || raw === '4') return 'CANCELED';
-  const s = String(raw).toLowerCase();
-  if (s.includes('draft')) return 'DRAFT';
-  if (s.includes('complete')) return 'COMPLETED';
+/** Collect name/value tokens from a CORE enum field (camelCase or PascalCase). */
+export function coreStatusTokens(status: unknown): string[] {
+  const out: string[] = [];
+  if (status == null || status === '') return out;
+  if (typeof status === 'number') {
+    out.push(String(status));
+    return out;
+  }
+  if (typeof status === 'string') {
+    out.push(status.trim());
+    return out;
+  }
+  if (typeof status !== 'object') return out;
+  const o = status as Record<string, unknown>;
+  for (const key of ['name', 'Name', 'description', 'Description', 'label', 'Label']) {
+    const v = o[key];
+    if (typeof v === 'string' && v.trim()) out.push(v.trim());
+  }
+  for (const key of ['value', 'Value', 'id', 'Id']) {
+    const v = o[key];
+    if (v != null && v !== '') out.push(String(v).trim());
+  }
+  return out;
+}
+
+function resolveStatusFromCoreField(status: unknown): string | null {
+  const tokens = coreStatusTokens(status);
+  if (!tokens.length) return null;
+
+  for (const token of tokens) {
+    const fromText = mapStatusTokenFromText(token);
+    if (fromText) return fromText;
+  }
+  for (const token of tokens) {
+    const n = Number(token);
+    if (Number.isFinite(n) && String(n) === token.replace(/^\+/, '')) {
+      const fromNum = mapStatusTokenFromNumber(n);
+      if (fromNum) return fromNum;
+    }
+  }
+  return null;
+}
+
+/** Match CORE status labels; do not treat bare "0" as Active here (handled numerically). */
+function mapStatusTokenFromText(raw: string): string | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
   if (s.includes('cancel')) return 'CANCELED';
   if (s.includes('hold')) return 'HOLD';
-  if (s.includes('inactive')) return 'INACTIVE';
-  if (s.includes('active')) return 'ACTIVE';
+  if (s.includes('draft')) return 'DRAFT';
+  if (s.includes('inactive') || s === 'inact') return 'INACTIVE';
+  if (s.includes('complete') || s === 'done') return 'COMPLETED';
+  if (s === 'active' || s === 'actv' || s.includes('in progress') || s === 'open') {
+    return 'ACTIVE';
+  }
+  return null;
+}
+
+function mapStatusTokenFromNumber(n: number): string | null {
+  if (n === 0) return 'ACTIVE';
+  if (n === 1) return 'INACTIVE';
+  if (n === 2) return 'COMPLETED';
+  if (n === 3) return 'HOLD';
+  if (n === 4) return 'CANCELED';
   return null;
 }
 
 function coreEnumName(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
-  const name = (value as { name?: string }).name;
+  const o = value as { name?: string; Name?: string };
+  const name = o.name ?? o.Name;
   return name != null && String(name).trim() ? String(name).trim() : null;
 }
 
@@ -538,10 +595,20 @@ function unwrapCoreEnum(value: unknown): string | number | null {
   if (value == null || value === '') return null;
   if (typeof value === 'number' || typeof value === 'string') return value;
   if (typeof value === 'object') {
-    const o = value as { value?: string | number; name?: string; id?: string | number };
-    if (o.value != null && o.value !== '') return o.value;
-    if (o.name != null && o.name !== '') return o.name;
-    if (o.id != null && o.id !== '') return o.id;
+    const o = value as {
+      value?: string | number;
+      Value?: string | number;
+      name?: string;
+      Name?: string;
+      id?: string | number;
+      Id?: string | number;
+    };
+    const val = o.value ?? o.Value;
+    if (val != null && val !== '') return val;
+    const name = o.name ?? o.Name;
+    if (name != null && name !== '') return name;
+    const id = o.id ?? o.Id;
+    if (id != null && id !== '') return id;
   }
   return null;
 }

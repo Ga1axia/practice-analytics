@@ -6,7 +6,7 @@ import {
   mapBqeContractType,
   mapBqeStatus,
 } from './bqe';
-import { mapCoreProjects } from './bqeSyncBuild';
+import { mapCoreProjects, rollupProjectHeaderStatuses } from './bqeSyncBuild';
 import type { BqeProject } from './bqe';
 
 function proj(partial: Partial<BqeProject> & Pick<BqeProject, 'id'>): BqeProject {
@@ -98,6 +98,26 @@ describe('mapBqeStatus', () => {
     assert.equal(mapBqeStatus({ value: 0, name: 'Completed' }), 'COMPLETED');
   });
 
+  it('maps Canceled from CORE name even when value is still Active (0)', () => {
+    assert.equal(mapBqeStatus({ value: 0, name: 'Canceled' }), 'CANCELED');
+    assert.equal(mapBqeStatus({ Value: 0, Name: 'Canceled' }), 'CANCELED');
+    assert.equal(mapBqeStatus({ value: 0, name: 'Cancelled' }), 'CANCELED');
+    assert.equal(mapBqeStatus(4), 'CANCELED');
+    assert.equal(mapBqeStatus('Canceled'), 'CANCELED');
+  });
+
+  it('does not mark Canceled as Completed when completedOn is set', () => {
+    assert.equal(
+      mapBqeStatus({ value: 4, name: 'Canceled' }, '2024-06-01T00:00:00'),
+      'CANCELED',
+    );
+  });
+
+  it('maps Hold as 3, not Completed', () => {
+    assert.equal(mapBqeStatus(3), 'HOLD');
+    assert.equal(mapBqeStatus({ value: 3, name: 'Hold' }), 'HOLD');
+  });
+
   it('filters Active with status=0 (no spaces — CORE where parser)', () => {
     assert.equal(CORE_PROJECT_WHERE_ACTIVE, 'status=0');
   });
@@ -156,5 +176,58 @@ describe('mapCoreProjects status', () => {
     assert.equal(mapped.rows[0]?.status, 'COMPLETED');
     assert.equal(mapped.rows[0]?.type, 'FIXED');
     assert.equal(mapped.rows[0]?.parent_project, 'Erdmann Residence II');
+  });
+
+  it('rolls up header to Canceled when every phase is Canceled', () => {
+    const mapped = mapCoreProjects([
+      proj({ id: 'root', name: '26-099 Demo', status: 0 }),
+      proj({
+        id: 'sd',
+        name: '26-099 Demo',
+        parentId: 'root',
+        phaseDescription: 'Schematic Design',
+        status: { value: 4, name: 'Canceled' },
+      }),
+      proj({
+        id: 'dd',
+        name: '26-099 Demo',
+        parentId: 'root',
+        phaseDescription: 'Design Development',
+        status: { value: 0, name: 'Canceled' },
+      }),
+    ]);
+    const header = mapped.rows.find((r) => r.row_kind === 'project');
+    assert.equal(header?.status, 'CANCELED');
+  });
+});
+
+describe('rollupProjectHeaderStatuses', () => {
+  it('sets header Canceled when all phases are Canceled', () => {
+    const rows = [
+      {
+        project: '26-099 Demo',
+        row_kind: 'project' as const,
+        status: 'ACTIVE',
+        phase: 'Other',
+        contract: 0,
+        spent: 0,
+        billed: 0,
+        parent_project: null,
+        sort_order: 0,
+      },
+      {
+        project: '26-099 Demo - SD',
+        row_kind: 'phase' as const,
+        status: 'CANCELED',
+        parent_project: '26-099 Demo',
+        phase: 'SD',
+        contract: 0,
+        spent: 0,
+        billed: 0,
+        sort_order: 1,
+      },
+    ];
+    rollupProjectHeaderStatuses(rows);
+    assert.equal(rows[0]?.status, 'CANCELED');
   });
 });

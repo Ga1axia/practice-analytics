@@ -504,9 +504,12 @@ export function mapBqeStatus(
   completedOn?: string | null,
 ): string {
   if (hasCoreCompletedOn(completedOn)) return 'COMPLETED';
-  const fromName = mapStatusToken(coreEnumName(status));
-  if (fromName) return fromName;
-  return mapStatusToken(unwrapCoreEnum(status)) || 'ACTIVE';
+  return (
+    mapStatusToken(coreEnumName(status)) ||
+    mapStatusToken(unwrapCoreEnum(status)) ||
+    mapStatusToken(typeof status === 'string' ? status : null) ||
+    'UNKNOWN'
+  );
 }
 
 function mapStatusToken(raw: string | number | null | undefined): string | null {
@@ -516,9 +519,11 @@ function mapStatusToken(raw: string | number | null | undefined): string | null 
   if (raw === 2 || raw === '2' || raw === 3 || raw === '3') return 'COMPLETED';
   if (raw === 4 || raw === '4') return 'CANCELED';
   const s = String(raw).toLowerCase();
+  if (s.includes('draft')) return 'DRAFT';
   if (s.includes('complete')) return 'COMPLETED';
-  if (s.includes('inactive') || s.includes('hold')) return 'INACTIVE';
   if (s.includes('cancel')) return 'CANCELED';
+  if (s.includes('hold')) return 'HOLD';
+  if (s.includes('inactive')) return 'INACTIVE';
   if (s.includes('active')) return 'ACTIVE';
   return null;
 }

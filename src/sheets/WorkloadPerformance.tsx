@@ -268,7 +268,7 @@ export function WorkloadPerformance({
         <div className="panel" style={{ marginBottom: 0 }}>
           <h3>
             Employees{' '}
-            <span className="tag">Time loggers · A–Z · {rosterPeopleCount}</span>
+            <span className="tag">US / Pak roster · A–Z · {rosterPeopleCount}</span>
           </h3>
           <input
             type="text"
@@ -335,7 +335,7 @@ export function WorkloadPerformance({
             })}
           </div>
           <p style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>
-            {rosterPeopleCount} people logging time
+            {rosterPeopleCount} on practice roster
           </p>
         </div>
         ) : null}

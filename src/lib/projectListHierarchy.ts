@@ -1,5 +1,6 @@
 import { phaseDisplayName } from './phaseAbbrev';
 import { rowOutstanding } from './receivable';
+import { isActiveProjectStatus } from './projectStatus';
 import type { ProjectRow } from './types';
 
 export type PhaseNode = {
@@ -171,4 +172,22 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
   }
 
   return clients.sort((a, b) => a.client.localeCompare(b.client, undefined, { sensitivity: 'base' }));
+}
+
+/** True when the project header is Active (Main Report project-status semantics). */
+export function isActiveProjectNode(project: ProjectNode): boolean {
+  if (project.row) return isActiveProjectStatus(project.row.status);
+  return project.phases.some((ph) => isActiveProjectStatus(ph.row.status));
+}
+
+export function clientHasActiveProject(node: ClientNode): boolean {
+  return node.projects.some(isActiveProjectNode);
+}
+
+/** Client names for filter dropdowns — only clients with at least one active project. */
+export function clientNamesWithActiveProjects(hierarchy: ClientNode[]): string[] {
+  return hierarchy
+    .filter(clientHasActiveProject)
+    .map((c) => c.client)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }

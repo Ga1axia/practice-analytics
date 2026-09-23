@@ -37,7 +37,12 @@ import {
   type ChatViewAction,
 } from '../lib/chatViewAction';
 import { compareEmployeeName } from '../lib/employeeRoster';
-import { buildClientHierarchy, type ProjectNode } from '../lib/projectListHierarchy';
+import { isActiveProjectStatus, normalizeProjectStatus } from '../lib/projectStatus';
+import {
+  buildClientHierarchy,
+  clientNamesWithActiveProjects,
+  type ProjectNode,
+} from '../lib/projectListHierarchy';
 import { timeEntryMatchesProject } from '../lib/projectHoursMatch';
 import { rowOutstanding, sumAmountReceivable } from '../lib/receivable';
 import type { DashboardData, ProjectRow } from '../lib/types';
@@ -77,7 +82,7 @@ function toggleStatusValue(prev: Set<string>, value: string): Set<string> {
 /** Empty set = all statuses. Matches the row’s own status (no parent rollup). */
 function matchesStatusFilter(selected: Set<string>, raw: string | null | undefined): boolean {
   if (!selected.size) return true;
-  return selected.has(String(raw || 'ACTIVE').toUpperCase());
+  return selected.has(normalizeProjectStatus(raw));
 }
 
 function StatusCheckboxes({
@@ -277,7 +282,7 @@ export function MainReport({
   const hierarchy = useMemo(() => buildClientHierarchy(data.projects), [data.projects]);
 
   const clientOptions = useMemo(
-    () => hierarchy.map((c) => c.client).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    () => clientNamesWithActiveProjects(hierarchy),
     [hierarchy],
   );
 
@@ -378,12 +383,12 @@ export function MainReport({
       const assignees = new Set<string>();
       if (p.phases.length) {
         for (const ph of p.phases) {
-          if ((ph.row.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
+          if (!isActiveProjectStatus(ph.row.status)) continue;
           if (ph.row.manager) assignees.add(ph.row.manager);
         }
       } else if (
         p.row?.manager &&
-        (p.row.status || 'ACTIVE').toUpperCase() === 'ACTIVE'
+        isActiveProjectStatus(p.row.status)
       ) {
         assignees.add(p.row.manager);
       }
@@ -532,6 +537,13 @@ export function MainReport({
     setProjectFilter('');
     setFocus(null);
   }, [projectFilter, filteredProjects]);
+
+  useEffect(() => {
+    if (!clientFilter) return;
+    if (clientOptions.includes(clientFilter)) return;
+    setClientFilter('');
+    setFocus(null);
+  }, [clientFilter, clientOptions]);
 
   // Keep click-focus in sync with the filtered set (stale phase/project → $0 KPIs).
   useEffect(() => {
@@ -1091,7 +1103,7 @@ export function MainReport({
                               <td className="mono">{managerInitials(p.row?.manager)}</td>
                               <td className="mono">—</td>
                               <td className="mono">
-                                {statusAbbrev(p.row?.status || 'ACTIVE')}
+                                {statusAbbrev(p.row?.status)}
                               </td>
                               <td className="mono">{typeAbbrev(p.row?.type)}</td>
                               <td className="num">{fmtUSD(p.contract)}</td>
@@ -1131,7 +1143,7 @@ export function MainReport({
                                         {phaseAbbrev(r.phase || ph.label)}
                                       </td>
                                       <td className="mono">
-                                        {statusAbbrev(r.status || 'ACTIVE')}
+                                        {statusAbbrev(r.status)}
                                       </td>
                                       <td className="mono">{typeAbbrev(r.type)}</td>
                                       <td className="num">{fmtUSD(r.contract)}</td>

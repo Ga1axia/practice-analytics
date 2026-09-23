@@ -119,6 +119,9 @@ export function statusAbbrev(status: string | null | undefined): string {
   if (s === 'COMPLETED') return 'Comp';
   if (s === 'INACTIVE') return 'Inact';
   if (s === 'HOLD') return 'Hold';
+  if (s === 'DRAFT') return 'Drft';
+  if (s === 'CANCELED' || s === 'CANCELLED') return 'Can';
+  if (s === 'UNKNOWN') return 'Unk';
   return s.slice(0, 4);
 }
 

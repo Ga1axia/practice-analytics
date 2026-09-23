@@ -2,6 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { serviceSupabase } from '../_lib/bqe.js';
 import { requireAdmin } from '../_lib/requireAdmin.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  buildEmployeeRoster,
+  DEFAULT_EMPLOYEE_ROSTER,
+  isPracticeRosterTeam,
+  normalizeEmployeeName,
+} from '../../src/lib/employeeRoster.js';
 
 export const config = { maxDuration: 60 };
 
@@ -87,6 +93,11 @@ type Body = {
   projectKey?: string;
   startDate?: string;
   profileId?: string;
+  /** practice_roster: list | add | remove | seed_defaults */
+  op?: string;
+  employee?: string;
+  team?: string;
+  rosterId?: number;
 };
 
 async function countTable(sb: SupabaseClient, table: AdminTable): Promise<number> {
@@ -967,6 +978,77 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'practice_roster') {
+      const op = String(body.op || 'list').trim();
+      if (op === 'list') {
+        const { data, error } = await sb
+          .from('pa_employee_roster')
+          .select('id, team, employee')
+          .order('team')
+          .order('employee');
+        if (error) throw new Error(error.message);
+        const rows = (data || []) as { id: number; team: string; employee: string }[];
+        res.status(200).json({
+          rows,
+          roster: buildEmployeeRoster(rows),
+        });
+        return;
+      }
+      if (op === 'seed_defaults') {
+        const { error } = await sb
+          .from('pa_employee_roster')
+          .upsert(DEFAULT_EMPLOYEE_ROSTER, { onConflict: 'team,employee', ignoreDuplicates: true });
+        if (error) throw new Error(error.message);
+        const { data, error: qErr } = await sb
+          .from('pa_employee_roster')
+          .select('id, team, employee')
+          .order('team')
+          .order('employee');
+        if (qErr) throw new Error(qErr.message);
+        const rows = (data || []) as { id: number; team: string; employee: string }[];
+        res.status(200).json({
+          ok: true,
+          seeded: DEFAULT_EMPLOYEE_ROSTER.length,
+          rows,
+          roster: buildEmployeeRoster(rows),
+        });
+        return;
+      }
+      if (op === 'add') {
+        const team = String(body.team || '').trim();
+        const employee = normalizeEmployeeName(String(body.employee || ''));
+        if (!isPracticeRosterTeam(team)) {
+          res.status(400).json({ error: 'team must be US Team or Pak Team' });
+          return;
+        }
+        if (!employee) {
+          res.status(400).json({ error: 'employee name required' });
+          return;
+        }
+        const { data, error } = await sb
+          .from('pa_employee_roster')
+          .upsert({ team, employee }, { onConflict: 'team,employee' })
+          .select('id, team, employee')
+          .single();
+        if (error) throw new Error(error.message);
+        res.status(200).json({ ok: true, row: data });
+        return;
+      }
+      if (op === 'remove') {
+        const id = Number(body.rosterId);
+        if (!Number.isFinite(id) || id <= 0) {
+          res.status(400).json({ error: 'rosterId required' });
+          return;
+        }
+        const { error } = await sb.from('pa_employee_roster').delete().eq('id', id);
+        if (error) throw new Error(error.message);
+        res.status(200).json({ ok: true, deleted: 1 });
+        return;
+      }
+      res.status(400).json({ error: 'Unknown practice_roster op', allowed: ['list', 'add', 'remove', 'seed_defaults'] });
+      return;
+    }
+
     if (action === 'update_profile') {
       const id = String((body as { profileId?: string }).profileId || body.ids?.[0] || '').trim();
       if (!id) {
@@ -1021,6 +1103,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         'employees_directory',
         'members_overview',
         'update_profile',
+        'practice_roster',
       ],
     });
   } catch (e) {

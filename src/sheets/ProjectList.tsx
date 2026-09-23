@@ -317,7 +317,7 @@ export function ProjectList({
                       </td>
                       <td>{entry.client}</td>
                       <td>{r.manager || '—'}</td>
-                      <td className="mono">{statusAbbrev(r.status || 'ACTIVE')}</td>
+                      <td className="mono">{statusAbbrev(r.status)}</td>
                       <td className="num">{(r.billed_hours ?? 0).toFixed(2)}</td>
                       <td className="num">{(r.spent_hours ?? 0).toFixed(2)}</td>
                       <td className="num">{fmtUSD(r.billed || 0)}</td>

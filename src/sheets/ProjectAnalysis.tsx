@@ -4,6 +4,7 @@ import { KpiRow } from '../components/KpiRow';
 import { QAPanel } from '../components/QAPanel';
 import { fmtPct, fmtUSD, monthLabel, palette } from '../lib/format';
 import { sumAmountReceivable } from '../lib/receivable';
+import { compareTeamName } from '../lib/employeeRoster';
 import type { DashboardData, ProjectRow } from '../lib/types';
 
 const PAGE_SIZE = 25;
@@ -149,7 +150,9 @@ export function ProjectAnalysis({
             }}
           >
             <option value="">Employee: All</option>
-            {Object.entries(data.employee_roster).map(([team, names]) => (
+            {Object.entries(data.employee_roster)
+              .sort(([a], [b]) => compareTeamName(a, b))
+              .map(([team, names]) => (
               <optgroup key={team} label={team}>
                 <option value={'TEAM:' + team}>All {team} (aggregate)</option>
                 {names.map((n) => (

@@ -8,7 +8,6 @@ import {
   CORE_PROJECT_WHERE_ACTIVE,
   hydrateProjectParents,
   serviceSupabase,
-  type BqeEmployee,
   type BqeExpenseEntry,
   type BqeInvoice,
   type BqeProject,
@@ -18,7 +17,6 @@ import {
   applyTimeAndInvoices,
   filterInvoicesForActiveProjects,
   mapCoreProjects,
-  mapEmployeesToRoster,
   type ProjectInsert,
 } from '../_lib/bqeSyncBuild.js';
 import { loadExistingProjectKeys } from '../_lib/projectHoursFilter.js';
@@ -168,7 +166,7 @@ export const config = { maxDuration: 300 };
 
 /**
  * BQE CORE sync.
- * - mode=projects: projects + employee roster only (Vercel-safe, ~seconds).
+ * - mode=projects: projects only (Vercel-safe, ~seconds). Practice roster is admin-managed.
  * - mode omitted / aggregates: analytics replace (time/expense lookback; invoices all dates on active projects).
  * - mode=historical|incremental|dry_run: persist (or count) raw time entries;
  *   pass since+until (YYYY-MM-DD) to keep each call under serverless limits.
@@ -277,18 +275,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           projects = await hydrateProjectParents(projects, onVercel ? 6 : 40);
         }
 
-        const employees =
-          page <= 1 && !onVercel
-            ? await tryList(
-                'Employee',
-                () =>
-                  bqeListAll<BqeEmployee>('/employee', 500, {
-                    fields: 'id,firstName,lastName,status,department,title,displayName',
-                  }),
-                warnings,
-              )
-            : [];
-
         const mapped = mapCoreProjects(projects);
         if (mapped.excludedCount) {
           warnings.push(
@@ -299,8 +285,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!libraryExists && (body.reset || page <= 1)) {
           await clearTable(sb, 'pa_projects');
         }
-        if (page <= 1 && employees.length) await clearTable(sb, 'pa_employee_roster');
-
         let insertedProjects = 0;
         if (mapped.rows.length) {
           const rows = await preserveExistingProjectFinancials(sb, mapped.rows);
@@ -312,11 +296,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
           insertedProjects = rows.length;
         }
-        if (employees.length) {
-          const roster = mapEmployeesToRoster(employees);
-          await insertChunks(sb, 'pa_employee_roster', roster);
-        }
-
         const msg =
           page > 0
             ? `Projects page ${page}: CORE ${projects.length} → +${insertedProjects} rows` +
@@ -404,15 +383,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         warnings,
       );
 
-      const employees = await tryList(
-        'Employee',
-        () =>
-          bqeListAll<BqeEmployee>('/employee', 500, {
-            fields: 'id,firstName,lastName,status,department,title,displayName',
-          }),
-        warnings,
-      );
-
       const mapped = mapCoreProjects(projects);
 
       let invoicesFetched = await tryList(
@@ -443,7 +413,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         invoices,
         expenseEntries,
       );
-      const roster = mapEmployeesToRoster(employees);
       if (mapped.excludedCount) {
         warnings.push(
           `Excluded ${mapped.excludedCount} test / Internal Office CORE rows from project list (hours still counted for firm efficiency)`,
@@ -461,7 +430,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       await clearTable(sb, 'pa_employee_monthly');
       await clearTable(sb, 'pa_employee_totals');
-      await clearTable(sb, 'pa_employee_roster');
       await clearTable(sb, 'pa_company_monthly');
       await clearTable(sb, 'pa_project_monthly_billed');
       await clearTable(sb, 'pa_client_monthly_billed');
@@ -488,7 +456,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       await insertChunks(sb, 'pa_employee_monthly', built.empMonthly);
       await insertChunks(sb, 'pa_employee_totals', built.empTotals);
-      await insertChunks(sb, 'pa_employee_roster', roster);
       await insertChunks(sb, 'pa_company_monthly', built.companyMonthly);
       await insertChunks(sb, 'pa_project_monthly_billed', built.projectMonthlyBilled);
       await insertChunks(sb, 'pa_client_monthly_billed', built.clientMonthlyBilled);
@@ -524,7 +491,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${built.stats.timeEntries} time entries (${built.stats.matchedTime} matched) · ` +
         `${built.stats.expenseEntries} expenses (${built.stats.matchedExpenses} matched) · ` +
         `${built.stats.invoices} invoices (${built.stats.matchedInvoiceLines} project lines) · ` +
-        `${roster.length} employees · ` +
         `${built.empTotals.length} employee hour totals` +
         (warnings.length ? ` · Notes: ${warnings.join(' | ')}` : '') +
         '.';

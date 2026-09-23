@@ -1,6 +1,11 @@
 import { phaseDisplayName } from './phaseAbbrev';
 import { extractJobCode, hasValidJobCode, isProjectCodeRow } from './parseProjectList';
 import { deterministicTextMatch } from './textSearch';
+import {
+  isActiveProjectStatus,
+  isCompletedProjectStatus,
+  normalizeProjectStatus,
+} from './projectStatus';
 import type { ProjectRow } from './types';
 
 export type PlistRowKind = 'project' | 'phase';
@@ -23,13 +28,7 @@ export type PlistTableRow = {
   globalHaystack: string;
 };
 
-export function normalizeProjectStatus(raw: string | null | undefined): string {
-  return String(raw || 'ACTIVE').toUpperCase();
-}
-
-export function isCompletedStatus(status: string): boolean {
-  return status === 'COMPLETED' || status === 'COMPLETE' || status === 'DONE';
-}
+export { normalizeProjectStatus } from './projectStatus';
 
 export function matchesProjectStatusFilter(
   row: ProjectRow,
@@ -37,9 +36,9 @@ export function matchesProjectStatusFilter(
 ): boolean {
   if (filter === 'ALL') return true;
   const s = normalizeProjectStatus(row.status);
-  if (filter === 'ACTIVE') return s === 'ACTIVE';
+  if (filter === 'ACTIVE') return isActiveProjectStatus(row.status);
   if (filter === 'INACTIVE') return s === 'INACTIVE';
-  if (filter === 'COMPLETED') return isCompletedStatus(s);
+  if (filter === 'COMPLETED') return isCompletedProjectStatus(row.status);
   return true;
 }
 

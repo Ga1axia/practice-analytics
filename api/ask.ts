@@ -291,11 +291,10 @@ async function buildContext(
       fetchAll<{ employee: string; month: string }>(supabase, 'pa_employee_monthly'),
       fetchAll(supabase, 'pa_company_monthly'),
     ]);
-    const employee_roster: Record<string, string[]> = {};
-    roster.forEach((r) => {
-      if (!employee_roster[r.team]) employee_roster[r.team] = [];
-      employee_roster[r.team].push(r.employee);
-    });
+    const { buildEmployeeRoster } = await import('../src/lib/employeeRoster.js');
+    const employee_roster = buildEmployeeRoster(
+      roster.map((r) => ({ team: r.team, employee: r.employee })),
+    );
     const allEmployees = Object.values(employee_roster).flat();
     const empEntities = findEntities(question, allEmployees, 3);
     const team =

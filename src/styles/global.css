@@ -2796,6 +2796,21 @@ footer{
 .emp-filter-bar{
   display:flex; flex-direction:column; gap:10px; align-items:stretch; min-width:min(320px, 100%);
 }
+.emp-filter-row{
+  display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;
+}
+.emp-filter-field{
+  display:flex; flex-direction:column; gap:4px; flex:1 1 120px; min-width:0;
+}
+.emp-filter-field > span{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft);
+}
+.emp-filter-select{
+  width:100%; padding:8px 10px; font-size:13px;
+  border:1px solid var(--border); background:#fff; border-radius:0;
+}
+.emp-filter-clear{ align-self:flex-end; margin-bottom:6px; white-space:nowrap; }
 .emp-tasks-layout{
   display:grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);

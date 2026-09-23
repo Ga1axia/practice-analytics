@@ -6,7 +6,16 @@ import { KpiRow } from '../components/KpiRow';
 import { ProjectSchedulePulse } from '../components/ProjectSchedulePulse';
 import { processPhaseLabel } from '../lib/architecturalProcess';
 import {
+  collectClientOptions,
+  collectMyPhaseOptions,
+  matchesEmployeeProjectFilters,
+  readEmployeeProjectFilters,
+  writeEmployeeProjectFilters,
+  type EmployeeProjectFilters,
+} from '../lib/employeeProjectFilters';
+import {
   compareEmployeeProjects,
+  parseEmployeeProjectSort,
   readEmployeeProjectSort,
   writeEmployeeProjectSort,
   type EmployeeProjectSort,
@@ -95,6 +104,9 @@ export function EmployeePortal({
   const [projectSort, setProjectSort] = useState<EmployeeProjectSort>(() =>
     readEmployeeProjectSort(employeeName),
   );
+  const [projectFilters, setProjectFilters] = useState<EmployeeProjectFilters>(() =>
+    readEmployeeProjectFilters(employeeName),
+  );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [memberRoles, setMemberRoles] = useState<Map<string, ProjectMemberRole>>(
@@ -115,11 +127,25 @@ export function EmployeePortal({
 
   useEffect(() => {
     setProjectSort(readEmployeeProjectSort(employeeName));
+    setProjectFilters(readEmployeeProjectFilters(employeeName));
   }, [employeeName]);
 
   function setAndPersistProjectSort(next: EmployeeProjectSort) {
     setProjectSort(next);
     writeEmployeeProjectSort(employeeName, next);
+  }
+
+  function setAndPersistProjectFilters(next: EmployeeProjectFilters) {
+    setProjectFilters(next);
+    writeEmployeeProjectFilters(employeeName, next);
+  }
+
+  function patchProjectFilters(patch: Partial<EmployeeProjectFilters>) {
+    setAndPersistProjectFilters({ ...projectFilters, ...patch });
+  }
+
+  function clearProjectFilters() {
+    setAndPersistProjectFilters({ role: 'all', phase: '', client: '' });
   }
 
   const totals = useMemo(
@@ -185,8 +211,20 @@ export function EmployeePortal({
     [assignedProjects],
   );
 
+  const isLeadForKey = useMemo(() => {
+    const byKey = new Map<string, boolean>();
+    for (const p of assignedProjects) {
+      byKey.set(
+        p.key,
+        isProjectLead(p, employeeName, memberRoles.get(p.key) || null),
+      );
+    }
+    return (key: string) => byKey.get(key) ?? false;
+  }, [assignedProjects, employeeName, memberRoles]);
+
   useEffect(() => {
-    if (projectSort !== 'recent' || !assignedProjects.length) return;
+    const needsHours = projectSort === 'recent' || projectSort === 'lead_first';
+    if (!needsHours || !assignedProjects.length) return;
     let cancelled = false;
     void loadEmployeeLastHoursByProject({
       employeeName,
@@ -201,12 +239,34 @@ export function EmployeePortal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeName, projectSort, assignedKey]);
 
-  const allProjects = useMemo(
-    () =>
-      [...assignedProjects].sort((a, b) =>
-        compareEmployeeProjects(a, b, projectSort, lastHoursByKey),
+  const sortProjects = (
+    list: (ProjectNode & { clientName: string })[],
+  ): (ProjectNode & { clientName: string })[] =>
+    [...list].sort((a, b) =>
+      compareEmployeeProjects(
+        {
+          key: a.key,
+          title: a.title,
+          clientName: a.clientName,
+          contract: a.contract,
+        },
+        {
+          key: b.key,
+          title: b.title,
+          clientName: b.clientName,
+          contract: b.contract,
+        },
+        projectSort,
+        lastHoursByKey,
+        isLeadForKey,
       ),
-    [assignedProjects, projectSort, lastHoursByKey],
+    );
+
+  const allProjects = useMemo(
+    () => sortProjects(assignedProjects),
+    // sortProjects closes over sort state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assignedProjects, projectSort, lastHoursByKey, isLeadForKey],
   );
 
   const activeProjects = useMemo(
@@ -214,17 +274,36 @@ export function EmployeePortal({
     [allProjects],
   );
 
-  const filteredProjects = useMemo(() => {
+  const phaseFilterOptions = useMemo(
+    () => collectMyPhaseOptions(assignedProjects, employeeName),
+    [assignedProjects, employeeName],
+  );
+
+  const clientFilterOptions = useMemo(
+    () => collectClientOptions(assignedProjects),
+    [assignedProjects],
+  );
+
+  const hasExtraFilters =
+    projectFilters.role !== 'all' || !!projectFilters.phase || !!projectFilters.client;
+
+  const scopedProjects = useMemo(() => {
     const base = statusFilter === 'active' ? activeProjects : allProjects;
+    return base.filter((p) =>
+      matchesEmployeeProjectFilters(p, employeeName, memberRoles, projectFilters),
+    );
+  }, [statusFilter, activeProjects, allProjects, employeeName, memberRoles, projectFilters]);
+
+  const filteredProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter(
+    if (!q) return scopedProjects;
+    return scopedProjects.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
         p.clientName.toLowerCase().includes(q) ||
         (p.code || '').toLowerCase().includes(q),
     );
-  }, [statusFilter, activeProjects, allProjects, query]);
+  }, [scopedProjects, query]);
 
   const selectedProject = useMemo(() => {
     if (!selectedKey) return null;
@@ -242,7 +321,7 @@ export function EmployeePortal({
   const bookContract = leadBookSource.reduce((a, p) => a + p.contract, 0);
   const bookBilled = leadBookSource.reduce((a, p) => a + p.billed, 0);
   const bookOut = leadBookSource.reduce((a, p) => a + Math.max(0, p.outstanding), 0);
-  const clientCount = new Set(bookSource.map((p) => p.clientName)).size;
+  const clientCount = new Set(scopedProjects.map((p) => p.clientName)).size;
   const showPaymentBook = leadBookSource.length > 0;
   const isPm = leadBookSource.length > 0;
 
@@ -488,29 +567,28 @@ export function EmployeePortal({
               <p className="pd-kicker">Projects</p>
               <h1 className="display">My projects</h1>
               <p className="emp-lede">
-                Open a project for its task list, calendar, meetings, and schedule.
-                {projectSort === 'recent'
-                  ? ' Sorted by your most recent hours — switch to A–Z anytime.'
-                  : ' Sorted A–Z by project name — switch to recent hours anytime.'}
+                Open a project for its task list, calendar, meetings, and schedule. Filter by
+                projects you lead, phases you manage, or client — then sort the list.
               </p>
             </div>
             <div className="emp-filter-bar">
-              <div className="emp-status-toggle" role="group" aria-label="Project sort">
-                <button
-                  type="button"
-                  className={projectSort === 'recent' ? 'on' : ''}
-                  onClick={() => setAndPersistProjectSort('recent')}
+              <label className="emp-filter-field">
+                <span>Sort</span>
+                <select
+                  className="emp-filter-select"
+                  value={projectSort}
+                  onChange={(e) =>
+                    setAndPersistProjectSort(parseEmployeeProjectSort(e.target.value))
+                  }
+                  aria-label="Sort projects"
                 >
-                  Recent hours
-                </button>
-                <button
-                  type="button"
-                  className={projectSort === 'name' ? 'on' : ''}
-                  onClick={() => setAndPersistProjectSort('name')}
-                >
-                  A–Z
-                </button>
-              </div>
+                  <option value="recent">Recent hours</option>
+                  <option value="lead_first">Projects I lead first</option>
+                  <option value="name">Project name (A–Z)</option>
+                  <option value="client">Client name</option>
+                  <option value="contract">Contract (high to low)</option>
+                </select>
+              </label>
               <div className="emp-status-toggle" role="group" aria-label="Project status filter">
                 <button
                   type="button"
@@ -526,6 +604,62 @@ export function EmployeePortal({
                 >
                   All ({allProjects.length})
                 </button>
+              </div>
+              <div className="emp-filter-row">
+                <label className="emp-filter-field">
+                  <span>My role</span>
+                  <select
+                    className="emp-filter-select"
+                    value={projectFilters.role}
+                    onChange={(e) =>
+                      patchProjectFilters({
+                        role: e.target.value as EmployeeProjectFilters['role'],
+                      })
+                    }
+                    aria-label="Filter by my role on the project"
+                  >
+                    <option value="all">All assignments</option>
+                    <option value="lead">Projects I lead</option>
+                    <option value="member">Team member only</option>
+                  </select>
+                </label>
+                <label className="emp-filter-field">
+                  <span>Phase I manage</span>
+                  <select
+                    className="emp-filter-select"
+                    value={projectFilters.phase}
+                    onChange={(e) => patchProjectFilters({ phase: e.target.value })}
+                    aria-label="Filter by phase you manage"
+                  >
+                    <option value="">All phases</option>
+                    {phaseFilterOptions.map((label) => (
+                      <option key={label} value={label}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="emp-filter-field">
+                  <span>Client</span>
+                  <select
+                    className="emp-filter-select"
+                    value={projectFilters.client}
+                    onChange={(e) => patchProjectFilters({ client: e.target.value })}
+                    aria-label="Filter by client"
+                  >
+                    <option value="">All clients</option>
+                    {clientFilterOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {hasExtraFilters ? (
+                  <button type="button" className="sched-text-btn emp-filter-clear" onClick={clearProjectFilters}>
+                    Clear filters
+                  </button>
+                ) : null}
               </div>
               <label className="emp-search">
                 <span className="visually-hidden">Search projects</span>
@@ -570,9 +704,13 @@ export function EmployeePortal({
           ) : !filteredProjects.length ? (
             <div className="panel">
               <p className="pd-muted">
-                {statusFilter === 'active'
-                  ? 'No active projects match. Try “All” or clear the search.'
-                  : 'No projects match your search.'}
+                {query.trim()
+                  ? 'No projects match your search.'
+                  : hasExtraFilters
+                    ? 'No projects match these filters. Try “Clear filters” or show All statuses.'
+                    : statusFilter === 'active'
+                      ? 'No active projects match. Try “All” or clear the search.'
+                      : 'No projects match.'}
               </p>
             </div>
           ) : (
@@ -654,7 +792,7 @@ export function EmployeePortal({
           hidden={page !== 'tasks'}
         >
           <EmployeeTasks
-            projects={statusFilter === 'active' ? activeProjects : allProjects}
+            projects={scopedProjects}
             employeeName={employeeName}
             onOpenProject={selectProject}
             active={page === 'tasks'}
@@ -668,7 +806,7 @@ export function EmployeePortal({
           hidden={page !== 'calendar'}
         >
           <EmployeeCalendar
-            projects={statusFilter === 'active' ? activeProjects : allProjects}
+            projects={scopedProjects}
             employeeName={employeeName}
             onOpenProject={selectProject}
           />

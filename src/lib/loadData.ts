@@ -13,6 +13,7 @@ import type {
   TopClient,
 } from './types';
 import { buildEmployeeRoster, type RosterRow } from './employeeRoster';
+import { isActiveProjectStatus } from './projectStatus';
 import { rowOutstanding, sumAmountReceivable } from './receivable';
 import { supabase } from './supabase';
 
@@ -158,7 +159,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     fetchAll<CmbRow>('pa_client_monthly_billed'),
   ]);
 
-  const employee_roster = buildEmployeeRoster(roster, empTotals, empMonthly);
+  const employee_roster = buildEmployeeRoster(roster);
 
   const invoice_ledger: InvoiceRow[] = invoices.map((r) => ({
     c: r.client || '',
@@ -174,8 +175,8 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const billingMonthsFromPmb = uniq(pmb.map((r) => r.month));
 
   const kpi_all = kpiFromProjects(projects, arClients);
-  const activeRows = projects.filter((p) => !p.status || p.status === 'ACTIVE');
-  const kpi_active = kpiFromProjects(activeRows.length ? activeRows : projects, arClients);
+  const activeRows = projects.filter((p) => isActiveProjectStatus(p.status));
+  const kpi_active = kpiFromProjects(activeRows, arClients);
 
   const ar_totals = arClients.reduce(
     (acc, c) => ({

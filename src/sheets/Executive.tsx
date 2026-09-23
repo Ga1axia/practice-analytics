@@ -10,6 +10,7 @@ import {
 } from '../lib/architecturalProcess';
 import { fmtUSDk, palette } from '../lib/format';
 import { buildClientHierarchy } from '../lib/projectListHierarchy';
+import { isActiveProjectStatus } from '../lib/projectStatus';
 import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData, ProjectRow } from '../lib/types';
 import {
@@ -177,7 +178,7 @@ export function Executive({ data }: { data: DashboardData }) {
       if (!r.manager || r.row_kind === 'project') continue;
       const phase = (r.phase || '').trim();
       if (!phase || phase === 'Internal/PTO') continue;
-      if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
+      if (!isActiveProjectStatus(r.status)) continue;
 
       const acc = ensure(r.manager);
       const bucket = phaseBucket(phase);
@@ -273,7 +274,7 @@ export function Executive({ data }: { data: DashboardData }) {
 
     for (const r of data.projects) {
       if (r.row_kind === 'project') continue;
-      if ((r.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
+      if (!isActiveProjectStatus(r.status)) continue;
       const phase = (r.phase || '').trim();
       if (!phase || phase === 'Internal/PTO') continue;
       const city = projectCity.get(projectKeyOf(r)) || cityOf(r);

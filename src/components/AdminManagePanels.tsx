@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  addPracticeRosterMember,
   listEmployeesDirectory,
   listMembersOverview,
+  listPracticeRoster,
   loadManagementOverview,
+  removePracticeRosterMember,
+  seedDefaultPracticeRoster,
   updateProfile,
   type EmployeeDirectoryRow,
   type ManagementOverview,
   type MembersOverviewRow,
+  type PracticeRosterRow,
 } from '../lib/adminData';
+import { PRACTICE_ROSTER_TEAMS } from '../lib/employeeRoster';
 import { roleLabel } from '../lib/roles';
 import type { UserRole } from '../lib/authTypes';
 import { BqeConnectPanel } from './BqeConnectPanel';
@@ -150,6 +156,168 @@ export function AdminOverviewPanel({
   );
 }
 
+export function AdminPracticeRosterPanel({
+  busy,
+  onBusy,
+  onError,
+  onMsg,
+}: {
+  busy: boolean;
+  onBusy: (v: boolean) => void;
+  onError: (v: string | null) => void;
+  onMsg: (v: string | null) => void;
+}) {
+  const [rows, setRows] = useState<PracticeRosterRow[]>([]);
+  const [team, setTeam] = useState<string>(PRACTICE_ROSTER_TEAMS[0]);
+  const [name, setName] = useState('');
+
+  const load = useCallback(async () => {
+    onBusy(true);
+    onError(null);
+    try {
+      const res = await listPracticeRoster();
+      setRows(res.rows);
+      onMsg(`Practice roster: ${res.rows.length} people (filters use this list only).`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Roster load failed');
+    } finally {
+      onBusy(false);
+    }
+  }, [onBusy, onError, onMsg]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const byTeam = PRACTICE_ROSTER_TEAMS.map((t) => ({
+    team: t,
+    names: rows.filter((r) => r.team === t).map((r) => r),
+  }));
+
+  return (
+    <div className="admin-data-panel" style={{ marginBottom: 24 }}>
+      <h3>Practice roster (US / Pak)</h3>
+      <p className="pd-muted">
+        Exhaustive list for employee filters and workload views. BQE sync does not change this
+        table. Reload the dashboard after edits.
+      </p>
+      <div className="admin-data-actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <button type="button" className="signout-btn" disabled={busy} onClick={() => void load()}>
+          Refresh
+        </button>
+        <button
+          type="button"
+          className="signout-btn"
+          disabled={busy}
+          onClick={() => {
+            void (async () => {
+              onBusy(true);
+              onError(null);
+              try {
+                await seedDefaultPracticeRoster();
+                await load();
+                onMsg('Default US / Pak roster seeded (existing rows kept).');
+              } catch (e) {
+                onError(e instanceof Error ? e.message : 'Seed failed');
+              } finally {
+                onBusy(false);
+              }
+            })();
+          }}
+        >
+          Seed default list
+        </button>
+      </div>
+      <div className="admin-data-inline" style={{ marginBottom: 16 }}>
+        <label>
+          Team
+          <select value={team} onChange={(e) => setTeam(e.target.value)}>
+            {PRACTICE_ROSTER_TEAMS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Name
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="First Last"
+            style={{ minWidth: 200 }}
+          />
+        </label>
+        <button
+          type="button"
+          className="signout-btn"
+          disabled={busy || !name.trim()}
+          onClick={() => {
+            void (async () => {
+              onBusy(true);
+              onError(null);
+              try {
+                await addPracticeRosterMember(team, name);
+                setName('');
+                await load();
+                onMsg(`Added ${name.trim()} to ${team}.`);
+              } catch (e) {
+                onError(e instanceof Error ? e.message : 'Add failed');
+              } finally {
+                onBusy(false);
+              }
+            })();
+          }}
+        >
+          Add employee
+        </button>
+      </div>
+      <div className="grid grid-2">
+        {byTeam.map(({ team: t, names }) => (
+          <div key={t} className="panel" style={{ margin: 0 }}>
+            <h4 className="exec-load-sub">{t}</h4>
+            {names.length === 0 ? (
+              <p className="pd-muted">No one listed — seed defaults or add a name.</p>
+            ) : (
+              <ul className="admin-data-table-counts">
+                {names.map((r) => (
+                  <li key={r.id}>
+                    <span>{r.employee}</span>
+                    <button
+                      type="button"
+                      className="reset-btn"
+                      disabled={busy}
+                      title="Remove from practice roster"
+                      onClick={() => {
+                        if (!window.confirm(`Remove ${r.employee} from ${t}?`)) return;
+                        void (async () => {
+                          onBusy(true);
+                          onError(null);
+                          try {
+                            await removePracticeRosterMember(r.id);
+                            await load();
+                            onMsg(`Removed ${r.employee}.`);
+                          } catch (e) {
+                            onError(e instanceof Error ? e.message : 'Remove failed');
+                          } finally {
+                            onBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AdminEmployeesPanel({
   busy,
   onBusy,
@@ -199,6 +367,12 @@ export function AdminEmployeesPanel({
 
   return (
     <div className="admin-data-panel">
+      <AdminPracticeRosterPanel
+        busy={busy}
+        onBusy={onBusy}
+        onError={onError}
+        onMsg={onMsg}
+      />
       <h3>Everyone in the system</h3>
       <p className="pd-muted">
         Merged from profiles, roster, capacity, hour totals, project memberships, and time-entry

@@ -256,6 +256,44 @@ export type EmployeeDirectoryRow = {
   sources: string[];
 };
 
+export type PracticeRosterRow = { id: number; team: string; employee: string };
+
+export function listPracticeRoster() {
+  return adminData<{ rows: PracticeRosterRow[]; roster: Record<string, string[]> }>({
+    action: 'practice_roster',
+    op: 'list',
+  });
+}
+
+export function seedDefaultPracticeRoster() {
+  return adminData<{
+    ok: boolean;
+    seeded: number;
+    rows: PracticeRosterRow[];
+    roster: Record<string, string[]>;
+  }>({
+    action: 'practice_roster',
+    op: 'seed_defaults',
+  });
+}
+
+export function addPracticeRosterMember(team: string, employee: string) {
+  return adminData<{ ok: boolean; row: PracticeRosterRow }>({
+    action: 'practice_roster',
+    op: 'add',
+    team,
+    employee,
+  });
+}
+
+export function removePracticeRosterMember(rosterId: number) {
+  return adminData<{ ok: boolean; deleted: number }>({
+    action: 'practice_roster',
+    op: 'remove',
+    rosterId,
+  });
+}
+
 export function listEmployeesDirectory(input: {
   from?: number;
   limit?: number;

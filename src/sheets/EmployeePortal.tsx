@@ -562,34 +562,13 @@ export function EmployeePortal({
         hidden={page !== 'projects'}
       >
         <>
-          <header className="emp-hero emp-hero-row">
-            <div>
-              <p className="pd-kicker">Projects</p>
-              <h1 className="display">My projects</h1>
-              <p className="emp-lede">
-                Open a project for its task list, calendar, meetings, and schedule. Filter by
-                projects you lead, phases you manage, or client — then sort the list.
-              </p>
-            </div>
-            <div className="emp-filter-bar">
-              <label className="emp-filter-field">
-                <span>Sort</span>
-                <select
-                  className="emp-filter-select"
-                  value={projectSort}
-                  onChange={(e) =>
-                    setAndPersistProjectSort(parseEmployeeProjectSort(e.target.value))
-                  }
-                  aria-label="Sort projects"
-                >
-                  <option value="recent">Recent hours</option>
-                  <option value="lead_first">Projects I lead first</option>
-                  <option value="name">Project name (A–Z)</option>
-                  <option value="client">Client name</option>
-                  <option value="contract">Contract (high to low)</option>
-                </select>
-              </label>
-              <div className="emp-status-toggle" role="group" aria-label="Project status filter">
+          <header className="emp-projects-head">
+            <h1 className="display emp-projects-h1">
+              <span className="pd-kicker">Projects</span>
+              My projects
+            </h1>
+            <div className="emp-projects-toolbar" role="toolbar" aria-label="Filter and sort projects">
+              <div className="emp-status-toggle emp-toolbar-toggle" role="group" aria-label="Status">
                 <button
                   type="button"
                   className={statusFilter === 'active' ? 'on' : ''}
@@ -605,67 +584,79 @@ export function EmployeePortal({
                   All ({allProjects.length})
                 </button>
               </div>
-              <div className="emp-filter-row">
-                <label className="emp-filter-field">
-                  <span>My role</span>
-                  <select
-                    className="emp-filter-select"
-                    value={projectFilters.role}
-                    onChange={(e) =>
-                      patchProjectFilters({
-                        role: e.target.value as EmployeeProjectFilters['role'],
-                      })
-                    }
-                    aria-label="Filter by my role on the project"
-                  >
-                    <option value="all">All assignments</option>
-                    <option value="lead">Projects I lead</option>
-                    <option value="member">Team member only</option>
-                  </select>
-                </label>
-                <label className="emp-filter-field">
-                  <span>Phase I manage</span>
-                  <select
-                    className="emp-filter-select"
-                    value={projectFilters.phase}
-                    onChange={(e) => patchProjectFilters({ phase: e.target.value })}
-                    aria-label="Filter by phase you manage"
-                  >
-                    <option value="">All phases</option>
-                    {phaseFilterOptions.map((label) => (
-                      <option key={label} value={label}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="emp-filter-field">
-                  <span>Client</span>
-                  <select
-                    className="emp-filter-select"
-                    value={projectFilters.client}
-                    onChange={(e) => patchProjectFilters({ client: e.target.value })}
-                    aria-label="Filter by client"
-                  >
-                    <option value="">All clients</option>
-                    {clientFilterOptions.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {hasExtraFilters ? (
-                  <button type="button" className="sched-text-btn emp-filter-clear" onClick={clearProjectFilters}>
-                    Clear filters
-                  </button>
-                ) : null}
-              </div>
-              <label className="emp-search">
+              <select
+                className="emp-filter-select emp-toolbar-control"
+                value={projectSort}
+                onChange={(e) =>
+                  setAndPersistProjectSort(parseEmployeeProjectSort(e.target.value))
+                }
+                aria-label="Sort projects"
+                title="Sort"
+              >
+                <option value="recent">Sort: recent hours</option>
+                <option value="lead_first">Sort: lead first</option>
+                <option value="name">Sort: A–Z</option>
+                <option value="client">Sort: client</option>
+                <option value="contract">Sort: contract</option>
+              </select>
+              <select
+                className="emp-filter-select emp-toolbar-control"
+                value={projectFilters.role}
+                onChange={(e) =>
+                  patchProjectFilters({
+                    role: e.target.value as EmployeeProjectFilters['role'],
+                  })
+                }
+                aria-label="My role"
+                title="My role"
+              >
+                <option value="all">Role: all</option>
+                <option value="lead">Role: I lead</option>
+                <option value="member">Role: member</option>
+              </select>
+              <select
+                className="emp-filter-select emp-toolbar-control emp-toolbar-phase"
+                value={projectFilters.phase}
+                onChange={(e) => patchProjectFilters({ phase: e.target.value })}
+                aria-label="Phase I manage"
+                title="Phase I manage"
+              >
+                <option value="">Phase: all</option>
+                {phaseFilterOptions.map((label) => (
+                  <option key={label} value={label}>
+                    Phase: {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="emp-filter-select emp-toolbar-control emp-toolbar-client"
+                value={projectFilters.client}
+                onChange={(e) => patchProjectFilters({ client: e.target.value })}
+                aria-label="Client"
+                title="Client"
+              >
+                <option value="">Client: all</option>
+                {clientFilterOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c.length > 28 ? `${c.slice(0, 26)}…` : c}
+                  </option>
+                ))}
+              </select>
+              {hasExtraFilters ? (
+                <button
+                  type="button"
+                  className="sched-text-btn emp-toolbar-clear"
+                  onClick={clearProjectFilters}
+                >
+                  Clear
+                </button>
+              ) : null}
+              <label className="emp-search emp-toolbar-search">
                 <span className="visually-hidden">Search projects</span>
                 <input
+                  className="emp-toolbar-control"
                   type="search"
-                  placeholder="Search project or client…"
+                  placeholder="Search…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -674,6 +665,7 @@ export function EmployeePortal({
           </header>
 
           <KpiRow
+            className="emp-projects-kpi"
             items={[
               {
                 k: statusFilter === 'active' ? 'Active projects' : 'Shown projects',

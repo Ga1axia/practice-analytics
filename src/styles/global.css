@@ -2811,6 +2811,103 @@ footer{
   border:1px solid var(--border); background:#fff; border-radius:0;
 }
 .emp-filter-clear{ align-self:flex-end; margin-bottom:6px; white-space:nowrap; }
+.emp-projects-head{
+  margin:0 0 10px;
+  padding-bottom:10px;
+  border-bottom:1px solid var(--border);
+}
+.emp-projects-h1{
+  margin:0 0 8px;
+  font-size:clamp(20px, 2.2vw, 26px);
+  line-height:1.15;
+  display:flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:8px 12px;
+}
+.emp-projects-h1 .pd-kicker{
+  margin:0;
+  font-size:10px;
+}
+.emp-projects-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+}
+.emp-projects-toolbar .emp-toolbar-toggle{
+  flex:0 0 auto;
+}
+.emp-projects-toolbar .emp-toolbar-toggle button{
+  flex:0 0 auto;
+  padding:5px 9px;
+  font-size:10px;
+  line-height:1.2;
+}
+.emp-projects-toolbar .emp-toolbar-control{
+  height:32px;
+  padding:0 8px;
+  font-size:12px;
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:0;
+  min-width:0;
+}
+.emp-projects-toolbar select.emp-toolbar-control{
+  max-width:148px;
+  padding-right:22px;
+}
+.emp-projects-toolbar .emp-toolbar-phase{ max-width:132px; }
+.emp-projects-toolbar .emp-toolbar-client{ max-width:160px; }
+.emp-projects-toolbar .emp-toolbar-search{
+  flex:1 1 120px;
+  min-width:100px;
+  max-width:220px;
+  margin:0;
+}
+.emp-projects-toolbar .emp-toolbar-search input{
+  width:100%;
+  height:32px;
+  padding:0 8px;
+  font-size:12px;
+  border:1px solid var(--border);
+  border-radius:0;
+}
+.emp-projects-toolbar .emp-toolbar-clear{
+  padding:4px 6px;
+  font-size:11px;
+  line-height:1.2;
+  white-space:nowrap;
+}
+.emp-projects-kpi.kpi-row{
+  grid-template-columns:repeat(5, minmax(0, 1fr));
+  margin-bottom:12px;
+}
+.emp-projects-kpi .kpi{
+  padding:8px 10px 7px;
+}
+.emp-projects-kpi .kpi .v{
+  font-size:17px;
+  margin-top:2px;
+}
+.emp-projects-kpi .kpi::before{
+  width:10px;
+  height:10px;
+}
+@media (max-width:900px){
+  .emp-projects-kpi.kpi-row{
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width:520px){
+  .emp-projects-kpi.kpi-row{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+  .emp-projects-toolbar .emp-toolbar-search{
+    flex:1 1 100%;
+    max-width:none;
+  }
+}
 .emp-tasks-layout{
   display:grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);

@@ -12,12 +12,28 @@ import {
   presetIncludesDates,
   setProjectStartDate,
 } from './scheduleAutofill';
+import { loadCorePhaseTitles } from './scheduleCorePhases';
 import {
   buildDatedScheduleRows,
   proposeMissingDates,
 } from './scheduleDating';
 import type { ScheduleMeta, ScheduleRow } from './scheduleTypes';
 import { supabase } from './supabase';
+
+async function buildScheduleDraftsForProject(
+  projectKey: string,
+  kickoff: Date,
+  opts: { preset?: SchedulePresetKind; includeDates?: boolean },
+) {
+  const corePhaseTitles = await loadCorePhaseTitles(projectKey);
+  const includeDates =
+    opts.includeDates ?? (opts.preset ? presetIncludesDates(opts.preset) : true);
+  return buildDatedScheduleRows(kickoff, {
+    preset: opts.preset,
+    includeDates,
+    ...(corePhaseTitles.length ? { corePhaseTitles } : {}),
+  });
+}
 
 const SCHEDULE_META_COLS = 'id, project_key, client_name, title, start_date';
 const SCHEDULE_META_COLS_LEGACY = 'id, project_key, client_name, title';
@@ -183,9 +199,8 @@ async function ensureProjectScheduleUncached(
             .order('sort_order');
           let list = (existingRows || []) as ScheduleRow[];
           if (!list.length && autoSeed) {
-            const drafts = buildDatedScheduleRows(kickoff, {
+            const drafts = await buildScheduleDraftsForProject(input.projectKey, kickoff, {
               preset: input.preset,
-              includeDates: input.preset ? presetIncludesDates(input.preset) : true,
             });
             const payload = drafts.map((d) => ({
               schedule_id: meta.id,
@@ -229,9 +244,8 @@ async function ensureProjectScheduleUncached(
     setProjectStartDate(input.projectKey, kickoffText);
     await persistScheduleStartDate(created.id, kickoffText);
 
-    const drafts = buildDatedScheduleRows(kickoff, {
+    const drafts = await buildScheduleDraftsForProject(input.projectKey, kickoff, {
       preset: input.preset,
-      includeDates: input.preset ? presetIncludesDates(input.preset) : true,
     });
     const payload = drafts.map((d) => ({
       schedule_id: created.id as string,
@@ -301,9 +315,8 @@ async function ensureProjectScheduleUncached(
         rows: [],
       };
     }
-    const drafts = buildDatedScheduleRows(kickoff, {
+    const drafts = await buildScheduleDraftsForProject(input.projectKey, kickoff, {
       preset: input.preset,
-      includeDates: input.preset ? presetIncludesDates(input.preset) : true,
     });
     const payload = drafts.map((d) => ({
       schedule_id: meta.id,
@@ -416,6 +429,8 @@ export async function applyProjectSchedulePreset(input: {
   title: string;
   kickoff: Date;
   preset: SchedulePresetKind;
+  /** When omitted, loaded from pa_projects (CORE) for this project key. */
+  corePhaseTitles?: string[];
 }): Promise<EnsureScheduleResult> {
   invalidateScheduleCache(input.projectKey);
 
@@ -536,9 +551,13 @@ export async function applyProjectSchedulePreset(input: {
       }
     }
 
+    const fromCore =
+      input.corePhaseTitles?.map((t) => t.trim()).filter(Boolean) ??
+      (await loadCorePhaseTitles(input.projectKey));
     const drafts = buildDatedScheduleRows(kickoff, {
       preset: input.preset,
       includeDates,
+      ...(fromCore.length ? { corePhaseTitles: fromCore } : {}),
     });
     const payload = drafts.map((d) => ({
       schedule_id: meta!.id,

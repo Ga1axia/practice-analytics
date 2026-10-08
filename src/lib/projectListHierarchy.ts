@@ -1,5 +1,6 @@
 import { phaseDisplayName } from './phaseAbbrev';
 import { rowOutstanding } from './receivable';
+import { managerNameMatches } from './projectManagerMatch';
 import { isActiveProjectStatus } from './projectStatus';
 import type { ProjectRow } from './types';
 
@@ -120,6 +121,7 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
         null;
       const parent = (parentKey && projectMap.get(parentKey)) || null;
       const target = parent || (projects.length === 1 ? projects[0]! : ensureOrphan());
+      if (!label.trim()) continue;
       target.phases.push({ row: ph, label });
     }
 
@@ -139,10 +141,12 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
 
     // If no project headers, treat all phases as one synthetic project
     if (!projects.length && phaseRows.length) {
-      const phases = phaseRows.map((ph) => ({
-        row: ph,
-        label: phaseDisplayName(ph.phase, ph.project),
-      }));
+      const phases = phaseRows
+        .map((ph) => ({
+          row: ph,
+          label: phaseDisplayName(ph.phase, ph.project),
+        }))
+        .filter((ph) => ph.label.trim());
       projects.push({
         key: `${client}::__all`,
         title: client,
@@ -178,6 +182,30 @@ export function buildClientHierarchy(rows: ProjectRow[]): ClientNode[] {
 export function isActiveProjectNode(project: ProjectNode): boolean {
   if (project.row) return isActiveProjectStatus(project.row.status);
   return project.phases.some((ph) => isActiveProjectStatus(ph.row.status));
+}
+
+/**
+ * Employee portal Active filter: active header, or PM on an active header/phase
+ * (shows managed jobs with no time entries).
+ */
+export function isActiveProjectForEmployee(
+  project: ProjectNode,
+  employeeName: string,
+): boolean {
+  const emp = employeeName.trim();
+  if (!emp) return false;
+
+  if (project.row && managerNameMatches(project.row.manager, emp)) {
+    if (isActiveProjectStatus(project.row.status)) return true;
+  }
+  const managesActivePhase = project.phases.some(
+    (ph) =>
+      managerNameMatches(ph.row.manager, emp) &&
+      isActiveProjectStatus(ph.row.status),
+  );
+  if (managesActivePhase) return true;
+
+  return isActiveProjectNode(project);
 }
 
 export function clientHasActiveProject(node: ClientNode): boolean {

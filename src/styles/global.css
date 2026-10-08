@@ -1120,6 +1120,9 @@ footer{
 }
 .cp-box-links.compact .cp-box-form{ grid-template-columns:1fr; }
 .cp-box-links.compact .cp-empty-card{ padding:14px; }
+.cp-box-form-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.cp-doc-list li.editing{ border-color:var(--gold); }
+.emp-box-panel h3{ margin-top:0; }
 .cp-budget-kpis{
   display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:14px 0;
 }
@@ -1614,7 +1617,7 @@ footer{
   padding:14px; margin-bottom:14px;
 }
 .pd-meeting-form.paste{ background:color-mix(in srgb, var(--teal) 6%, #fff); }
-.pd-meeting-form.paste > label.wide{ display:flex; flex-direction:column; gap:5px; }
+.pd-meeting-form.paste > label.wide{ display:flex; flex-direction:column; gap:5px; margin-top:12px; }
 .pd-meeting-form.paste > label.wide span{
   font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
   color:var(--ink-soft);
@@ -1629,10 +1632,22 @@ footer{
 .pd-meeting-form-grid{
   display:grid; grid-template-columns:1fr 1fr; gap:12px;
 }
-.pd-meeting-form.paste .pd-meeting-form-grid{ margin-top:12px; }
-.pd-meeting-form-grid label{ display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--ink-soft); }
+.pd-meeting-form.paste .pd-meeting-form-grid{ margin-top:0; }
+.pd-meeting-where{ display:flex; gap:6px; flex-wrap:wrap; }
+.pd-meeting-where button{
+  border:1px solid var(--border); background:#fff; color:var(--ink);
+  padding:8px 12px; font:inherit; font-size:13.5px; cursor:pointer;
+}
+.pd-meeting-where button.selected{
+  border-color:color-mix(in srgb, var(--teal) 45%, var(--border));
+  background:color-mix(in srgb, var(--teal) 10%, #fff);
+  color:var(--navy); font-weight:600;
+}
+.pd-meeting-form-grid label,
+.pd-meeting-form-grid > div{ display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--ink-soft); }
 .pd-meeting-form-grid label.wide{ grid-column:1 / -1; }
-.pd-meeting-form-grid label span{
+.pd-meeting-form-grid label span,
+.pd-meeting-form-grid > div > span{
   font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
 }
 .pd-meeting-form-grid input,
@@ -2996,6 +3011,18 @@ footer{
 .emp-status-toggle button.on{
   background:var(--navy); color:#fff;
 }
+.emp-project-hours-scope{
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;
+  margin:0 0 12px; font-size:12px; color:var(--ink-soft);
+}
+.emp-project-hours-scope .emp-interior-scope-toggle{ flex:0 0 auto; }
+.admin-portal-prefs-cell{
+  min-width:148px; vertical-align:top;
+}
+.admin-portal-pref{
+  display:flex; align-items:center; gap:4px; font-size:11px; line-height:1.35;
+  margin:0 0 4px; cursor:pointer; white-space:nowrap;
+}
 .emp-search input{
   width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:2px;
   font-family:'Montserrat',sans-serif; font-size:13.5px;
@@ -3886,7 +3913,33 @@ footer{
 }
 .emp-gantt-row.selected{ outline:1px solid var(--gold); background:rgba(168,120,58,0.06); }
 .emp-project-tasks{ margin-top:4px; }
-.emp-project-tasks-bar{ margin-bottom:8px; flex-wrap:wrap; gap:8px; }
+.emp-project-tasks-bar{
+  margin-bottom:8px; flex-direction:row; flex-wrap:wrap; gap:8px; align-items:center;
+}
+.emp-task-filter-wrap{ position:relative; flex:0 0 auto; }
+.emp-filter-trigger{
+  padding:6px 12px; font-size:12px; font-family:'IBM Plex Mono',monospace;
+  letter-spacing:0.04em; text-transform:uppercase;
+  border:1px solid var(--border); background:#fff; cursor:pointer;
+}
+.emp-filter-trigger.on,
+.emp-filter-trigger.has-filters{
+  border-color:var(--teal); color:var(--teal-dark, #0f4f4e);
+  box-shadow:inset 0 0 0 1px rgba(20,108,107,0.15);
+}
+.emp-task-filter-pop{
+  position:absolute; top:calc(100% + 6px); right:0; z-index:40;
+  width:min(280px, calc(100vw - 32px)); padding:12px;
+  background:#fff; border:1px solid var(--border);
+  box-shadow:0 8px 24px rgba(16,27,45,0.12);
+  display:flex; flex-direction:column; gap:10px;
+}
+.emp-task-filter-pop .emp-filter-field{ flex:1 1 auto; min-width:0; }
+.emp-task-filter-pop .emp-started-toggle{ margin:0; font-size:13px; }
+.emp-task-scope-toggle.compact button{ padding:6px 10px; font-size:11px; }
+.emp-tasks-scope-note{ margin:0 0 12px; font-size:11px; line-height:1.4; }
+.emp-tasks-nav .emp-task-scope-toggle{ margin-bottom:8px; width:100%; }
+.emp-tasks-nav .emp-task-scope-toggle button{ flex:1; }
 .emp-project-tasks-hint{ margin:0 0 10px; font-size:12px; }
 .emp-project-task-phase{
   margin-bottom:6px; border:1px solid var(--border); background:#fff;
@@ -3930,4 +3983,63 @@ footer{
 .emp-project-task-side .emp-task-edit,
 .emp-project-task-side .emp-task-delete{
   padding:2px 4px;
+}
+.emp-task-modal-overlay{
+  position:fixed; inset:0; z-index:1200;
+  background:rgba(16,27,45,0.45);
+  display:flex; align-items:center; justify-content:center;
+  padding:16px;
+}
+.emp-task-modal{
+  width:min(520px, 100%); max-height:min(90vh, 720px);
+  overflow:auto; margin:0;
+  box-shadow:0 12px 40px rgba(16,27,45,0.2);
+}
+.emp-task-modal-head{
+  display:flex; justify-content:space-between; gap:12px; align-items:flex-start;
+  margin-bottom:14px;
+}
+.emp-task-modal-head h2{ margin:4px 0 0; font-size:20px; }
+.emp-task-modal-field{
+  display:flex; flex-direction:column; gap:4px; margin-bottom:12px;
+}
+.emp-task-modal-field > span{
+  font-family:'IBM Plex Mono',monospace; font-size:10px;
+  letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-soft);
+}
+.emp-task-modal-field input[type="text"],
+.emp-task-modal-field textarea{
+  width:100%; padding:8px 10px; border:1px solid var(--border); font-size:14px;
+}
+.emp-task-modal-dates{
+  display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;
+}
+.emp-task-modal-section{ margin-bottom:14px; }
+.emp-task-modal-section h3{ margin:0 0 8px; font-size:14px; }
+.emp-task-checklist,
+.emp-task-links{
+  list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:6px;
+}
+.emp-task-check-item{
+  display:flex; align-items:center; gap:8px; flex:1; font-size:13px;
+}
+.emp-task-check-item .done{ text-decoration:line-through; color:var(--ink-soft); }
+.emp-task-checklist li{
+  display:flex; align-items:center; gap:6px; justify-content:space-between;
+}
+.emp-task-links li{
+  display:flex; align-items:center; gap:8px; font-size:13px;
+}
+.emp-task-links a{ color:var(--teal); word-break:break-all; }
+.emp-task-modal-add-row,
+.emp-task-modal-links-add{
+  display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+}
+.emp-task-modal-add-row input,
+.emp-task-modal-links-add input{
+  flex:1 1 120px; min-width:0; padding:6px 8px; border:1px solid var(--border);
+}
+.emp-task-modal-foot{
+  display:flex; justify-content:flex-end; gap:10px; margin-top:16px;
+  padding-top:12px; border-top:1px solid var(--border);
 }

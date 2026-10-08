@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   clientHasActiveProject,
   clientNamesWithActiveProjects,
+  isActiveProjectForEmployee,
   isActiveProjectNode,
   type ClientNode,
   type ProjectNode,
@@ -47,6 +48,22 @@ function proj(
     spentHours: 0,
   };
 }
+
+describe('isActiveProjectForEmployee', () => {
+  it('includes active projects managed with no hours (header PM)', () => {
+    const p = proj('Job - 26-010', 'ACTIVE');
+    p.row!.manager = 'Avery Cobe';
+    assert.equal(isActiveProjectForEmployee(p, 'Avery Cobe'), true);
+    assert.equal(isActiveProjectForEmployee(p, 'avery cobe'), true);
+  });
+
+  it('excludes completed header for PM when no active phase', () => {
+    const p = proj('Job - 18-139', 'COMPLETED');
+    p.row!.manager = 'Avery Cobe';
+    assert.equal(isActiveProjectForEmployee(p, 'Avery Cobe'), false);
+    assert.equal(isActiveProjectForEmployee(p, 'Other Person'), false);
+  });
+});
 
 describe('isActiveProjectNode', () => {
   it('uses project header status when present (ignores stray active phases)', () => {

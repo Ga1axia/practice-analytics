@@ -9,6 +9,7 @@ describe('parseMeetingSummary', () => {
     );
     assert.equal(parsed.title, 'SD pin-up');
     assert.equal(parsed.attendees, '');
+    assert.equal(parsed.location, '');
     assert.equal(parsed.meetingAt, null);
     assert.match(parsed.notes, /east elevation/);
   });
@@ -49,5 +50,16 @@ Confirmed scope, budget band, and biweekly cadence.`);
   it('does not treat random sentences as dates', () => {
     assert.equal(parseLooseDate('Follow up on finishes next week.'), null);
     assert.equal(parseLooseDate('Action item 1'), null);
+  });
+
+  it('reads site vs in-office from labeled location or recap wording', () => {
+    assert.equal(
+      parseMeetingSummary('Location: Site visit\n\nWalked the property with the client.').location,
+      'site',
+    );
+    assert.equal(
+      parseMeetingSummary('Design review\nIn office\n\nPinned up the SD set.').location,
+      'office',
+    );
   });
 });

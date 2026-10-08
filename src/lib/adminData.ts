@@ -254,6 +254,7 @@ export type EmployeeDirectoryRow = {
   member_projects: number;
   lead_projects: number;
   sources: string[];
+  portal_prefs?: Record<string, unknown> | null;
 };
 
 export type PracticeRosterRow = { id: number; team: string; employee: string };
@@ -354,6 +355,7 @@ export function updateProfile(
     employee_name: string | null;
     client_name: string | null;
     email: string;
+    portal_prefs?: Record<string, unknown> | null;
   }>,
 ) {
   return adminData<{ ok: boolean; profile: Record<string, unknown> }>({

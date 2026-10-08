@@ -18,8 +18,16 @@ import { roleLabel } from '../lib/roles';
 import type { UserRole } from '../lib/authTypes';
 import { BqeConnectPanel } from './BqeConnectPanel';
 import { AdminTestAsPanel } from './AdminTestAs';
+import { resolveEmployeePortalPrefs } from '../lib/employeePortalPrefs';
 
 const ROLES: UserRole[] = ['admin', 'exec', 'project_lead', 'employee', 'customer'];
+
+function portalPrefsForDirectoryRow(r: EmployeeDirectoryRow) {
+  return resolveEmployeePortalPrefs({
+    employeeName: r.name || r.display_name || r.email || '',
+    profilePrefs: r.portal_prefs,
+  });
+}
 
 function cell(v: unknown): string {
   if (v == null || v === '') return '—';
@@ -571,7 +579,8 @@ export function AdminProfilesPanel({
     <div className="admin-data-panel">
       <h3>Portal profiles &amp; roles</h3>
       <p className="pd-muted">
-        Edit email, role, and employee binding for signed-in portal accounts (people with a{' '}
+        Edit email, role, employee binding, and optional interior-design portal focus (project
+        list + hours toggles) for signed-in portal accounts (people with a{' '}
         <span className="mono">pa_profiles</span> row).
       </p>
       <div className="admin-data-inline" style={{ marginBottom: 12 }}>
@@ -595,11 +604,14 @@ export function AdminProfilesPanel({
               <th>Display</th>
               <th>Employee name</th>
               <th>Role</th>
+              <th title="Interior design focus on employee portal">Interior focus</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const pp = portalPrefsForDirectoryRow(r);
+              return (
               <tr key={r.profile_id!}>
                 <td>
                   <input
@@ -640,6 +652,32 @@ export function AdminProfilesPanel({
                     ))}
                   </select>
                 </td>
+                <td className="admin-portal-prefs-cell">
+                  <label className="admin-portal-pref" title="Show Interior jobs / All my projects toggle">
+                    <input
+                      type="checkbox"
+                      defaultChecked={pp.interiorProjectsOption}
+                      id={`pp-opt-${r.profile_id}`}
+                    />
+                    Toggles
+                  </label>
+                  <label className="admin-portal-pref" title="Default project list to interior phases">
+                    <input
+                      type="checkbox"
+                      defaultChecked={pp.defaultInteriorProjects}
+                      id={`pp-proj-${r.profile_id}`}
+                    />
+                    Def. jobs
+                  </label>
+                  <label className="admin-portal-pref" title="Default hours chart to interior phases">
+                    <input
+                      type="checkbox"
+                      defaultChecked={pp.defaultInteriorHours}
+                      id={`pp-hrs-${r.profile_id}`}
+                    />
+                    Def. hours
+                  </label>
+                </td>
                 <td>
                   <button
                     type="button"
@@ -658,6 +696,17 @@ export function AdminProfilesPanel({
                       )?.value;
                       const role = (document.getElementById(`role-${id}`) as HTMLSelectElement | null)
                         ?.value;
+                      const portal_prefs = {
+                        interiorProjectsOption: (
+                          document.getElementById(`pp-opt-${id}`) as HTMLInputElement | null
+                        )?.checked,
+                        defaultInteriorProjects: (
+                          document.getElementById(`pp-proj-${id}`) as HTMLInputElement | null
+                        )?.checked,
+                        defaultInteriorHours: (
+                          document.getElementById(`pp-hrs-${id}`) as HTMLInputElement | null
+                        )?.checked,
+                      };
                       void (async () => {
                         onBusy(true);
                         onError(null);
@@ -671,6 +720,7 @@ export function AdminProfilesPanel({
                             display_name: display?.trim() || null,
                             employee_name: employee?.trim() || null,
                             role: role || 'employee',
+                            portal_prefs,
                           });
                           onMsg(`Updated ${trimmed}`);
                           await load();
@@ -686,10 +736,11 @@ export function AdminProfilesPanel({
                   </button>
                 </td>
               </tr>
-            ))}
+            );
+            })}
             {!rows.length ? (
               <tr>
-                <td colSpan={5}>{busy ? 'Loading…' : 'No profiles'}</td>
+                <td colSpan={6}>{busy ? 'Loading…' : 'No profiles'}</td>
               </tr>
             ) : null}
           </tbody>

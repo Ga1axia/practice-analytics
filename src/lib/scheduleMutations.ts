@@ -254,39 +254,76 @@ export async function createScheduleTask(input: {
     ).data ||
     [];
 
-  const sections = groupScheduleSections(rows as ScheduleRow[]);
-  const section =
-    sections.find((s) => s.title === input.phaseTitle) ||
-    sections.find((s) => s.title.toLowerCase() === input.phaseTitle.toLowerCase()) ||
+  const rowList = rows as ScheduleRow[];
+  const sections = groupScheduleSections(rowList);
+  const phaseTitle = input.phaseTitle.trim();
+  let section =
+    sections.find((s) => s.title === phaseTitle) ||
+    sections.find((s) => s.title.toLowerCase() === phaseTitle.toLowerCase()) ||
     null;
 
   const afterRow = input.afterRowId
-    ? (rows as ScheduleRow[]).find((r) => r.id === input.afterRowId)
+    ? rowList.find((r) => r.id === input.afterRowId)
     : null;
 
+  const shiftFrom = async (fromOrder: number, by: number) => {
+    const toShift = rowList.filter((r) => (r.sort_order || 0) >= fromOrder);
+    if (!toShift.length) return;
+    await Promise.all(
+      toShift.map((r) =>
+        supabase
+          .from('pa_schedule_rows')
+          .update({ sort_order: (r.sort_order || 0) + by })
+          .eq('id', r.id),
+      ),
+    );
+  };
+
   let sortOrder: number;
+  let insertedPhase: ScheduleRow | null = null;
+
   if (afterRow) {
     sortOrder = (afterRow.sort_order || 0) + 1;
   } else if (section) {
     const last = section.items[section.items.length - 1];
     const after = last?.sort_order ?? section.phaseRow?.sort_order ?? 0;
     sortOrder = after + 1;
+  } else if (phaseTitle && !/^project kickoff$/i.test(phaseTitle)) {
+    const max = rowList.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+    const phaseOrder = max + 1;
+    await shiftFrom(phaseOrder, 2);
+    const { data: phaseRow, error: phaseErr } = await supabase
+      .from('pa_schedule_rows')
+      .insert({
+        schedule_id: input.scheduleId,
+        sort_order: phaseOrder,
+        row_kind: 'phase',
+        task: phaseTitle,
+        budget_remaining: 'Active',
+        target_start: '',
+        target_end: '',
+        actual_start: '',
+        actual_end: '',
+        action: '',
+        estimate_time: '',
+        mdesigns_comments: '',
+        client_comments: '',
+        assignee_name: '',
+      })
+      .select('*')
+      .single();
+    if (phaseErr || !phaseRow) {
+      return { ok: false, error: phaseErr?.message || 'Could not create phase' };
+    }
+    insertedPhase = phaseRow as ScheduleRow;
+    sortOrder = phaseOrder + 1;
   } else {
-    const max = (rows as ScheduleRow[]).reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+    const max = rowList.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
     sortOrder = max + 1;
   }
 
-  // Shift following rows so the new task sits in the right phase block.
-  const toShift = (rows as ScheduleRow[]).filter((r) => (r.sort_order || 0) >= sortOrder);
-  if (toShift.length) {
-    await Promise.all(
-      toShift.map((r) =>
-        supabase
-          .from('pa_schedule_rows')
-          .update({ sort_order: (r.sort_order || 0) + 1 })
-          .eq('id', r.id),
-      ),
-    );
+  if (!insertedPhase) {
+    await shiftFrom(sortOrder, 1);
   }
 
   const kind: ScheduleRowKind = input.kind || 'task';
@@ -320,12 +357,26 @@ export async function createScheduleTask(input: {
   const created = data as ScheduleRow;
   const cached = getCachedSchedule(input.projectKey);
   if (cached) {
-    const nextRows = cached.rows
-      .map((r) =>
-        (r.sort_order || 0) >= sortOrder ? { ...r, sort_order: (r.sort_order || 0) + 1 } : r,
-      )
-      .concat([created])
-      .sort((a, b) => a.sort_order - b.sort_order);
+    let nextRows = cached.rows;
+    if (insertedPhase) {
+      const phaseOrder = insertedPhase.sort_order;
+      nextRows = nextRows
+        .map((r) =>
+          (r.sort_order || 0) >= phaseOrder
+            ? { ...r, sort_order: (r.sort_order || 0) + 2 }
+            : r,
+        )
+        .concat([insertedPhase, created]);
+    } else {
+      nextRows = nextRows
+        .map((r) =>
+          (r.sort_order || 0) >= sortOrder
+            ? { ...r, sort_order: (r.sort_order || 0) + 1 }
+            : r,
+        )
+        .concat([created]);
+    }
+    nextRows.sort((a, b) => a.sort_order - b.sort_order);
     setCachedSchedule({ ...cached, rows: nextRows });
   } else {
     invalidateScheduleCache(input.projectKey);

@@ -1,8 +1,23 @@
-/** Extract phase label from "Project Name - Phase Name". */
+/** Extract phase label from "Project Name - Phase Name" or "Name - 26-001 - Phase". */
 export function extractPhaseLabel(projectName: string): string {
-  const parts = projectName.split(' - ');
-  if (parts.length < 2) return projectName;
-  return parts.slice(1).join(' - ').trim() || projectName;
+  const parts = projectName
+    .split(' - ')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return projectName.trim();
+  if (parts.length >= 3 && /^\d{2}-\d{3}$/.test(parts[parts.length - 2]!)) {
+    return parts[parts.length - 1]!;
+  }
+  return parts.slice(1).join(' - ').trim() || projectName.trim();
+}
+
+/** True when CORE / BQE explicitly names an additional-services phase. */
+export function isAdditionalServicesPhase(
+  phase: string | null | undefined,
+  projectName?: string | null,
+): boolean {
+  const parts = [phase, projectName, extractPhaseLabel(projectName || '')];
+  return parts.some((p) => /additional\s*service/i.test((p || '').trim()));
 }
 
 /** Clean phase name for charts/tables — never the full "Project - Phase" string. */
@@ -11,12 +26,23 @@ export function phaseDisplayName(
   projectName?: string | null,
 ): string {
   const raw = (phase || '').trim();
-  if (raw && raw.toLowerCase() !== 'other') {
+  const proj = (projectName || '').trim();
+
+  if (raw && !/^other$/i.test(raw)) {
     return extractPhaseLabel(raw);
   }
-  const fromProject = extractPhaseLabel((projectName || '').trim());
-  if (fromProject && fromProject !== (projectName || '').trim()) return fromProject;
-  return 'Additional Services';
+
+  const fromProject = extractPhaseLabel(proj);
+  if (fromProject && fromProject !== proj) {
+    if (/^other$/i.test(raw) && /^\d{2}-\d{3}$/.test(fromProject)) return '';
+    return fromProject;
+  }
+
+  if (isAdditionalServicesPhase(raw, proj)) {
+    return fromProject || raw || 'Additional Services';
+  }
+
+  return raw || fromProject || '';
 }
 
 /** Short phase codes used in the Main Report table (Power BI style). */

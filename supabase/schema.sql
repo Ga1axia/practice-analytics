@@ -222,7 +222,7 @@ create index if not exists pa_schedule_rows_schedule_idx
 --   pa_client_box_links — staff-posted Box share URLs on the client Documents tab
 --
 -- Meeting history (see migration pa_client_meetings):
---   pa_client_meetings — dated meetings + notes per client (PM/admin only)
+--   pa_client_meetings — dated meetings + notes per client (PM/admin only; location site|office)
 --   pa_staff_project_access(project, client) — staff RLS helper
 --
 -- Demo employees (see migration pa_employee_demos_arnita_nini_zhengrui):

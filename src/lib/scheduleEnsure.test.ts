@@ -42,6 +42,20 @@ describe('schedule ensure dating', () => {
     assert.ok(work.every((r) => isPresetStructureAction(r.action)));
   });
 
+  it('uses CORE phase titles and maps template tasks onto them', () => {
+    const kickoff = new Date(2026, 0, 5);
+    const rows = buildDatedScheduleRows(kickoff, {
+      corePhaseTitles: ['Pre-Design Services', 'Schematic Design', 'Construction Documents'],
+    });
+    const phases = rows.filter((r) => r.row_kind === 'phase');
+    assert.deepEqual(
+      phases.map((p) => p.task),
+      ['Pre-Design Services', 'Schematic Design', 'Construction Documents'],
+    );
+    assert.ok(rows.some((r) => /program/i.test(r.task)));
+    assert.ok(rows.some((r) => r.row_kind === 'task' && /construction document/i.test(r.task)));
+  });
+
   it('uses remodel preset phase gaps', () => {
     const kickoff = new Date(2026, 0, 5);
     const remodel = buildDatedScheduleRows(kickoff, { preset: 'remodel' });

@@ -289,7 +289,11 @@ function EmployeeShell() {
         </div>
       </header>
       <main>
-        <EmployeePortal data={data} employeeName={employeeName} />
+        <EmployeePortal
+          data={data}
+          employeeName={employeeName}
+          profilePortalPrefs={profile?.portal_prefs}
+        />
       </main>
       <footer>
         {isDemo

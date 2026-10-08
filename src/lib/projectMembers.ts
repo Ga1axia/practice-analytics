@@ -5,7 +5,10 @@ import {
   buildTimeEntryProjectIndex,
   projectKeysForTimeEntry,
 } from './projectLoggedHours';
+import { isProjectListManager } from './projectManagerMatch';
 import { supabase } from './supabase';
+
+export { isProjectListManager } from './projectManagerMatch';
 
 export type ProjectMemberRole = 'lead' | 'member';
 
@@ -20,18 +23,6 @@ export type MutationResult<T = void> = { ok: true; data: T } | { ok: false; erro
 
 function norm(name: string) {
   return name.trim().toLowerCase();
-}
-
-/** True when the employee is the Project List manager (header or any phase). */
-export function isProjectListManager(
-  project: {
-    row?: { manager?: string | null } | null;
-    phases?: { row: { manager?: string | null } }[];
-  },
-  employeeName: string,
-): boolean {
-  if (project.row?.manager === employeeName) return true;
-  return Boolean(project.phases?.some((ph) => ph.row.manager === employeeName));
 }
 
 export function isProjectLead(
@@ -317,4 +308,30 @@ export async function ensureMyMembershipsFromTimeEntries(input: {
     }
   }
   return { added };
+}
+
+/** Project List PMs appear in the portal even with zero hours — ensure lead membership. */
+export async function ensureManagedProjectLeadMemberships(input: {
+  employeeName: string;
+  projects: {
+    key: string;
+    row?: { manager?: string | null } | null;
+    phases?: { row: { manager?: string | null } }[];
+  }[];
+}): Promise<{ ensured: number; error?: string }> {
+  const emp = input.employeeName.trim();
+  if (!emp) return { ensured: 0 };
+
+  let ensured = 0;
+  let lastError: string | undefined;
+  for (const p of input.projects) {
+    if (!isProjectListManager(p, emp)) continue;
+    const res = await ensureLeadMembership({ projectKey: p.key, employeeName: emp });
+    if (!res.ok) {
+      lastError = res.error;
+      continue;
+    }
+    ensured += 1;
+  }
+  return { ensured, error: lastError };
 }

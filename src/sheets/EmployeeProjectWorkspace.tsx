@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { InteriorScopeToggle } from '../components/InteriorScopeToggle';
+import { ClientBoxLinks } from '../components/ClientBoxLinks';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
 import { KpiRow } from '../components/KpiRow';
@@ -14,6 +16,12 @@ import {
   processPhaseLabel,
 } from '../lib/architecturalProcess';
 import { buildDemoProjectDetail } from '../lib/demoProjectDetail';
+import {
+  filterInteriorPhaseHours,
+  readHoursPhaseScope,
+  writeHoursPhaseScope,
+  type ResolvedEmployeePortalPrefs,
+} from '../lib/employeePortalPrefs';
 import { fmtUSD } from '../lib/format';
 import { scheduleDeliverables } from '../lib/loadProjectSchedule';
 import type { ProjectMember } from '../lib/projectMembers';
@@ -29,11 +37,14 @@ import {
   dismissScheduleStartLater,
   getProjectStartDate,
   inferSchedulePresetKind,
+  parseProjectStartDate,
   scheduleNeedsStartPrompt,
   setProjectStartDate,
   type SchedulePresetKind,
 } from '../lib/scheduleAutofill';
 import { buildDeadlineEvents } from '../lib/scheduleDates';
+import { corePhasesFromProject } from '../lib/scheduleCorePhases';
+import { resyncProjectScheduleFromCore } from '../lib/scheduleCoreResync';
 import {
   applyProjectSchedulePreset,
   ensureProjectSchedule,
@@ -110,6 +121,7 @@ type Props = {
   employeeName: string;
   isLead?: boolean;
   rosterNames?: string[];
+  portalPrefs?: ResolvedEmployeePortalPrefs;
   onMembershipChange?: () => void;
 };
 
@@ -118,6 +130,11 @@ export function EmployeeProjectWorkspace({
   employeeName,
   isLead = true,
   rosterNames = [],
+  portalPrefs = {
+    interiorProjectsOption: false,
+    defaultInteriorProjects: false,
+    defaultInteriorHours: false,
+  },
   onMembershipChange,
 }: Props) {
   const isDemo = useDemoMode();
@@ -132,7 +149,21 @@ export function EmployeeProjectWorkspace({
   const [startError, setStartError] = useState<string | null>(null);
   const [startDateText, setStartDateText] = useState('');
   const [teamMembers, setTeamMembers] = useState<ProjectMember[]>([]);
+  const [resyncBusy, setResyncBusy] = useState(false);
+  const [resyncMsg, setResyncMsg] = useState<string | null>(null);
+  const [hoursScope, setHoursScopeState] = useState(() =>
+    readHoursPhaseScope(employeeName, portalPrefs),
+  );
   const showPayments = isLead;
+
+  useEffect(() => {
+    setHoursScopeState(readHoursPhaseScope(employeeName, portalPrefs));
+  }, [employeeName, portalPrefs]);
+
+  function setHoursScope(scope: 'interior' | 'all') {
+    setHoursScopeState(scope);
+    writeHoursPhaseScope(employeeName, scope);
+  }
 
   const detailRows = useMemo(() => {
     if (project.phases.length) return project.phases.map((p) => p.row);
@@ -232,6 +263,7 @@ export function EmployeeProjectWorkspace({
         title: project.title,
         kickoff: input.kickoff,
         preset: input.preset,
+        corePhaseTitles: corePhasesFromProject(project).map((p) => p.title),
       });
       const taskCount = res.rows.filter(
         (r) =>
@@ -266,6 +298,46 @@ export function EmployeeProjectWorkspace({
       setShowStartPrompt(true);
     } finally {
       setStartBusy(false);
+    }
+  }
+
+  async function onResyncFromCore() {
+    if (!scheduleMeta?.id || resyncBusy || usingDemo) return;
+    if (
+      !window.confirm(
+        'Resync schedule from CORE? Phase names and leads will update, and missing checklist tasks will be added. Existing tasks are kept.',
+      )
+    ) {
+      return;
+    }
+    setResyncBusy(true);
+    setResyncMsg(null);
+    try {
+      const res = await resyncProjectScheduleFromCore({
+        projectKey: project.key,
+        scheduleId: scheduleMeta.id,
+        preset: defaultPreset,
+        kickoff: startDateText
+          ? parseProjectStartDate(fromDateInputValue(startDateText)) ?? undefined
+          : undefined,
+        corePhases: corePhasesFromProject(project),
+        headerManager: project.row?.manager,
+        projectTitle: project.title,
+        projectCode: project.code,
+        clientName: project.clientName,
+      });
+      if (!res.ok) {
+        setResyncMsg(res.error);
+        return;
+      }
+      setDbRows(res.rows);
+      setResyncMsg(
+        `Updated ${res.stats.phasesAligned + res.stats.phasesAdded} phase(s), added ${res.stats.tasksAdded} task(s), refreshed ${res.stats.leadsEnsured} lead(s).`,
+      );
+    } catch (e) {
+      setResyncMsg(e instanceof Error ? e.message : 'Resync failed');
+    } finally {
+      setResyncBusy(false);
     }
   }
 
@@ -383,6 +455,23 @@ export function EmployeeProjectWorkspace({
     }
     return { slices: [], source: '' };
   }, [project.phases, hours]);
+
+  const displayHourSlices = useMemo(() => {
+    if (!portalPrefs.interiorProjectsOption) {
+      return phaseHourSlices;
+    }
+    if (hoursScope === 'all') return phaseHourSlices;
+    const filtered = filterInteriorPhaseHours(phaseHourSlices.slices);
+    const total = filtered.reduce((a, s) => a + s.hours, 0);
+    return {
+      source: phaseHourSlices.source,
+      slices: filtered.map((s, i) => ({
+        ...s,
+        share: total > 0 ? s.hours / total : 0,
+        color: phaseColor(s.label, i),
+      })),
+    };
+  }, [phaseHourSlices, hoursScope, portalPrefs]);
 
   const noteThreads = useMemo(() => {
     const sections = groupScheduleSections(rows);
@@ -565,8 +654,17 @@ export function EmployeeProjectWorkspace({
         </p>
       ) : null}
 
-      {phaseHourSlices.slices.length ? (
-        <PhaseHoursChart slices={phaseHourSlices.slices} source={phaseHourSlices.source} />
+      {portalPrefs.interiorProjectsOption ? (
+        <div className="emp-project-hours-scope">
+          <InteriorScopeToggle
+            scope={hoursScope}
+            onChange={setHoursScope}
+            labels={{ interior: 'Interior hours', all: 'All phase hours' }}
+          />
+        </div>
+      ) : null}
+      {displayHourSlices.slices.length ? (
+        <PhaseHoursChart slices={displayHourSlices.slices} source={displayHourSlices.source} />
       ) : !hoursLoading ? (
         <p className="pd-muted emp-project-hours-mix">
           No phase hour breakdown available for this project yet.
@@ -603,7 +701,9 @@ export function EmployeeProjectWorkspace({
           {loading ? (
             <p className="pd-muted">Loading tasks…</p>
           ) : (
-            <ProjectTaskList
+            <>
+              {resyncMsg ? <p className="plist-upload-err">{resyncMsg}</p> : null}
+              <ProjectTaskList
               projectKey={project.key}
               projectTitle={project.title}
               clientName={project.clientName}
@@ -613,6 +713,9 @@ export function EmployeeProjectWorkspace({
               canAssign={isLead && !usingDemo}
               assigneeOptions={teamMembers.map((m) => m.employee_name)}
               onRowsChange={setDbRows}
+              onResyncFromCore={isLead && !usingDemo && scheduleMeta?.id ? onResyncFromCore : undefined}
+              resyncBusy={resyncBusy}
+              isLead={isLead}
               onStartSchedule={
                 needsSchedule
                   ? () => {
@@ -625,6 +728,7 @@ export function EmployeeProjectWorkspace({
                   : undefined
               }
             />
+            </>
           )}
         </aside>
       </div>
@@ -634,6 +738,19 @@ export function EmployeeProjectWorkspace({
           projectKey={project.key}
           clientName={project.clientName}
           seedMeetings={usingDemo && demo ? demo.meetings : null}
+        />
+      </section>
+
+      <section className="panel emp-box-panel">
+        <h3>Box files</h3>
+        <ClientBoxLinks
+          projectKey={project.key}
+          clientName={project.clientName}
+          authorName={authorName}
+          mode="pm"
+          compact
+          embedded
+          canEdit={isLead && !usingDemo}
         />
       </section>
 

@@ -104,6 +104,11 @@ export type BuildScheduleOptions = {
    * Defaults to true unless preset is Interior.
    */
   includeDates?: boolean;
+  /**
+   * CORE / Project List phase titles (order preserved). Checklist tasks from the
+   * firm template are mapped by process phase; headers use these labels.
+   */
+  corePhaseTitles?: string[];
 };
 
 /**
@@ -149,37 +154,96 @@ export function buildDatedScheduleRows(
     if (!item.na) cursor = addDays(end, 1);
   }
 
-  for (const block of blocks) {
-    const phaseTitle = block.phase?.task || 'Phase';
-    const days = phaseDaysForTitle(phaseTitle, preset);
-    const phaseStart = cursor;
-    const phaseEnd = addDays(phaseStart, Math.max(days, 7));
+  const coreTitles = (options?.corePhaseTitles || []).map((t) => t.trim()).filter(Boolean);
 
-    const activeItems = block.items.filter((i) => !i.na);
-    const step =
-      activeItems.length > 0 ? Math.max(2, Math.floor(days / Math.max(activeItems.length, 1))) : 7;
-
-    if (block.phase) {
-      out.push(draftFromSkeleton(block.phase, phaseStart, phaseEnd, 'Active', includeDates));
+  if (coreTitles.length) {
+    const blocksByProcessIdx = new Map<number, PhaseBlock[]>();
+    for (const block of blocks) {
+      const idx = matchProcessPhaseIndex(block.phase?.task || '');
+      if (idx < 0) continue;
+      const list = blocksByProcessIdx.get(idx) ?? [];
+      list.push(block);
+      blocksByProcessIdx.set(idx, list);
     }
+    const usedBlocks = new Set<PhaseBlock>();
 
-    let itemCursor = phaseStart;
-    for (const item of block.items) {
-      if (item.na) {
-        out.push(draftFromSkeleton(item, phaseStart, phaseStart, 'N/A', includeDates));
-        continue;
+    for (const coreTitle of coreTitles) {
+      const idx = matchProcessPhaseIndex(coreTitle);
+      let block: PhaseBlock | undefined;
+      if (idx >= 0) {
+        const candidates = blocksByProcessIdx.get(idx) ?? [];
+        block = candidates.find((b) => !usedBlocks.has(b));
+        if (block) usedBlocks.add(block);
       }
-      const start = itemCursor;
-      const end = addDays(start, Math.max(1, Math.floor(step * 0.7)));
-      out.push(draftFromSkeleton(item, start, end, 'Active', includeDates));
-      itemCursor = addDays(itemCursor, step);
-      if (itemCursor.getTime() > phaseEnd.getTime()) itemCursor = phaseEnd;
+      cursor = appendPhaseBlock(out, {
+        phaseTitle: coreTitle,
+        block: block ?? { items: [] },
+        cursor,
+        preset,
+        includeDates,
+      });
     }
-
-    cursor = addDays(phaseEnd, 1);
+  } else {
+    for (const block of blocks) {
+      cursor = appendPhaseBlock(out, {
+        phaseTitle: block.phase?.task || 'Phase',
+        block,
+        cursor,
+        preset,
+        includeDates,
+      });
+    }
   }
 
-  return out;
+  return renumberDraftSortOrder(out);
+}
+
+function appendPhaseBlock(
+  out: DatedDraft[],
+  input: {
+    phaseTitle: string;
+    block: { phase?: SkeletonRow; items: SkeletonRow[] };
+    cursor: Date;
+    preset?: SchedulePresetKind;
+    includeDates: boolean;
+  },
+): Date {
+  let cursor = input.cursor;
+  const { phaseTitle, block, preset, includeDates } = input;
+  const days = phaseDaysForTitle(phaseTitle, preset);
+  const phaseStart = cursor;
+  const phaseEnd = addDays(phaseStart, Math.max(days, 7));
+
+  const activeItems = block.items.filter((i) => !i.na);
+  const step =
+    activeItems.length > 0 ? Math.max(2, Math.floor(days / Math.max(activeItems.length, 1))) : 7;
+
+  const phaseRow: SkeletonRow = {
+    sort_order: block.phase?.sort_order ?? 0,
+    row_kind: 'phase',
+    task: phaseTitle,
+    na: false,
+  };
+  out.push(draftFromSkeleton(phaseRow, phaseStart, phaseEnd, 'Active', includeDates));
+
+  let itemCursor = phaseStart;
+  for (const item of block.items) {
+    if (item.na) {
+      out.push(draftFromSkeleton(item, phaseStart, phaseStart, 'N/A', includeDates));
+      continue;
+    }
+    const start = itemCursor;
+    const end = addDays(start, Math.max(1, Math.floor(step * 0.7)));
+    out.push(draftFromSkeleton(item, start, end, 'Active', includeDates));
+    itemCursor = addDays(itemCursor, step);
+    if (itemCursor.getTime() > phaseEnd.getTime()) itemCursor = phaseEnd;
+  }
+
+  return addDays(phaseEnd, 1);
+}
+
+function renumberDraftSortOrder(rows: DatedDraft[]): DatedDraft[] {
+  return rows.map((r, i) => ({ ...r, sort_order: i }));
 }
 
 function draftFromSkeleton(

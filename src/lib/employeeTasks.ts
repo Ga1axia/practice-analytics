@@ -6,7 +6,8 @@ import { isAutofilledAction } from './scheduleAutofill';
 import { patchCachedScheduleRow } from './scheduleCache';
 import { parseScheduleDate, startOfDay } from './scheduleDates';
 import { ensureProjectSchedule } from './scheduleEnsure';
-import { groupScheduleSections } from './scheduleSections';
+import { phaseManagerFromComments } from './schedulePhaseMeta';
+import { groupScheduleSections, type ScheduleSection } from './scheduleSections';
 import type { ScheduleRow } from './scheduleTypes';
 import { supabase } from './supabase';
 
@@ -145,6 +146,16 @@ export function resolvePhaseManager(
   }
 
   return header;
+}
+
+/** CORE manager on the phase row (after resync), else Project List match. */
+export function resolvePhaseManagerForSection(
+  project: Parameters<typeof resolvePhaseManager>[0],
+  section: Pick<ScheduleSection, 'title' | 'phaseRow'>,
+): string {
+  const fromRow = phaseManagerFromComments(section.phaseRow?.mdesigns_comments);
+  if (fromRow) return fromRow;
+  return resolvePhaseManager(project, section.title);
 }
 
 const PRIORITY_KEY = 'pa-emp-task-priority-v1';
@@ -312,7 +323,7 @@ export async function loadEmployeeTasks(
             complete,
             priority,
             assigneeName: (row.assignee_name || '').trim(),
-            phaseManagerName: resolvePhaseManager(p, section.title),
+            phaseManagerName: resolvePhaseManagerForSection(p, section),
             writable,
             datesAutofilled: isAutofilledAction(row.action),
           });
@@ -451,7 +462,7 @@ export function tasksFromScheduleRows(
         complete,
         priority,
         assigneeName: (row.assignee_name || '').trim(),
-        phaseManagerName: resolvePhaseManager(project, section.title),
+        phaseManagerName: resolvePhaseManagerForSection(project, section),
         writable,
         datesAutofilled: isAutofilledAction(row.action),
       });

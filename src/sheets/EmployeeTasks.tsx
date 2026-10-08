@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AddScheduleTaskForm } from '../components/AddScheduleTaskForm';
+import { TaskScopeToggle } from '../components/TaskScopeToggle';
+import { useEmployeeTaskScope } from '../hooks/useEmployeeTaskScope';
 import { ScheduleDateInput } from '../components/ScheduleDateInput';
+import { TaskEditModal } from '../components/TaskEditModal';
 import { useDemoMode } from '../hooks/useDemoMode';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from '../lib/architecturalProcess';
 import {
@@ -25,11 +28,11 @@ import {
   deleteScheduleRow,
   duplicateScheduleTask,
   phaseTitlesFromRows,
-  renameScheduleTask,
   setScheduleRowDates,
 } from '../lib/scheduleMutations';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { parseScheduleDate, startOfDay } from '../lib/scheduleDates';
+import { applyEmployeeTaskScope } from '../lib/employeeTaskScope';
 
 type StatusView = 'current' | 'incomplete' | 'overdue' | 'not_started' | 'complete';
 
@@ -114,6 +117,7 @@ export function EmployeeTasks({
   active?: boolean;
 }) {
   const isDemo = useDemoMode();
+  const { scope: taskScope, setScope: setTaskScope } = useEmployeeTaskScope(employeeName);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usedDemo, setUsedDemo] = useState(false);
@@ -125,8 +129,7 @@ export function EmployeeTasks({
   const [addAssignees, setAddAssignees] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const nameInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const [editTask, setEditTask] = useState<EmployeeTask | null>(null);
   const [adding, setAdding] = useState(false);
   const [addProjectKey, setAddProjectKey] = useState('');
   const [addMeta, setAddMeta] = useState<{
@@ -216,8 +219,13 @@ export function EmployeeTasks({
 
   const today = useMemo(() => startOfDay(new Date()), []);
 
+  const scopedTasks = useMemo(
+    () => applyEmployeeTaskScope(tasks, employeeName, taskScope),
+    [tasks, employeeName, taskScope],
+  );
+
   const filtered = useMemo(() => {
-    let list = tasks;
+    let list = scopedTasks;
     // "Not started" view must ignore the started-only toggle so those tasks remain visible.
     if (startedOnly && view !== 'not_started') {
       list = list.filter((t) => taskHasStarted(t, today));
@@ -242,12 +250,12 @@ export function EmployeeTasks({
       );
     }
     return sortEmployeeTasks(list, sortKey, sortDir);
-  }, [tasks, view, query, sortKey, sortDir, startedOnly, today]);
+  }, [scopedTasks, view, query, sortKey, sortDir, startedOnly, today]);
 
   // Reset the render window whenever the filtered set identity changes.
   useEffect(() => {
     setVisibleCount(TASK_PAGE_SIZE);
-  }, [view, query, sortKey, sortDir, startedOnly, projectsKey]);
+  }, [view, query, sortKey, sortDir, startedOnly, taskScope, projectsKey]);
 
   const visibleTasks = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -281,16 +289,16 @@ export function EmployeeTasks({
   }, [hasMoreTasks, filtered.length, visibleTasks.length]);
 
   const counts = useMemo(() => {
-    const started = tasks.filter((t) => taskHasStarted(t, today));
-    const base = startedOnly ? started : tasks;
+    const started = scopedTasks.filter((t) => taskHasStarted(t, today));
+    const base = startedOnly ? started : scopedTasks;
     return {
       current: base.filter((t) => taskInCurrentWindow(t, today)).length,
       incomplete: base.filter((t) => t.status === 'incomplete').length,
       overdue: base.filter((t) => t.status === 'overdue').length,
-      notStarted: tasks.filter((t) => t.status === 'not_started').length,
+      notStarted: scopedTasks.filter((t) => t.status === 'not_started').length,
       complete: base.filter((t) => t.status === 'complete').length,
     };
-  }, [tasks, startedOnly, today]);
+  }, [scopedTasks, startedOnly, today]);
 
   async function onToggleComplete(task: EmployeeTask) {
     if (busyId || !task.writable) return;
@@ -318,24 +326,6 @@ export function EmployeeTasks({
   function onPriorityChange(task: EmployeeTask, priority: TaskPriority) {
     saveTaskPriority(task.rowId, priority);
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, priority } : t)));
-  }
-
-  async function onRename(task: EmployeeTask, name: string) {
-    if (!task.writable || name.trim() === task.task) return;
-    setBusyId(task.id);
-    const res = await renameScheduleTask({
-      projectKey: task.projectKey,
-      rowId: task.rowId,
-      task: name,
-    });
-    setBusyId(null);
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, task: name.trim() } : t)),
-    );
   }
 
   async function onDateChange(
@@ -394,15 +384,6 @@ export function EmployeeTasks({
     );
   }
 
-  function beginEdit(task: EmployeeTask) {
-    setEditingId(task.id);
-    window.requestAnimationFrame(() => {
-      const el = nameInputRefs.current.get(task.id);
-      el?.focus();
-      el?.select();
-    });
-  }
-
   async function onDuplicate(task: EmployeeTask) {
     if (!task.writable || busyId) return;
     if (!task.scheduleId) {
@@ -446,12 +427,7 @@ export function EmployeeTasks({
       datesAutofilled: false,
     });
     setTasks((prev) => [...prev, cloned]);
-    setEditingId(cloned.id);
-    window.setTimeout(() => {
-      const el = nameInputRefs.current.get(cloned.id);
-      el?.focus();
-      el?.select();
-    }, 0);
+    setEditTask(cloned);
   }
 
   async function onDelete(task: EmployeeTask) {
@@ -474,6 +450,12 @@ export function EmployeeTasks({
     <div className="emp-tasks emp-tasks-layout">
       <aside className="emp-tasks-nav" aria-label="Task filters">
         <p className="emp-tasks-nav-kicker">Filters</p>
+        <TaskScopeToggle scope={taskScope} onChange={setTaskScope} />
+        <p className="pd-muted emp-tasks-scope-note">
+          {taskScope === 'assigned'
+            ? 'Showing tasks assigned to you on your projects.'
+            : 'Showing every task on projects you’re on.'}
+        </p>
         <label className={`emp-started-toggle${startedOnly ? ' on' : ''}`}>
           <input
             type="checkbox"
@@ -600,6 +582,13 @@ export function EmployeeTasks({
         <div className="panel emp-tasks-panel">
         {loading ? (
           <div className="plist-empty">Loading your tasks…</div>
+        ) : !scopedTasks.length && tasks.length > 0 && taskScope === 'assigned' ? (
+          <div className="plist-empty">
+            No tasks are assigned to you yet.{' '}
+            <button type="button" className="sched-text-btn" onClick={() => setTaskScope('all')}>
+              Show all project tasks
+            </button>
+          </div>
         ) : !tasks.length ? (
           <div className="plist-empty">
             No schedule tasks yet. Use <strong>Add task</strong> or open a project to build the list.
@@ -665,11 +654,10 @@ export function EmployeeTasks({
               <tbody>
                 {visibleTasks.map((t) => {
                   const phaseStyle = phasePillStyle(t.phase);
-                  const editing = editingId === t.id;
                   return (
                     <tr
                       key={t.id}
-                      className={`${t.status === 'complete' ? 'done' : ''}${editing ? ' editing' : ''}`}
+                      className={t.status === 'complete' ? 'done' : ''}
                     >
                       <td>
                         <button
@@ -714,32 +702,7 @@ export function EmployeeTasks({
                         </select>
                       </td>
                       <td className="col-task">
-                        {t.writable ? (
-                          <input
-                            type="text"
-                            className="emp-task-name-input"
-                            defaultValue={t.task}
-                            key={`${t.id}:${t.task}`}
-                            disabled={busyId === t.id}
-                            aria-label="Task name"
-                            ref={(el) => {
-                              if (el) nameInputRefs.current.set(t.id, el);
-                              else nameInputRefs.current.delete(t.id);
-                            }}
-                            onFocus={() => setEditingId(t.id)}
-                            onBlur={(e) => {
-                              void onRename(t, e.target.value);
-                              setEditingId((id) => (id === t.id ? null : id));
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                (e.target as HTMLInputElement).blur();
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className="emp-task-text">{t.task}</span>
-                        )}
+                        <span className="emp-task-text">{t.task}</span>
                         {t.kind === 'subtask' ? (
                           <span className="emp-task-kind mono">subtask</span>
                         ) : null}
@@ -796,7 +759,7 @@ export function EmployeeTasks({
                               disabled={busyId === t.id}
                               title="Edit task"
                               aria-label={`Edit ${t.task}`}
-                              onClick={() => beginEdit(t)}
+                              onClick={() => setEditTask(t)}
                             >
                               <PencilIcon />
                             </button>
@@ -841,6 +804,13 @@ export function EmployeeTasks({
         )}
         </div>
       </div>
+
+      <TaskEditModal
+        task={editTask}
+        open={!!editTask}
+        onClose={() => setEditTask(null)}
+        onSaved={() => void refresh()}
+      />
     </div>
   );
 }

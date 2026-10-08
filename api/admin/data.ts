@@ -742,6 +742,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         profile_id: string | null;
         role: string | null;
         display_name: string | null;
+        portal_prefs: Record<string, unknown> | null;
         team: string | null;
         capacity_hours: number | null;
         job_role: string | null;
@@ -766,6 +767,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
             profile_id: null,
             role: null,
             display_name: null,
+            portal_prefs: null,
             team: null,
             capacity_hours: null,
             job_role: null,
@@ -787,7 +789,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
       for (let f = 0; ; f += 1000) {
         const { data, error } = await sb
           .from('pa_profiles')
-          .select('id, email, role, display_name, employee_name')
+          .select('id, email, role, display_name, employee_name, portal_prefs')
           .range(f, f + 999);
         if (error) throw new Error(error.message);
         if (!data?.length) break;
@@ -800,6 +802,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
               row.email = (p.email as string) || row.email;
               row.role = (p.role as string) || row.role;
               row.display_name = (p.display_name as string) || row.display_name;
+              row.portal_prefs = (p.portal_prefs as Record<string, unknown>) || null;
               addSource(row, 'profile');
             }
           } else if (p.role && p.role !== 'customer') {
@@ -809,6 +812,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
               row.email = (p.email as string) || null;
               row.role = p.role as string;
               row.display_name = (p.display_name as string) || null;
+              row.portal_prefs = (p.portal_prefs as Record<string, unknown>) || row.portal_prefs;
               addSource(row, 'profile');
             }
           }
@@ -1056,10 +1060,21 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         return;
       }
       const patch = body.patch || {};
-      const allowedKeys = ['role', 'display_name', 'employee_name', 'client_name', 'email'];
+      const allowedKeys = [
+        'role',
+        'display_name',
+        'employee_name',
+        'client_name',
+        'email',
+        'portal_prefs',
+      ];
       const clean: Record<string, unknown> = {};
       for (const k of allowedKeys) {
         if (k in patch) clean[k] = patch[k];
+      }
+      if (clean.portal_prefs != null && typeof clean.portal_prefs !== 'object') {
+        res.status(400).json({ error: 'portal_prefs must be an object' });
+        return;
       }
       if (clean.role != null) {
         const role = String(clean.role);
@@ -1076,7 +1091,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         .from('pa_profiles')
         .update(clean)
         .eq('id', id)
-        .select('id, email, role, display_name, employee_name, client_name')
+        .select('id, email, role, display_name, employee_name, client_name, portal_prefs')
         .single();
       if (error) throw new Error(error.message);
       res.status(200).json({ ok: true, profile: data });

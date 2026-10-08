@@ -7,4 +7,5 @@ export type Profile = {
   display_name: string | null;
   employee_name: string | null;
   client_name: string | null;
+  portal_prefs?: Record<string, unknown> | null;
 };

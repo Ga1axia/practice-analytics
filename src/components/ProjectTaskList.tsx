@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AddScheduleTaskForm } from './AddScheduleTaskForm';
 import { ScheduleDateInput } from './ScheduleDateInput';
+import { TaskEditModal } from './TaskEditModal';
+import { loadProjectSchedule } from '../lib/loadProjectSchedule';
 import { matchProcessPhaseIndex, PROCESS_PHASES } from '../lib/architecturalProcess';
 import {
   lifecycleStatusLabel,
@@ -14,11 +16,13 @@ import { parseScheduleDate } from '../lib/scheduleDates';
 import {
   deleteScheduleRow,
   phaseTitlesFromRows,
-  renameScheduleTask,
   setScheduleAssignee,
   setScheduleRowDates,
 } from '../lib/scheduleMutations';
 import type { ScheduleRow } from '../lib/scheduleTypes';
+import { applyEmployeeTaskScope } from '../lib/employeeTaskScope';
+import { useEmployeeTaskScope } from '../hooks/useEmployeeTaskScope';
+import { TaskScopeToggle } from './TaskScopeToggle';
 
 function statusClass(task: EmployeeTask) {
   const s = taskLifecycleStatus(task);
@@ -60,6 +64,9 @@ export function ProjectTaskList({
   assigneeOptions = [],
   onRowsChange,
   onStartSchedule,
+  onResyncFromCore,
+  resyncBusy = false,
+  isLead = false,
 }: {
   projectKey: string;
   projectTitle: string;
@@ -68,20 +75,35 @@ export function ProjectTaskList({
   rows: ScheduleRow[];
   writable?: boolean;
   canAssign?: boolean;
+  /** When false, member can toggle assigned-only vs full project task list. */
+  isLead?: boolean;
   assigneeOptions?: string[];
   onRowsChange?: (rows: ScheduleRow[]) => void;
   /** Shown when there are zero checklist tasks. */
   onStartSchedule?: () => void;
+  /** Lead-only: align phases/tasks/leads with CORE. */
+  onResyncFromCore?: () => void | Promise<void>;
+  resyncBusy?: boolean;
 }) {
   const [view, setView] = useState<'open' | 'all' | 'done'>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [phaseFilter, setPhaseFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<
+    'any' | 'incomplete' | 'overdue' | 'not_started'
+  >('any');
+  const [query, setQuery] = useState('');
+  const [mineOnly, setMineOnly] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localRows, setLocalRows] = useState(rows);
   const [openPhases, setOpenPhases] = useState<Set<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
   const [addPhase, setAddPhase] = useState('');
-  const nameInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const [editTask, setEditTask] = useState<EmployeeTask | null>(null);
   const expandedOnce = useRef(false);
+  const { scope: taskScope, setScope: setTaskScope } = useEmployeeTaskScope(employeeName);
 
   useEffect(() => {
     setLocalRows(rows);
@@ -90,7 +112,22 @@ export function ProjectTaskList({
   useEffect(() => {
     expandedOnce.current = false;
     setOpenPhases(new Set());
+    setPhaseFilter('');
+    setAssigneeFilter('');
+    setStatusFilter('any');
+    setQuery('');
+    setMineOnly(false);
+    setFiltersOpen(false);
   }, [projectKey]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (!filterRef.current?.contains(e.target as Node)) setFiltersOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [filtersOpen]);
 
   const scheduleId = localRows[0]?.schedule_id || '';
   const phaseOptions = useMemo(() => phaseTitlesFromRows(localRows), [localRows]);
@@ -106,18 +143,78 @@ export function ProjectTaskList({
     [projectKey, projectTitle, clientName, localRows, employeeName, writable],
   );
 
+  const scopedTasks = useMemo(
+    () => applyEmployeeTaskScope(tasks, employeeName, taskScope, { isLead }),
+    [tasks, employeeName, taskScope, isLead],
+  );
+
   const counts = useMemo(() => {
-    const open = tasks.filter((t) => !t.complete).length;
-    const done = tasks.filter((t) => t.complete).length;
-    return { open, done, all: tasks.length };
-  }, [tasks]);
+    const open = scopedTasks.filter((t) => !t.complete).length;
+    const done = scopedTasks.filter((t) => t.complete).length;
+    return { open, done, all: scopedTasks.length };
+  }, [scopedTasks]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (phaseFilter) n += 1;
+    if (assigneeFilter) n += 1;
+    if (statusFilter !== 'any') n += 1;
+    if (query.trim()) n += 1;
+    if (mineOnly) n += 1;
+    return n;
+  }, [phaseFilter, assigneeFilter, statusFilter, query, mineOnly]);
 
   const filtered = useMemo(() => {
-    let list = tasks;
+    let list = scopedTasks;
     if (view === 'open') list = list.filter((t) => !t.complete);
     else if (view === 'done') list = list.filter((t) => t.complete);
+    if (mineOnly) {
+      list = list.filter(
+        (t) => t.assigneeName.toLowerCase() === employeeName.trim().toLowerCase(),
+      );
+    }
+    if (phaseFilter) list = list.filter((t) => t.phase === phaseFilter);
+    if (assigneeFilter === '__unassigned__') {
+      list = list.filter((t) => !t.assigneeName.trim());
+    } else if (assigneeFilter) {
+      list = list.filter((t) => t.assigneeName === assigneeFilter);
+    }
+    if (statusFilter === 'incomplete') {
+      list = list.filter((t) => taskLifecycleStatus(t) === 'incomplete');
+    } else if (statusFilter === 'overdue') {
+      list = list.filter((t) => taskLifecycleStatus(t) === 'overdue');
+    } else if (statusFilter === 'not_started') {
+      list = list.filter((t) => taskLifecycleStatus(t) === 'not_started');
+    }
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (t) =>
+          t.task.toLowerCase().includes(q) ||
+          t.phase.toLowerCase().includes(q) ||
+          t.assigneeName.toLowerCase().includes(q) ||
+          t.phaseManagerName.toLowerCase().includes(q),
+      );
+    }
     return sortEmployeeTasks(list, 'due', 'asc');
-  }, [tasks, view]);
+  }, [
+    scopedTasks,
+    view,
+    mineOnly,
+    employeeName,
+    phaseFilter,
+    assigneeFilter,
+    statusFilter,
+    query,
+  ]);
+
+  function clearFilters() {
+    setPhaseFilter('');
+    setAssigneeFilter('');
+    setStatusFilter('any');
+    setQuery('');
+    setMineOnly(false);
+  }
 
   const byPhase = useMemo(() => {
     const map = new Map<string, { title: string; list: EmployeeTask[] }>();
@@ -187,20 +284,9 @@ export function ProjectTaskList({
     );
   }
 
-  async function onRename(task: EmployeeTask, name: string) {
-    if (!task.writable || name.trim() === task.task) return;
-    setBusyId(task.id);
-    const res = await renameScheduleTask({
-      projectKey,
-      rowId: task.rowId,
-      task: name,
-    });
-    setBusyId(null);
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    commitRows(localRows.map((r) => (r.id === task.rowId ? { ...r, task: name.trim() } : r)));
+  async function onTaskModalSaved() {
+    const loaded = await loadProjectSchedule(projectKey);
+    commitRows(loaded.rows);
   }
 
   async function onDateChange(
@@ -239,14 +325,6 @@ export function ProjectTaskList({
     commitRows(localRows.filter((r) => r.id !== task.rowId));
   }
 
-  function beginEdit(task: EmployeeTask) {
-    window.requestAnimationFrame(() => {
-      const el = nameInputRefs.current.get(task.id);
-      el?.focus();
-      el?.select();
-    });
-  }
-
   async function onAssigneeChange(task: EmployeeTask, assigneeName: string) {
     if (!canAssign || !task.writable || busyId) return;
     if (assigneeName === task.assigneeName) return;
@@ -281,6 +359,9 @@ export function ProjectTaskList({
   return (
     <div className="emp-project-tasks">
       <div className="emp-filter-bar emp-project-tasks-bar">
+        {!isLead ? (
+          <TaskScopeToggle scope={taskScope} onChange={setTaskScope} compact />
+        ) : null}
         <div className="emp-status-toggle" role="group" aria-label="Task filter">
           <button
             type="button"
@@ -312,6 +393,94 @@ export function ProjectTaskList({
             Collapse all
           </button>
         </div>
+        <div className="emp-task-filter-wrap" ref={filterRef}>
+          <button
+            type="button"
+            className={`emp-filter-trigger${filtersOpen ? ' on' : ''}${activeFilterCount ? ' has-filters' : ''}`}
+            aria-expanded={filtersOpen}
+            aria-haspopup="dialog"
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            Filter{activeFilterCount ? ` · ${activeFilterCount}` : ''}
+          </button>
+          {filtersOpen ? (
+            <div className="emp-task-filter-pop" role="dialog" aria-label="Task filters">
+              <label className="emp-filter-field">
+                <span>Phase</span>
+                <select
+                  className="emp-filter-select"
+                  value={phaseFilter}
+                  onChange={(e) => setPhaseFilter(e.target.value)}
+                >
+                  <option value="">All phases</option>
+                  {phaseOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="emp-filter-field">
+                <span>Status</span>
+                <select
+                  className="emp-filter-select"
+                  value={statusFilter}
+                  onChange={(e) =>
+                    setStatusFilter(e.target.value as typeof statusFilter)
+                  }
+                >
+                  <option value="any">Any status</option>
+                  <option value="incomplete">Incomplete</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="not_started">Not started</option>
+                </select>
+              </label>
+              {canAssign || assignNames.length > 1 ? (
+                <label className="emp-filter-field">
+                  <span>Assignee</span>
+                  <select
+                    className="emp-filter-select"
+                    value={assigneeFilter}
+                    onChange={(e) => setAssigneeFilter(e.target.value)}
+                  >
+                    <option value="">Anyone</option>
+                    <option value="__unassigned__">Unassigned</option>
+                    {assignNames.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {(isLead || taskScope === 'all') && (
+                <label className={`emp-started-toggle${mineOnly ? ' on' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={mineOnly}
+                    onChange={(e) => setMineOnly(e.target.checked)}
+                  />
+                  <span>Assigned to me</span>
+                </label>
+              )}
+              <label className="emp-filter-field">
+                <span>Search</span>
+                <input
+                  type="search"
+                  className="emp-filter-select"
+                  placeholder="Task, phase, assignee…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </label>
+              {activeFilterCount ? (
+                <button type="button" className="sched-text-btn" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
         {writable && scheduleId ? (
           <button
             type="button"
@@ -324,10 +493,22 @@ export function ProjectTaskList({
             {adding ? 'Close' : 'Add task'}
           </button>
         ) : null}
+        {onResyncFromCore && scheduleId ? (
+          <button
+            type="button"
+            className="cp-text-btn emp-resync-core-btn"
+            disabled={resyncBusy || Boolean(busyId)}
+            title="Align phases with CORE, add missing checklist tasks, refresh phase leads"
+            onClick={() => void onResyncFromCore()}
+          >
+            {resyncBusy ? 'Resyncing…' : 'Resync from CORE'}
+          </button>
+        ) : null}
       </div>
 
       <p className="pd-muted emp-project-tasks-hint">
-        Check off work, edit names and dates inline, or add a task under any phase.
+        Check off work, use the edit button for details and subtasks, or resync phases from CORE to
+        fill in checklist tasks.
       </p>
 
       {adding && scheduleId ? (
@@ -353,7 +534,14 @@ export function ProjectTaskList({
 
       {error ? <p className="plist-upload-err">{error}</p> : null}
 
-      {!tasks.length && !adding ? (
+      {!scopedTasks.length && tasks.length > 0 && !isLead && taskScope === 'assigned' ? (
+        <p className="pd-muted">
+          No tasks assigned to you on this project.{' '}
+          <button type="button" className="sched-text-btn" onClick={() => setTaskScope('all')}>
+            Show all project tasks
+          </button>
+        </p>
+      ) : !tasks.length && !adding ? (
         <div className="emp-task-empty-start">
           <p className="pd-muted">No tasks on this project schedule yet.</p>
           {onStartSchedule ? (
@@ -364,8 +552,15 @@ export function ProjectTaskList({
         </div>
       ) : !filtered.length && !adding ? (
         <p className="pd-muted">
-          No tasks in this view.
-          {counts.all > 0 && view !== 'all' ? (
+          No tasks match this filter.
+          {activeFilterCount ? (
+            <>
+              {' '}
+              <button type="button" className="sched-text-btn" onClick={clearFilters}>
+                Clear filters
+              </button>
+            </>
+          ) : counts.all > 0 && view !== 'all' ? (
             <>
               {' '}
               <button type="button" className="sched-text-btn" onClick={() => setView('all')}>
@@ -416,28 +611,7 @@ export function ProjectTaskList({
                           aria-label={`Mark ${t.task} ${t.complete ? 'incomplete' : 'complete'}`}
                         />
                         <div className="emp-project-task-body">
-                          {t.writable ? (
-                            <input
-                              type="text"
-                              className="emp-task-name-input"
-                              defaultValue={t.task}
-                              key={`${t.id}:${t.task}`}
-                              disabled={busyId === t.id}
-                              aria-label="Task name"
-                              ref={(el) => {
-                                if (el) nameInputRefs.current.set(t.id, el);
-                                else nameInputRefs.current.delete(t.id);
-                              }}
-                              onBlur={(e) => void onRename(t, e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  (e.target as HTMLInputElement).blur();
-                                }
-                              }}
-                            />
-                          ) : (
-                            <strong>{t.task}</strong>
-                          )}
+                          <strong>{t.task}</strong>
                           <div className="emp-project-task-dates">
                             <label>
                               <span>Start</span>
@@ -518,9 +692,9 @@ export function ProjectTaskList({
                                 type="button"
                                 className="emp-task-edit"
                                 disabled={busyId === t.id}
-                                title="Edit task name"
+                                title="Edit task"
                                 aria-label={`Edit ${t.task}`}
-                                onClick={() => beginEdit(t)}
+                                onClick={() => setEditTask(t)}
                               >
                                 <PencilIcon />
                               </button>
@@ -561,6 +735,13 @@ export function ProjectTaskList({
           );
         })
       )}
+
+      <TaskEditModal
+        task={editTask}
+        open={!!editTask}
+        onClose={() => setEditTask(null)}
+        onSaved={() => void onTaskModalSaved()}
+      />
     </div>
   );
 }

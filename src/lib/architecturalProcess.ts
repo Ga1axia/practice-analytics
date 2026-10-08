@@ -214,8 +214,18 @@ export function matchProcessPhaseIndex(phase: string | null | undefined): number
     return PROCESS_PHASES.findIndex((s) => s.id === 'design-dev');
   }
 
-  // Catchall: Additional Services, Other, and any unmapped phase label
-  return additionalIdx;
+  if (/^other$/i.test(p)) return -1;
+
+  if (
+    p.includes('additional service') ||
+    p === 'additional services' ||
+    p.includes('additional services')
+  ) {
+    return additionalIdx;
+  }
+
+  // Unmapped CORE labels are not treated as Additional Services.
+  return -1;
 }
 
 export function processPhaseLabel(phase: string | null | undefined): string {

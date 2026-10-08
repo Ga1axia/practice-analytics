@@ -23,6 +23,7 @@ import {
 import { extractProjectCode, loadEmployeeLastHoursByProject } from '../lib/projectLoggedHours';
 import { fmtPct, fmtUSD, monthLabel } from '../lib/format';
 import {
+  ensureManagedProjectLeadMemberships,
   ensureMyMembershipsFromTimeEntries,
   isProjectLead,
   isProjectListManager,
@@ -32,13 +33,20 @@ import {
 } from '../lib/projectMembers';
 import {
   buildClientHierarchy,
-  isActiveProjectNode,
+  isActiveProjectForEmployee,
   type ProjectNode,
 } from '../lib/projectListHierarchy';
 import { normalizeProjectStatus } from '../lib/projectStatus';
 import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
+import { InteriorScopeToggle } from '../components/InteriorScopeToggle';
 import { useDemoMode } from '../hooks/useDemoMode';
+import {
+  projectHasInteriorDesignPhase,
+  readProjectListScope,
+  resolveEmployeePortalPrefs,
+  writeProjectListScope,
+} from '../lib/employeePortalPrefs';
 import { EmployeeCalendar } from './EmployeeCalendar';
 import { EmployeeProjectWorkspace } from './EmployeeProjectWorkspace';
 import { EmployeeTasks } from './EmployeeTasks';
@@ -87,11 +95,20 @@ function projectStatus(p: ProjectNode): string {
 export function EmployeePortal({
   data,
   employeeName,
+  profilePortalPrefs,
 }: {
   data: DashboardData;
   employeeName: string;
+  profilePortalPrefs?: Record<string, unknown> | null;
 }) {
   const isDemo = useDemoMode();
+  const portalPrefs = useMemo(
+    () => resolveEmployeePortalPrefs({ employeeName, profilePrefs: profilePortalPrefs }),
+    [employeeName, profilePortalPrefs],
+  );
+  const [projectListScope, setProjectListScopeState] = useState(() =>
+    readProjectListScope(employeeName, portalPrefs),
+  );
   const [page, setPage] = useState<PageId>('today');
   const [visited, setVisited] = useState<Set<PageId>>(() => new Set(['today']));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
@@ -122,7 +139,14 @@ export function EmployeePortal({
   useEffect(() => {
     setProjectSort(readEmployeeProjectSort(employeeName));
     setProjectFilters(readEmployeeProjectFilters(employeeName));
-  }, [employeeName]);
+    const prefs = resolveEmployeePortalPrefs({ employeeName, profilePrefs: profilePortalPrefs });
+    setProjectListScopeState(readProjectListScope(employeeName, prefs));
+  }, [employeeName, profilePortalPrefs]);
+
+  function setProjectListScope(scope: 'interior' | 'all') {
+    setProjectListScopeState(scope);
+    writeProjectListScope(employeeName, scope);
+  }
 
   function setAndPersistProjectSort(next: EmployeeProjectSort) {
     setProjectSort(next);
@@ -167,11 +191,20 @@ export function EmployeePortal({
       const first = await loadMembershipsForEmployee(employeeName);
       if (cancelled) return;
       setMemberRoles(first.byKey);
+
+      const projectNodes = hierarchy.flatMap((c) => c.projects);
+      const managed = await ensureManagedProjectLeadMemberships({
+        employeeName,
+        projects: projectNodes,
+      });
+
       const claimed = await ensureMyMembershipsFromTimeEntries({ employeeName, projects });
-      if (cancelled || !claimed.added) return;
-      const res = await loadMembershipsForEmployee(employeeName);
       if (cancelled) return;
-      setMemberRoles(res.byKey);
+      if (managed.ensured || claimed.added) {
+        const res = await loadMembershipsForEmployee(employeeName);
+        if (cancelled) return;
+        setMemberRoles(res.byKey);
+      }
     })();
     return () => {
       cancelled = true;
@@ -264,8 +297,8 @@ export function EmployeePortal({
   );
 
   const activeProjects = useMemo(
-    () => allProjects.filter(isActiveProjectNode),
-    [allProjects],
+    () => allProjects.filter((p) => isActiveProjectForEmployee(p, employeeName)),
+    [allProjects, employeeName],
   );
 
   const phaseFilterOptions = useMemo(
@@ -288,16 +321,23 @@ export function EmployeePortal({
     );
   }, [statusFilter, activeProjects, allProjects, employeeName, memberRoles, projectFilters]);
 
+  const interiorScopedProjects = useMemo(() => {
+    if (!portalPrefs.interiorProjectsOption || projectListScope === 'all') {
+      return scopedProjects;
+    }
+    return scopedProjects.filter((p) => projectHasInteriorDesignPhase(p));
+  }, [scopedProjects, portalPrefs.interiorProjectsOption, projectListScope]);
+
   const filteredProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return scopedProjects;
-    return scopedProjects.filter(
+    if (!q) return interiorScopedProjects;
+    return interiorScopedProjects.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
         p.clientName.toLowerCase().includes(q) ||
         (p.code || '').toLowerCase().includes(q),
     );
-  }, [scopedProjects, query]);
+  }, [interiorScopedProjects, query]);
 
   const selectedProject = useMemo(() => {
     if (!selectedKey) return null;
@@ -562,6 +602,14 @@ export function EmployeePortal({
               My projects
             </h1>
             <div className="emp-projects-toolbar" role="toolbar" aria-label="Filter and sort projects">
+              {portalPrefs.interiorProjectsOption ? (
+                <InteriorScopeToggle
+                  scope={projectListScope}
+                  onChange={setProjectListScope}
+                  compact
+                  labels={{ interior: 'Interior jobs', all: 'All my projects' }}
+                />
+              ) : null}
               <div className="emp-status-toggle emp-toolbar-toggle" role="group" aria-label="Status">
                 <button
                   type="button"
@@ -778,7 +826,7 @@ export function EmployeePortal({
           hidden={page !== 'tasks'}
         >
           <EmployeeTasks
-            projects={scopedProjects}
+            projects={interiorScopedProjects}
             employeeName={employeeName}
             onOpenProject={selectProject}
             active={page === 'tasks'}
@@ -827,7 +875,7 @@ export function EmployeePortal({
                 {allProjects.length > activeProjects.length ? (
                   <optgroup label={`Inactive / other (${allProjects.length - activeProjects.length})`}>
                     {allProjects
-                      .filter((p) => !isActiveProjectNode(p))
+                      .filter((p) => !isActiveProjectForEmployee(p, employeeName))
                       .map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.title} — {p.clientName}
@@ -843,6 +891,7 @@ export function EmployeePortal({
             <EmployeeProjectWorkspace
               project={selectedProject}
               employeeName={employeeName}
+              portalPrefs={portalPrefs}
               isLead={isProjectLead(
                 selectedProject,
                 employeeName,

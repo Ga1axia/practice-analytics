@@ -1,11 +1,20 @@
 /** Pull title / date / attendees out of a pasted recap. The original text is always kept. */
 
+export type MeetingLocation = '' | 'site' | 'office';
+
 export type ParsedMeetingSummary = {
   title: string;
   meetingAt: string | null;
   attendees: string;
+  location: MeetingLocation;
   notes: string;
 };
+
+export function meetingLocationLabel(location: string | null | undefined): string {
+  if (location === 'site') return 'Site';
+  if (location === 'office') return 'In office';
+  return '';
+}
 
 const SKIP_TITLE =
   /^(meeting recap|meeting notes|meeting summary|recap|summary|notes|ai notes|copilot recap|gemini notes)$/i;
@@ -13,6 +22,7 @@ const SKIP_TITLE =
 const LABELED_TITLE = /^(title|subject|meeting)\s*[:\-–]\s*(.+)$/i;
 const LABELED_DATE = /^(date|when|meeting date|started(?: time)?|start(?: time)?)\s*[:\-–]\s*(.+)$/i;
 const LABELED_ATTENDEES = /^(attendees?|participants?|invitees?)\s*[:\-–]?\s*(.*)$/i;
+const LABELED_LOCATION = /^(location|where|venue|place)\s*[:\-–]\s*(.+)$/i;
 const SECTION_HEAD =
   /^(summary|action items?|notes|agenda|next steps?|overview|transcript|chapters?)\s*[:\-–]?$/i;
 const MONTH =
@@ -33,6 +43,16 @@ export function parseLooseDate(value: string): string | null {
   const y = d.getFullYear();
   if (y < 1990 || y > 2100) return null;
   return d.toISOString();
+}
+
+export function parseMeetingLocation(value: string): MeetingLocation {
+  const t = value.trim();
+  if (!t) return '';
+  if (/\b(on[\s-]?site|site visit|at the (?:job\s*)?site|property walk|job site)\b/i.test(t)) {
+    return 'site';
+  }
+  if (/\b(in[\s-]?office|at the office|in the office|our office)\b/i.test(t)) return 'office';
+  return '';
 }
 
 function collectFollowingNames(lines: string[], start: number): string {
@@ -56,6 +76,7 @@ export function parseMeetingSummary(raw: string): ParsedMeetingSummary {
   let title = '';
   let attendees = '';
   let meetingAt: string | null = null;
+  let location: MeetingLocation = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim();
@@ -73,10 +94,26 @@ export function parseMeetingSummary(raw: string): ParsedMeetingSummary {
       continue;
     }
 
+    const located = line.match(LABELED_LOCATION);
+    if (located && !location) {
+      location = parseMeetingLocation(located[2]!);
+      continue;
+    }
+
     const att = line.match(LABELED_ATTENDEES);
     if (att && !attendees) {
       const rest = att[2]!.trim();
       attendees = rest || collectFollowingNames(lines, i + 1);
+    }
+  }
+
+  if (!location) {
+    for (const line of lines.slice(0, 12)) {
+      const loc = parseMeetingLocation(line);
+      if (loc) {
+        location = loc;
+        break;
+      }
     }
   }
 
@@ -95,7 +132,7 @@ export function parseMeetingSummary(raw: string): ParsedMeetingSummary {
       const t = line.trim().replace(/^#+\s*/, '');
       if (!t) continue;
       if (SKIP_TITLE.test(t)) continue;
-      if (LABELED_ATTENDEES.test(t) || LABELED_DATE.test(t)) continue;
+      if (LABELED_ATTENDEES.test(t) || LABELED_DATE.test(t) || LABELED_LOCATION.test(t)) continue;
       if (SECTION_HEAD.test(t)) continue;
       if (parseLooseDate(t)) continue;
       if (t.length <= 90) title = t;
@@ -103,5 +140,5 @@ export function parseMeetingSummary(raw: string): ParsedMeetingSummary {
     }
   }
 
-  return { title, meetingAt, attendees, notes };
+  return { title, meetingAt, attendees, location, notes };
 }

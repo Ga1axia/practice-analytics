@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { parseMeetingSummary } from '../lib/parseMeetingSummary';
+import {
+  meetingLocationLabel,
+  parseMeetingSummary,
+  type MeetingLocation,
+} from '../lib/parseMeetingSummary';
 import { supabase } from '../lib/supabase';
 
 export type ClientMeeting = {
@@ -9,10 +13,16 @@ export type ClientMeeting = {
   meeting_at: string;
   title: string;
   attendees: string;
+  location?: string;
   notes: string;
   created_at: string;
   updated_at: string;
 };
+
+const LOCATION_OPTIONS: { id: MeetingLocation; label: string }[] = [
+  { id: 'site', label: 'Site' },
+  { id: 'office', label: 'In office' },
+];
 
 function toLocalInput(iso: string) {
   const d = new Date(iso);
@@ -39,11 +49,12 @@ function formatMeetingWhen(iso: string) {
   });
 }
 
-function emptyDraft(clientName: string) {
+function emptyDraft() {
   return {
     meeting_at: toLocalInput(new Date().toISOString()),
-    title: `Meeting — ${clientName}`,
+    title: '',
     attendees: '',
+    location: '' as MeetingLocation,
     notes: '',
   };
 }
@@ -64,10 +75,10 @@ export function ClientMeetingsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState(() => emptyDraft(clientName));
+  const [draft, setDraft] = useState(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [metaTouched, setMetaTouched] = useState(false);
+  const [dateTouched, setDateTouched] = useState(false);
   const [pasteHint, setPasteHint] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -98,9 +109,9 @@ export function ClientMeetingsPanel({
 
   useEffect(() => {
     setEditingId(null);
-    setMetaTouched(false);
+    setDateTouched(false);
     setPasteHint(null);
-    setDraft(emptyDraft(clientName));
+    setDraft(emptyDraft());
     void load();
   }, [projectKey, clientName, load]);
 
@@ -111,28 +122,24 @@ export function ClientMeetingsPanel({
 
   const projectCount = meetings.filter((m) => m.project_key === projectKey).length;
 
-  function applyParsedNotes(notes: string, forceMeta: boolean) {
+  function applyParsedNotes(notes: string) {
     const parsed = parseMeetingSummary(notes);
     setDraft((d) => {
       const next = { ...d, notes };
-      if (forceMeta || !metaTouched) {
-        next.title = parsed.title || d.title || `Meeting — ${clientName}`;
-        next.attendees = parsed.attendees || d.attendees;
-        if (parsed.meetingAt) next.meeting_at = toLocalInput(parsed.meetingAt);
-      }
+      if (!d.title.trim() && parsed.title) next.title = parsed.title;
+      if (!d.attendees.trim() && parsed.attendees) next.attendees = parsed.attendees;
+      if (!d.location && parsed.location) next.location = parsed.location;
+      if (!dateTouched && parsed.meetingAt) next.meeting_at = toLocalInput(parsed.meetingAt);
       return next;
     });
-    if (forceMeta) setMetaTouched(false);
-    if (parsed.title || parsed.meetingAt || parsed.attendees) {
-      const bits = [
-        parsed.title || null,
-        parsed.meetingAt ? formatMeetingWhen(parsed.meetingAt) : null,
-        parsed.attendees || null,
-      ].filter(Boolean);
-      setPasteHint(`Picked up ${bits.join(' · ')}`);
-    } else {
-      setPasteHint(notes.trim() ? 'Full summary will be saved as written.' : null);
-    }
+    const filled = [
+      parsed.title || null,
+      parsed.meetingAt ? formatMeetingWhen(parsed.meetingAt) : null,
+      meetingLocationLabel(parsed.location) || null,
+      parsed.attendees || null,
+    ].filter(Boolean);
+    if (filled.length) setPasteHint(`Picked up ${filled.join(' · ')}`);
+    else setPasteHint(notes.trim() ? 'Full summary will be saved as written.' : null);
   }
 
   async function saveMeeting() {
@@ -149,6 +156,7 @@ export function ClientMeetingsPanel({
       meeting_at: fromLocalInput(draft.meeting_at),
       title,
       attendees: draft.attendees.trim(),
+      location: draft.location,
       notes,
       updated_at: new Date().toISOString(),
       updated_by: uid,
@@ -179,29 +187,30 @@ export function ClientMeetingsPanel({
     }
 
     setEditingId(null);
-    setMetaTouched(false);
+    setDateTouched(false);
     setPasteHint(null);
-    setDraft(emptyDraft(clientName));
+    setDraft(emptyDraft());
     await load();
   }
 
   function startEdit(m: ClientMeeting) {
     setEditingId(m.id);
-    setMetaTouched(true);
+    setDateTouched(true);
     setPasteHint(null);
     setDraft({
       meeting_at: toLocalInput(m.meeting_at),
       title: m.title,
       attendees: m.attendees,
+      location: m.location === 'site' || m.location === 'office' ? m.location : '',
       notes: m.notes,
     });
   }
 
   function cancelEdit() {
     setEditingId(null);
-    setMetaTouched(false);
+    setDateTouched(false);
     setPasteHint(null);
-    setDraft(emptyDraft(clientName));
+    setDraft(emptyDraft());
   }
 
   async function pasteFromClipboard() {
@@ -212,7 +221,7 @@ export function ClientMeetingsPanel({
         return;
       }
       setError(null);
-      applyParsedNotes(text, true);
+      applyParsedNotes(text);
     } catch {
       setError('Could not read the clipboard. Paste into the box with ⌘V or Ctrl+V.');
     }
@@ -229,8 +238,8 @@ export function ClientMeetingsPanel({
     await load();
   }
 
-  const recording = !editingId;
   const hasNotes = Boolean(draft.notes.trim());
+  const hasDraft = hasNotes || Boolean(draft.title.trim() || draft.attendees.trim() || draft.location);
 
   return (
     <div className={`pd-meetings${compact ? ' compact' : ''}`}>
@@ -251,137 +260,92 @@ export function ClientMeetingsPanel({
 
       {error ? <p className="pd-muted" style={{ color: 'var(--rust)' }}>{error}</p> : null}
 
-      <div className={`pd-meeting-form${recording ? ' paste' : ''}`}>
-        {recording ? (
-          <>
-            <label className="wide">
-              <span>Paste meeting summary</span>
-              <textarea
-                rows={compact ? 7 : 10}
-                value={draft.notes}
-                onChange={(e) => applyParsedNotes(e.target.value, false)}
-                onPaste={(e) => {
-                  const text = e.clipboardData.getData('text/plain');
-                  if (!text.trim() || draft.notes.trim()) return;
-                  e.preventDefault();
-                  applyParsedNotes(text, true);
-                }}
-                placeholder="Paste a Teams, Zoom, or written recap. The full text is saved; title, date, and attendees are filled in when they’re in the notes."
-              />
-            </label>
-            {pasteHint ? <p className="pd-meeting-paste-hint">{pasteHint}</p> : null}
-            {hasNotes ? (
-              <div className="pd-meeting-form-grid">
-                <label>
-                  <span>When</span>
-                  <input
-                    type="datetime-local"
-                    value={draft.meeting_at}
-                    onChange={(e) => {
-                      setMetaTouched(true);
-                      setDraft((d) => ({ ...d, meeting_at: e.target.value }));
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Title</span>
-                  <input
-                    type="text"
-                    value={draft.title}
-                    onChange={(e) => {
-                      setMetaTouched(true);
-                      setDraft((d) => ({ ...d, title: e.target.value }));
-                    }}
-                    placeholder="Design review, site walk…"
-                  />
-                </label>
-                <label className="wide">
-                  <span>Attendees</span>
-                  <input
-                    type="text"
-                    value={draft.attendees}
-                    onChange={(e) => {
-                      setMetaTouched(true);
-                      setDraft((d) => ({ ...d, attendees: e.target.value }));
-                    }}
-                    placeholder="Client, PM, consultants…"
-                  />
-                </label>
-              </div>
-            ) : null}
-            <div className="pd-meeting-form-actions">
-              <button type="button" className="sched-text-btn" onClick={() => void pasteFromClipboard()}>
-                Paste from clipboard
-              </button>
-              {hasNotes ? (
-                <button type="button" className="sched-text-btn" onClick={cancelEdit}>
-                  Clear
+      <div className="pd-meeting-form paste">
+        <div className="pd-meeting-form-grid">
+          <label>
+            <span>Subject</span>
+            <input
+              type="text"
+              value={draft.title}
+              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+              placeholder="Design review, site walk…"
+            />
+          </label>
+          <label>
+            <span>Date</span>
+            <input
+              type="datetime-local"
+              value={draft.meeting_at}
+              onChange={(e) => {
+                setDateTouched(true);
+                setDraft((d) => ({ ...d, meeting_at: e.target.value }));
+              }}
+            />
+          </label>
+          <div>
+            <span>Where</span>
+            <div className="pd-meeting-where" role="group" aria-label="Meeting location">
+              {LOCATION_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={draft.location === opt.id ? 'selected' : ''}
+                  aria-pressed={draft.location === opt.id}
+                  onClick={() =>
+                    setDraft((d) => ({ ...d, location: d.location === opt.id ? '' : opt.id }))
+                  }
+                >
+                  {opt.label}
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="pd-client-preview-btn"
-                disabled={saving || !hasNotes}
-                onClick={() => void saveMeeting()}
-              >
-                {saving ? 'Saving…' : 'Record meeting'}
-              </button>
+              ))}
             </div>
-          </>
-        ) : (
-          <>
-            <div className="pd-meeting-form-grid">
-              <label>
-                <span>When</span>
-                <input
-                  type="datetime-local"
-                  value={draft.meeting_at}
-                  onChange={(e) => setDraft((d) => ({ ...d, meeting_at: e.target.value }))}
-                />
-              </label>
-              <label>
-                <span>Title</span>
-                <input
-                  type="text"
-                  value={draft.title}
-                  onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-                  placeholder="Design review, site walk…"
-                />
-              </label>
-              <label className="wide">
-                <span>Attendees</span>
-                <input
-                  type="text"
-                  value={draft.attendees}
-                  onChange={(e) => setDraft((d) => ({ ...d, attendees: e.target.value }))}
-                  placeholder="Client, PM, consultants…"
-                />
-              </label>
-              <label className="wide">
-                <span>Meeting notes</span>
-                <textarea
-                  rows={6}
-                  value={draft.notes}
-                  onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
-                  placeholder="Decisions, action items, follow-ups…"
-                />
-              </label>
-            </div>
-            <div className="pd-meeting-form-actions">
-              <button type="button" className="sched-text-btn" onClick={cancelEdit}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="pd-client-preview-btn"
-                disabled={saving || !draft.notes.trim()}
-                onClick={() => void saveMeeting()}
-              >
-                {saving ? 'Saving…' : 'Save notes'}
-              </button>
-            </div>
-          </>
-        )}
+          </div>
+          <label>
+            <span>Attendees</span>
+            <input
+              type="text"
+              value={draft.attendees}
+              onChange={(e) => setDraft((d) => ({ ...d, attendees: e.target.value }))}
+              placeholder="Client, PM, consultants…"
+            />
+          </label>
+        </div>
+        <label className="wide">
+          <span>{editingId ? 'Meeting notes' : 'Paste meeting summary'}</span>
+          <textarea
+            rows={compact ? 7 : 10}
+            value={draft.notes}
+            onChange={(e) => applyParsedNotes(e.target.value)}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData('text/plain');
+              if (!text.trim() || draft.notes.trim()) return;
+              e.preventDefault();
+              applyParsedNotes(text);
+            }}
+            placeholder="Paste a Teams, Zoom, or written recap. Empty fields above fill in when they’re in the notes."
+          />
+        </label>
+        {pasteHint ? <p className="pd-meeting-paste-hint">{pasteHint}</p> : null}
+        <div className="pd-meeting-form-actions">
+          {!editingId ? (
+            <button type="button" className="sched-text-btn" onClick={() => void pasteFromClipboard()}>
+              Paste from clipboard
+            </button>
+          ) : null}
+          {editingId || hasDraft ? (
+            <button type="button" className="sched-text-btn" onClick={cancelEdit}>
+              {editingId ? 'Cancel' : 'Clear'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="pd-client-preview-btn"
+            disabled={saving || !hasNotes}
+            onClick={() => void saveMeeting()}
+          >
+            {saving ? 'Saving…' : editingId ? 'Save notes' : 'Record meeting'}
+          </button>
+        </div>
       </div>
 
       <div className="pd-meetings-layout">
@@ -401,6 +365,7 @@ export function ClientMeetingsPanel({
                     <span className="title">{m.title || 'Meeting'}</span>
                     <span className="meta">
                       {m.project_key === projectKey ? 'This project' : 'Other project'}
+                      {meetingLocationLabel(m.location) ? ` · ${meetingLocationLabel(m.location)}` : ''}
                       {m.attendees ? ` · ${m.attendees}` : ''}
                     </span>
                   </button>
@@ -418,6 +383,9 @@ export function ClientMeetingsPanel({
                   <p className="pd-kicker">Meeting notes</p>
                   <h4>{selected.title}</h4>
                   <p className="mono">{formatMeetingWhen(selected.meeting_at)}</p>
+                  {meetingLocationLabel(selected.location) ? (
+                    <p className="pd-muted">{meetingLocationLabel(selected.location)}</p>
+                  ) : null}
                   {selected.attendees ? (
                     <p className="pd-muted">Attendees: {selected.attendees}</p>
                   ) : null}

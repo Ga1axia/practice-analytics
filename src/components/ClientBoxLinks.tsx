@@ -10,6 +10,14 @@ import {
 import { documentReviews, markDocumentReviewed, type DocReview } from '../lib/clientPortal';
 import { supabase } from '../lib/supabase';
 
+function emptyDraft(): {
+  title: string;
+  boxUrl: string;
+  section: ClientFileCategoryId;
+} {
+  return { title: '', boxUrl: '', section: 'drawings' };
+}
+
 export function ClientBoxLinks({
   projectKey,
   clientName,
@@ -17,6 +25,7 @@ export function ClientBoxLinks({
   mode,
   compact = false,
   embedded = false,
+  canEdit,
 }: {
   projectKey: string;
   clientName: string;
@@ -24,15 +33,17 @@ export function ClientBoxLinks({
   mode: ClientBoardMode;
   compact?: boolean;
   embedded?: boolean;
+  /** Project managers add and edit. Defaults to staff (pm) mode. */
+  canEdit?: boolean;
 }) {
   const staff = mode === 'pm';
+  const editable = canEdit ?? staff;
   const [links, setLinks] = useState<ClientBoxLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState('');
-  const [boxUrl, setBoxUrl] = useState('');
-  const [section, setSection] = useState<ClientFileCategoryId>('drawings');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState(emptyDraft);
   const [reviews, setReviews] = useState(() => documentReviews(projectKey));
 
   const grouped = useMemo(() => {
@@ -70,11 +81,29 @@ export function ClientBoxLinks({
 
   useEffect(() => {
     setReviews(documentReviews(projectKey));
+    setEditingId(null);
+    setDraft(emptyDraft());
   }, [projectKey]);
 
-  async function addLink() {
-    const name = title.trim();
-    const url = boxUrl.trim();
+  function startEdit(link: ClientBoxLink) {
+    setEditingId(link.id);
+    setDraft({
+      title: link.title,
+      boxUrl: link.box_url,
+      section: normalizeClientFileCategory(link.section, link.title),
+    });
+    setError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraft(emptyDraft());
+    setError(null);
+  }
+
+  async function saveLink() {
+    const name = draft.title.trim();
+    const url = draft.boxUrl.trim();
     if (!name || !url || saving) return;
     if (!isBoxShareUrl(url)) {
       setError('Paste an https:// Box link (app.box.com or boxcloud.com).');
@@ -82,6 +111,24 @@ export function ClientBoxLinks({
     }
     setSaving(true);
     setError(null);
+    if (editingId) {
+      const { data, error: err } = await supabase
+        .from('pa_client_box_links')
+        .update({ title: name, box_url: url, section: draft.section })
+        .eq('id', editingId)
+        .select('*')
+        .single();
+      setSaving(false);
+      if (err) {
+        setError(err.message);
+        return;
+      }
+      if (data) {
+        setLinks((prev) => prev.map((l) => (l.id === editingId ? (data as ClientBoxLink) : l)));
+      }
+      cancelEdit();
+      return;
+    }
     const { data: sessionData } = await supabase.auth.getSession();
     const uid = sessionData.session?.user?.id || null;
     const { data, error: err } = await supabase
@@ -91,7 +138,7 @@ export function ClientBoxLinks({
         client_name: clientName,
         title: name,
         box_url: url,
-        section,
+        section: draft.section,
         created_by: uid,
         created_by_name: authorName,
       })
@@ -102,9 +149,7 @@ export function ClientBoxLinks({
       setError(err.message);
       return;
     }
-    setTitle('');
-    setBoxUrl('');
-    setSection('drawings');
+    setDraft(emptyDraft());
     if (data) setLinks((prev) => [data as ClientBoxLink, ...prev]);
   }
 
@@ -114,6 +159,7 @@ export function ClientBoxLinks({
       setError(err.message);
       return;
     }
+    if (editingId === id) cancelEdit();
     setLinks((prev) => prev.filter((l) => l.id !== id));
   }
 
@@ -123,8 +169,9 @@ export function ClientBoxLinks({
   }
 
   function fileRow(link: ClientBoxLink, rec: DocReview | undefined) {
+    const editing = editingId === link.id;
     return (
-      <li key={link.id}>
+      <li key={link.id} className={editing ? 'editing' : ''}>
         <div>
           <strong>{link.title}</strong>
           <span className="meta mono">
@@ -151,10 +198,19 @@ export function ClientBoxLinks({
               {rec ? 'Reviewed' : 'Mark as reviewed'}
             </button>
           ) : null}
-          {staff ? (
-            <button type="button" className="cp-text-btn" onClick={() => void removeLink(link.id)}>
-              Remove
-            </button>
+          {editable ? (
+            <>
+              <button
+                type="button"
+                className="cp-text-btn"
+                onClick={() => (editing ? cancelEdit() : startEdit(link))}
+              >
+                {editing ? 'Cancel' : 'Edit'}
+              </button>
+              <button type="button" className="cp-text-btn" onClick={() => void removeLink(link.id)}>
+                Remove
+              </button>
+            </>
           ) : null}
         </div>
       </li>
@@ -166,10 +222,10 @@ export function ClientBoxLinks({
       {!compact && !embedded ? (
         <>
           <p className="customer-kicker">Box files</p>
-          <h3 className="cp-box-heading">Shared with you</h3>
+          <h3 className="cp-box-heading">{staff ? 'Project Box' : 'Shared with you'}</h3>
           <p className="cp-phase-summary">
-            {staff
-              ? 'Paste a Box share link. It appears on the client Files tab immediately.'
+            {editable
+              ? 'Paste a Box share link. The client sees it on their Files tab immediately.'
               : 'Open a file in Box to view or download. Your project team posts new sets here.'}
           </p>
         </>
@@ -177,24 +233,25 @@ export function ClientBoxLinks({
 
       {compact ? (
         <p className="pd-muted">
-          Box links posted here show on the client portal Files tab, grouped as drawings, renderings,
-          or packages.
+          {editable
+            ? 'Paste a Box share link. It appears on the client Files tab, grouped as drawings, renderings, or packages.'
+            : 'Open a file in Box. Your project manager posts drawings, renderings, and packages here.'}
         </p>
       ) : null}
 
-      {staff ? (
+      {editable ? (
         <form
           className="cp-box-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void addLink();
+            void saveLink();
           }}
         >
           <label>
             <span>Title</span>
             <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              value={draft.title}
+              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
               placeholder="CD Set — Rev 3"
               required
             />
@@ -202,8 +259,8 @@ export function ClientBoxLinks({
           <label>
             <span>Box link</span>
             <input
-              value={boxUrl}
-              onChange={(e) => setBoxUrl(e.target.value)}
+              value={draft.boxUrl}
+              onChange={(e) => setDraft((d) => ({ ...d, boxUrl: e.target.value }))}
               placeholder="https://app.box.com/s/…"
               inputMode="url"
               autoComplete="url"
@@ -213,8 +270,10 @@ export function ClientBoxLinks({
           <label>
             <span>Category</span>
             <select
-              value={section}
-              onChange={(e) => setSection(e.target.value as ClientFileCategoryId)}
+              value={draft.section}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, section: e.target.value as ClientFileCategoryId }))
+              }
             >
               {CLIENT_FILE_CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -223,9 +282,20 @@ export function ClientBoxLinks({
               ))}
             </select>
           </label>
-          <button type="submit" className="cp-text-btn" disabled={saving || !title.trim() || !boxUrl.trim()}>
-            {saving ? 'Saving…' : 'Share with client'}
-          </button>
+          <div className="cp-box-form-actions">
+            <button
+              type="submit"
+              className="cp-text-btn"
+              disabled={saving || !draft.title.trim() || !draft.boxUrl.trim()}
+            >
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add Box link'}
+            </button>
+            {editingId ? (
+              <button type="button" className="cp-text-btn" onClick={cancelEdit}>
+                Cancel
+              </button>
+            ) : null}
+          </div>
         </form>
       ) : null}
 
@@ -234,7 +304,7 @@ export function ClientBoxLinks({
       {!loading && !links.length ? (
         <div className="cp-empty-card">
           <p>
-            {staff
+            {editable
               ? 'No files on this project yet. Paste a Box share URL above.'
               : 'No design files have been shared yet. Your PM will post drawings, renderings, and packages here when they are ready.'}
           </p>

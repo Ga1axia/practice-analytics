@@ -4,8 +4,25 @@ import {
   parseProjectStartDate,
 } from '../../src/lib/scheduleAutofill';
 import { parseScheduleDate, startOfDay } from '../../src/lib/scheduleDates';
+import { phaseDisplayName } from '../../src/lib/phaseAbbrev';
 import { buildDatedScheduleRows } from '../../src/lib/scheduleDating';
 import { extractJobCode } from './projectHoursFilter.js';
+
+async function loadCorePhaseTitles(
+  sb: SupabaseClient,
+  projectKey: string,
+): Promise<string[]> {
+  const { data } = await sb
+    .from('pa_projects')
+    .select('project, phase, sort_order')
+    .eq('row_kind', 'phase')
+    .eq('parent_project', projectKey)
+    .order('sort_order', { ascending: true });
+  if (!data?.length) return [];
+  return data.map((row) =>
+    phaseDisplayName(row.phase as string | null, row.project as string),
+  );
+}
 
 function isoToMdY(iso: string): string | null {
   const m = String(iso || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
@@ -255,9 +272,11 @@ export async function seedSchedulesFromTimeEntries(
     const kickoff = parseProjectStartDate(plan.startDate)!;
     const explicit = typeByProject.get(plan.projectKey) ?? null;
     const preset = inferSchedulePresetKind(plan.projectKey, explicit);
+    const corePhaseTitles = await loadCorePhaseTitles(sb, plan.projectKey);
     const drafts = buildDatedScheduleRows(kickoff, {
       preset,
       includeDates: true,
+      ...(corePhaseTitles.length ? { corePhaseTitles } : {}),
     }).map((d) => withHistoricalStatus(d, today));
 
     const payload = drafts.map((d) => ({

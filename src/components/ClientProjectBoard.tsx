@@ -37,12 +37,13 @@ import { buildDeadlineEvents, startOfDay } from '../lib/scheduleDates';
 import { groupScheduleSections, sectionStatus } from '../lib/scheduleSections';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { supabase } from '../lib/supabase';
+import { ClientBoxLinks } from './ClientBoxLinks';
 import { ClientMeetingsPanel } from './ClientMeetingsPanel';
 import { ClientMessageThread } from './ClientMessageThread';
 import { CustomerComms } from './CustomerComms';
 import { ScheduleDeadlineCalendar } from './ScheduleDeadlineCalendar';
 
-type CenterTab = 'overview' | 'meetings' | 'budget' | 'notes';
+type CenterTab = 'overview' | 'meetings' | 'files' | 'budget' | 'notes';
 
 function stageState(i: number, currentIdx: number): 'done' | 'current' | 'upcoming' {
   if (currentIdx < 0) return 'upcoming';
@@ -324,6 +325,7 @@ export function ClientProjectBoard({
   const centerTabs: { id: CenterTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     ...(mode === 'pm' ? [{ id: 'meetings' as const, label: 'Meetings' }] : []),
+    { id: 'files', label: 'Files' },
     { id: 'budget', label: 'Budget' },
     { id: 'notes', label: mode === 'customer' ? 'Schedule notes' : 'Notes' },
   ];
@@ -642,6 +644,23 @@ export function ClientProjectBoard({
               <ClientMeetingsPanel
                 projectKey={project.projectKey}
                 clientName={project.clientName}
+              />
+            </section>
+          ) : null}
+
+          {tab === 'files' ? (
+            <section
+              className="cp-card"
+              id="cp-panel-files"
+              role="tabpanel"
+              aria-labelledby="cp-tab-files"
+            >
+              <ClientBoxLinks
+                projectKey={project.projectKey}
+                clientName={project.clientName}
+                authorName={authorName}
+                mode={mode}
+                canEdit={mode === 'pm'}
               />
             </section>
           ) : null}

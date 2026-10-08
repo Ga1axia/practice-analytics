@@ -17,8 +17,17 @@
     },
     "api/admin/data.ts": {
       "maxDuration": 60
+    },
+    "api/cron/schedules-core-sync.ts": {
+      "maxDuration": 300
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/schedules-core-sync",
+      "schedule": "0 14 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

@@ -609,24 +609,10 @@ export async function applyProjectSchedulePreset(input: {
     }
   }
 
-  const aligned = await ensureProjectSchedulePhasesFromCore({
-    projectKey: input.projectKey,
-    clientName: input.clientName,
-    title: input.title,
-    corePhases: undefined,
-    syncLeadMembership: true,
-    includeChecklistTasks: false,
-    kickoff: input.kickoff,
-    preset: input.preset,
-  });
-  if (aligned.rows.length) list = aligned.rows;
-  if (aligned.meta) meta = aligned.meta;
-
   const result: EnsureScheduleResult = {
     projectKey: input.projectKey,
     created,
     dated: list.filter((r) => r.target_end).length,
-    error: aligned.error || undefined,
     meta,
     rows: list,
   };

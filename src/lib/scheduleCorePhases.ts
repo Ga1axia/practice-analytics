@@ -54,11 +54,14 @@ export function corePhaseTitlesFromProject(project: Pick<ProjectNode, 'phases'>)
 }
 
 /** Promote CORE header + phase managers to project lead membership. */
-export async function ensureCorePhaseLeads(input: {
-  projectKey: string;
-  headerManager?: string | null;
-  phases: CoreProjectPhase[];
-}): Promise<{ ensured: number; error?: string }> {
+export async function ensureCorePhaseLeads(
+  input: {
+    projectKey: string;
+    headerManager?: string | null;
+    phases: CoreProjectPhase[];
+  },
+  client: SupabaseClient = supabase,
+): Promise<{ ensured: number; error?: string }> {
   const names = new Set<string>();
   const header = (input.headerManager || '').trim();
   if (header) names.add(header);
@@ -68,10 +71,13 @@ export async function ensureCorePhaseLeads(input: {
   }
   let ensured = 0;
   for (const name of names) {
-    const res = await ensureLeadMembership({
-      projectKey: input.projectKey,
-      employeeName: name,
-    });
+    const res = await ensureLeadMembership(
+      {
+        projectKey: input.projectKey,
+        employeeName: name,
+      },
+      client,
+    );
     if (!res.ok) return { ensured, error: res.error };
     if (res.data) ensured += 1;
   }

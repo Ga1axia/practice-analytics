@@ -15,6 +15,7 @@
     "seed:time-entries-json": "tsx scripts/seed-time-entries-from-json.ts",
     "provision:employees": "node --env-file=.env.local scripts/provision-employees-from-time.mjs",
     "sync:project-members": "node --env-file=.env.local scripts/sync-project-members-from-time.mjs",
+    "sync:schedules-from-core": "tsx --env-file=.env.local scripts/sync-schedules-from-core.ts",
     "seed:demo-customers": "node --env-file=.env.local scripts/seed-demo-customers.mjs"
   },
   "dependencies": {

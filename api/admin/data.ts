@@ -450,6 +450,13 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'sync_all_schedules_from_core') {
+      const { syncAllSchedulesFromCore } = await import('../_lib/syncAllSchedulesFromCore.js');
+      const result = await syncAllSchedulesFromCore(sb);
+      res.status(200).json({ ok: true, ...result });
+      return;
+    }
+
     if (action === 'resync_schedule_from_core') {
       const projectKey = String(body.projectKey || '').trim();
       if (!projectKey) {
@@ -1158,6 +1165,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         'project_schedules',
         'set_schedule_start',
         'resync_schedule_from_core',
+        'sync_all_schedules_from_core',
         'management_overview',
         'employees_directory',
         'members_overview',

@@ -97,6 +97,8 @@ export async function resyncProjectScheduleFromCore(
     projectTitle?: string;
     projectCode?: string | null;
     clientName?: string;
+    /** When false, skip TE-based member sync (faster for daily batch). */
+    syncTimeMembers?: boolean;
   },
   client: Db = supabase,
 ): Promise<
@@ -159,11 +161,14 @@ export async function resyncProjectScheduleFromCore(
   );
   if (!saved.ok) return saved;
 
-  const leads = await ensureCorePhaseLeads({
-    projectKey,
-    headerManager: input.headerManager,
-    phases: corePhases,
-  });
+  const leads = await ensureCorePhaseLeads(
+    {
+      projectKey,
+      headerManager: input.headerManager,
+      phases: corePhases,
+    },
+    client,
+  );
   if (leads.error) {
     return { ok: false, error: leads.error };
   }
@@ -178,13 +183,15 @@ export async function resyncProjectScheduleFromCore(
         .filter(Boolean),
     ),
   ];
-  await syncProjectMembersFromTimeEntries({
-    projectKey,
-    projectTitle: input.projectTitle || projectKey,
-    projectFullName: projectKey,
-    projectCode: input.projectCode ?? null,
-    leadNames,
-  });
+  if (input.syncTimeMembers !== false) {
+    await syncProjectMembersFromTimeEntries({
+      projectKey,
+      projectTitle: input.projectTitle || projectKey,
+      projectFullName: projectKey,
+      projectCode: input.projectCode ?? null,
+      leadNames,
+    });
+  }
 
   return {
     ok: true,

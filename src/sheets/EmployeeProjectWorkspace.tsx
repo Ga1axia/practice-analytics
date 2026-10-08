@@ -53,7 +53,6 @@ import { corePhasesFromProject } from '../lib/scheduleCorePhases';
 import {
   applyProjectSchedulePreset,
   ensureProjectSchedule,
-  ensureProjectSchedulePhasesFromCore,
   saveProjectScheduleStartDate,
 } from '../lib/scheduleEnsure';
 import { fromDateInputValue, toDateInputValue } from '../lib/scheduleMutations';
@@ -243,30 +242,16 @@ export function EmployeeProjectWorkspace({
           autoDate: false,
           forceRefresh: true,
         });
-        const phased = isDemo
-          ? ensured
-          : await ensureProjectSchedulePhasesFromCore({
-              projectKey: project.key,
-              clientName: project.clientName,
-              title: project.title,
-              corePhases: corePhasesFromProject(project),
-              headerManager: project.row?.manager,
-              syncLeadMembership: true,
-              includeChecklistTasks: false,
-            });
         if (cancelled) return;
-        const loaded = phased.error && !phased.rows.length ? ensured : phased;
-        setDbRows(loaded.rows);
-        setScheduleMeta(loaded.meta ?? ensured.meta);
+        setDbRows(ensured.rows);
+        setScheduleMeta(ensured.meta);
         const savedStart =
           (ensured.meta?.start_date || '').trim() || getProjectStartDate(project.key);
         setStartDateText(savedStart ? toDateInputValue(savedStart) : toDateInputValue(new Date()));
-        const needs = scheduleNeedsStartPrompt(loaded.rows);
+        const needs = scheduleNeedsStartPrompt(ensured.rows);
         if (needs) clearScheduleStartDismiss(project.key);
         setShowStartPrompt(needs);
-        if (loaded.error || ensured.error) {
-          setStartError(loaded.error || ensured.error || null);
-        }
+        if (ensured.error) setStartError(ensured.error);
       } catch (e) {
         if (cancelled) return;
         setDbRows([]);
@@ -281,7 +266,7 @@ export function EmployeeProjectWorkspace({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [project, isDemo]);
+  }, [project.key, project.clientName, project.title]);
 
   async function onStartSchedule(input: { kickoff: Date; preset: SchedulePresetKind }) {
     setStartBusy(true);

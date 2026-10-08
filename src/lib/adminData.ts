@@ -170,6 +170,16 @@ export function clearAllSchedules() {
   return adminData<{ ok: boolean; message?: string }>({ action: 'clear_schedules' });
 }
 
+export function syncAllSchedulesFromCore() {
+  return adminData<{
+    ok: boolean;
+    projects: number;
+    synced: number;
+    skippedNoPhases: number;
+    errors: string[];
+  }>({ action: 'sync_all_schedules_from_core' });
+}
+
 export function resyncScheduleFromCore(projectKey: string) {
   return adminData<{
     ok: boolean;

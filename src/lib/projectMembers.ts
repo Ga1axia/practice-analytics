@@ -6,6 +6,7 @@ import {
   projectKeysForTimeEntry,
 } from './projectLoggedHours';
 import { isProjectListManager, managerNameMatches } from './projectManagerMatch';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 export { isProjectListManager } from './projectManagerMatch';
@@ -95,8 +96,9 @@ export async function loadMembershipsForEmployee(
 
 export async function loadProjectMembers(
   projectKey: string,
+  client: SupabaseClient = supabase,
 ): Promise<{ members: ProjectMember[]; error?: string }> {
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('pa_project_members')
     .select('id, project_key, employee_name, role')
     .eq('project_key', projectKey)
@@ -113,19 +115,22 @@ export async function loadProjectMembers(
 }
 
 /** Ensure the Project List manager appears as a lead in membership. */
-export async function ensureLeadMembership(input: {
-  projectKey: string;
-  employeeName: string;
-}): Promise<MutationResult<ProjectMember | null>> {
+export async function ensureLeadMembership(
+  input: {
+    projectKey: string;
+    employeeName: string;
+  },
+  client: SupabaseClient = supabase,
+): Promise<MutationResult<ProjectMember | null>> {
   const employeeName = input.employeeName.trim();
   if (!employeeName) return { ok: true, data: null };
 
-  const existing = await loadProjectMembers(input.projectKey);
+  const existing = await loadProjectMembers(input.projectKey, client);
   if (existing.error) return { ok: false, error: existing.error };
   const hit = existing.members.find((m) => norm(m.employee_name) === norm(employeeName));
   if (hit) {
     if (hit.role === 'lead') return { ok: true, data: hit };
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('pa_project_members')
       .update({ role: 'lead' })
       .eq('id', hit.id)
@@ -143,7 +148,7 @@ export async function ensureLeadMembership(input: {
     };
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('pa_project_members')
     .insert({
       project_key: input.projectKey,

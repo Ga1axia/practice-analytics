@@ -5,6 +5,7 @@ import {
   listMembersOverview,
   listPracticeRoster,
   clearAllSchedules,
+  syncAllSchedulesFromCore,
   loadManagementOverview,
   removePracticeRosterMember,
   seedDefaultPracticeRoster,
@@ -103,10 +104,42 @@ export function AdminOverviewPanel({
           </div>
           <h3>Employee schedules &amp; tasks</h3>
           <p className="pd-muted">
-            Deletes every row in <span className="mono">pa_schedules</span> and{' '}
-            <span className="mono">pa_schedule_rows</span>. Project List data is unchanged. Staff
-            will see empty projects and can use <strong>Start schedule</strong> per job.
+            CORE → schedule sync runs automatically once per day (
+            <span className="mono">/api/cron/schedules-core-sync</span>, ~7:00 AM Pacific). Manual
+            per-project resync is under Admin → Data → Schedules.
           </p>
+          <p className="pd-muted">
+            Clears every row in <span className="mono">pa_schedules</span> and{' '}
+            <span className="mono">pa_schedule_rows</span> (Project List unchanged).
+          </p>
+          <button
+            type="button"
+            className="signout-btn"
+            disabled={busy}
+            style={{ marginBottom: 10 }}
+            onClick={() => {
+              void (async () => {
+                onBusy(true);
+                onError(null);
+                try {
+                  const res = await syncAllSchedulesFromCore();
+                  onMsg(
+                    `CORE schedule sync: ${res.synced} project(s), ${res.skippedNoPhases} skipped (no phases), ${res.errors.length} error(s).`,
+                  );
+                  if (res.errors.length) {
+                    onError(res.errors.slice(0, 3).join(' · '));
+                  }
+                  await load();
+                } catch (e) {
+                  onError(e instanceof Error ? e.message : 'Sync failed');
+                } finally {
+                  onBusy(false);
+                }
+              })();
+            }}
+          >
+            Run CORE schedule sync now
+          </button>
           <button
             type="button"
             className="signout-btn admin-danger-btn"

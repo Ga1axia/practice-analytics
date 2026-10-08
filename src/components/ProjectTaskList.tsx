@@ -491,8 +491,8 @@ export function ProjectTaskList({
       </div>
 
       <p className="pd-muted emp-project-tasks-hint">
-        Phases come from the Project List (CORE). Check off work or use the edit button for details
-        and subtasks; project leads can start the checklist when it is empty.
+        Phases and checklist tasks are synced from CORE daily. Check off work or use the edit
+        button for details; project leads can start the checklist when it is empty.
       </p>
 
       {adding && scheduleId ? (

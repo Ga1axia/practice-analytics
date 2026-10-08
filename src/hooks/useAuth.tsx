@@ -12,6 +12,7 @@ import { oauthRedirectTo } from '../lib/oauthRedirect';
 import { isAdminRole } from '../lib/roles';
 import { supabase } from '../lib/supabase';
 import type { Profile } from '../lib/authTypes';
+import { isMDesignsWorkEmail } from '../lib/firmEmail';
 
 const IMPERSONATE_KEY = 'pa_impersonate_profile_id';
 
@@ -40,8 +41,33 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
     .select('id,email,role,display_name,employee_name,client_name,portal_prefs')
     .eq('id', userId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    if (/portal_prefs/i.test(error.message)) {
+      const fallback = await supabase
+        .from('pa_profiles')
+        .select('id,email,role,display_name,employee_name,client_name')
+        .eq('id', userId)
+        .maybeSingle();
+      if (fallback.error) throw fallback.error;
+      return fallback.data as Profile | null;
+    }
+    throw error;
+  }
   return data as Profile | null;
+}
+
+async function ensureFirmProfileIfMissing(
+  user: Session['user'],
+  existing: Profile | null,
+): Promise<Profile | null> {
+  if (existing) return existing;
+  if (!isMDesignsWorkEmail(user.email)) return null;
+  const { data, error } = await supabase.rpc('pa_ensure_firm_profile');
+  if (error) {
+    console.warn('[auth] firm profile ensure failed', error.message);
+    return null;
+  }
+  return (data as Profile | null) ?? null;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -97,7 +123,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        const p = await fetchProfile(next.user.id);
+        let p = await fetchProfile(next.user.id);
+        p = await ensureFirmProfileIfMissing(next.user, p);
+        if (!p && isMDesignsWorkEmail(next.user.email)) {
+          p = await fetchProfile(next.user.id);
+        }
         setRealProfile(p);
         setError(p ? null : 'No profile linked to this account.');
         if (p) await restoreImpersonation(p);

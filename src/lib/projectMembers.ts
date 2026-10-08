@@ -5,7 +5,7 @@ import {
   buildTimeEntryProjectIndex,
   projectKeysForTimeEntry,
 } from './projectLoggedHours';
-import { isProjectListManager } from './projectManagerMatch';
+import { isProjectListManager, managerNameMatches } from './projectManagerMatch';
 import { supabase } from './supabase';
 
 export { isProjectListManager } from './projectManagerMatch';
@@ -25,6 +25,16 @@ function norm(name: string) {
   return name.trim().toLowerCase();
 }
 
+/** Portal membership or Project List header manager (not phase-only PM). */
+export function isProjectHeaderLead(
+  project: { row?: { manager?: string | null } | null },
+  employeeName: string,
+  membershipRole?: ProjectMemberRole | null,
+): boolean {
+  if (membershipRole === 'lead') return true;
+  return managerNameMatches(project.row?.manager, employeeName);
+}
+
 export function isProjectLead(
   project: {
     row?: { manager?: string | null } | null;
@@ -35,6 +45,30 @@ export function isProjectLead(
 ): boolean {
   if (membershipRole === 'lead') return true;
   return isProjectListManager(project, employeeName);
+}
+
+/** True when the employee is the Project List manager on any phase (not necessarily the header). */
+export function isPhaseLead(
+  project: { phases?: { row: { manager?: string | null } }[] },
+  employeeName: string,
+): boolean {
+  return Boolean(
+    project.phases?.some((ph) => managerNameMatches(ph.row.manager, employeeName)),
+  );
+}
+
+export function canViewPhaseBudgets(
+  project: {
+    row?: { manager?: string | null } | null;
+    phases?: { row: { manager?: string | null } }[];
+  },
+  employeeName: string,
+  membershipRole?: ProjectMemberRole | null,
+): boolean {
+  return (
+    isProjectHeaderLead(project, employeeName, membershipRole) ||
+    isPhaseLead(project, employeeName)
+  );
 }
 
 export async function loadMembershipsForEmployee(

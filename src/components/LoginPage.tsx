@@ -202,12 +202,20 @@ export function LoginPage() {
               <p className="login-kicker">Account pending</p>
               <h1 className="display">This account is not provisioned yet.</h1>
               <p className="login-lede soft">
-                You signed in as <span className="mono">{session?.user.email}</span>, but there is no
-                portal profile for that email. Firm staff should use an{' '}
-                <span className="mono">@mdesignsarchitects.com</span> work account. Ask an
-                administrator if you still see this after signing in.
+                You signed in as <span className="mono">{session?.user.email}</span>, but we could not
+                link a portal profile. Any{' '}
+                <span className="mono">@mdesignsarchitects.com</span> account should auto-provision on
+                sign-in — try refreshing the page once. If this persists, the database migration may
+                not be applied yet; ask an administrator to run Supabase migrations.
               </p>
-              <button type="button" className="login-submit" onClick={() => void signOut()}>
+              <button
+                type="button"
+                className="login-submit"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+              <button type="button" className="login-submit secondary" onClick={() => void signOut()}>
                 Sign out
               </button>
             </div>

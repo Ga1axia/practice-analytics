@@ -31,6 +31,8 @@ import {
   staffNameOptions,
   type ProjectMemberRole,
 } from '../lib/projectMembers';
+import { managerNameMatches } from '../lib/projectManagerMatch';
+import { maxPhaseBudgetPctForManager } from '../lib/phaseBudget';
 import {
   buildClientHierarchy,
   isActiveProjectForEmployee,
@@ -754,7 +756,10 @@ export function EmployeePortal({
                 const phaseRaw =
                   p.row?.phase || p.phases.find((ph) => ph.row.phase)?.row.phase || null;
                 const city = p.row?.city || p.phases.find((ph) => ph.row.city)?.row.city || null;
-                const myPhases = p.phases.filter((ph) => ph.row.manager === employeeName);
+                const myPhases = p.phases.filter((ph) =>
+                  managerNameMatches(ph.row.manager, employeeName),
+                );
+                const myPhaseBudgetPct = maxPhaseBudgetPctForManager(p.phases, employeeName);
                 const out = myPhases.length
                   ? myPhases.reduce((a, x) => a + rowOutstanding(x.row), 0)
                   : p.outstanding;
@@ -811,6 +816,12 @@ export function EmployeePortal({
                         <span className="k">Phases</span>
                         <span className="v">{myPhases.length || p.phases.length}</span>
                       </div>
+                      {myPhaseBudgetPct != null ? (
+                        <div>
+                          <span className="k">Phase budget</span>
+                          <span className="v">{Math.round(myPhaseBudgetPct * 100)}% used</span>
+                        </div>
+                      ) : null}
                     </div>
                   </button>
                 );
@@ -897,6 +908,7 @@ export function EmployeePortal({
                 employeeName,
                 memberRoles.get(selectedProject.key) || null,
               )}
+              membershipRole={memberRoles.get(selectedProject.key) || null}
               rosterNames={rosterNames}
               onMembershipChange={() => {
                 void loadMembershipsForEmployee(employeeName).then((res) => {

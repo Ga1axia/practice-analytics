@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { InteriorScopeToggle } from '../components/InteriorScopeToggle';
+import { PhaseBudgetPanel } from '../components/PhaseBudgetPanel';
 import { ClientBoxLinks } from '../components/ClientBoxLinks';
 import { ClientMeetingsPanel } from '../components/ClientMeetingsPanel';
 import { ClientMessageThread } from '../components/ClientMessageThread';
@@ -24,7 +25,13 @@ import {
 } from '../lib/employeePortalPrefs';
 import { fmtUSD } from '../lib/format';
 import { scheduleDeliverables } from '../lib/loadProjectSchedule';
-import type { ProjectMember } from '../lib/projectMembers';
+import {
+  canViewPhaseBudgets,
+  isProjectHeaderLead,
+  type ProjectMember,
+  type ProjectMemberRole,
+} from '../lib/projectMembers';
+import { buildProjectPhaseBudgetBars } from '../lib/phaseBudget';
 import type { ProjectNode } from '../lib/projectListHierarchy';
 import {
   loadProjectLoggedHours,
@@ -120,6 +127,7 @@ type Props = {
   project: ProjectNode & { clientName: string };
   employeeName: string;
   isLead?: boolean;
+  membershipRole?: ProjectMemberRole | null;
   rosterNames?: string[];
   portalPrefs?: ResolvedEmployeePortalPrefs;
   onMembershipChange?: () => void;
@@ -129,6 +137,7 @@ export function EmployeeProjectWorkspace({
   project,
   employeeName,
   isLead = true,
+  membershipRole = null,
   rosterNames = [],
   portalPrefs = {
     interiorProjectsOption: false,
@@ -155,6 +164,17 @@ export function EmployeeProjectWorkspace({
     readHoursPhaseScope(employeeName, portalPrefs),
   );
   const showPayments = isLead;
+  const showPhaseBudgets = canViewPhaseBudgets(project, employeeName, membershipRole);
+  const viewAllPhaseBudgets = isProjectHeaderLead(project, employeeName, membershipRole);
+
+  const phaseBudgetBars = useMemo(() => {
+    if (!showPhaseBudgets) return [];
+    return buildProjectPhaseBudgetBars({
+      project,
+      employeeName,
+      viewAllPhases: viewAllPhaseBudgets,
+    });
+  }, [showPhaseBudgets, project, employeeName, viewAllPhaseBudgets]);
 
   useEffect(() => {
     setHoursScopeState(readHoursPhaseScope(employeeName, portalPrefs));
@@ -651,6 +671,17 @@ export function EmployeeProjectWorkspace({
       {hours?.error ? (
         <p className="plist-upload-err" style={{ marginTop: -8 }}>
           {hours.error}
+        </p>
+      ) : null}
+
+      {phaseBudgetBars.length ? (
+        <PhaseBudgetPanel
+          bars={phaseBudgetBars}
+          showOwnershipHint={!viewAllPhaseBudgets && phaseBudgetBars.length > 1}
+        />
+      ) : showPhaseBudgets ? (
+        <p className="pd-muted emp-phase-budget-empty">
+          No phase contract budgets on this project yet (check Project List phase rows).
         </p>
       ) : null}
 

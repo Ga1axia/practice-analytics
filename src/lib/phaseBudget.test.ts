@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 import {
   buildProjectPhaseBudgetBars,
   budgetBurnFillColor,
-  maxPhaseBudgetPctForManager,
   phaseBudgetPct,
+  projectBudgetUsage,
 } from './phaseBudget';
 import type { ProjectRow } from './types';
 
@@ -84,13 +84,20 @@ describe('buildProjectPhaseBudgetBars', () => {
   });
 });
 
-describe('maxPhaseBudgetPctForManager', () => {
-  it('picks the highest pct among managed phases', () => {
-    const phases = [
-      { label: 'A', row: phaseRow({ project: 'a', contract: 100, spent: 30, manager: 'X' }) },
-      { label: 'B', row: phaseRow({ project: 'b', contract: 100, spent: 95, manager: 'X' }) },
-    ];
-    assert.equal(maxPhaseBudgetPctForManager(phases, 'x'), 0.95);
+describe('projectBudgetUsage', () => {
+  it('sums phase contracts and spent', () => {
+    const usage = projectBudgetUsage({
+      contract: 0,
+      row: null,
+      phases: [
+        { label: 'A', row: phaseRow({ project: 'a', contract: 100, spent: 25 }) },
+        { label: 'B', row: phaseRow({ project: 'b', contract: 300, spent: 150 }) },
+      ],
+    });
+    assert.ok(usage);
+    assert.equal(usage!.contract, 400);
+    assert.equal(usage!.spent, 175);
+    assert.equal(usage!.pct, 0.4375);
   });
 });
 

@@ -39,11 +39,17 @@ describe('employee project filters', () => {
     assert.deepEqual(collectMyPhaseOptions(projects, 'Pat'), ['SD']);
   });
 
-  it('filters lead vs member', () => {
-    const pLead = stubProject({
+  it('filters project lead vs phase lead vs member', () => {
+    const pProjectLead = stubProject({
       key: 'lead',
       title: 'Lead',
       row: { manager: 'Pat' } as never,
+    });
+    const pPhaseLead = stubProject({
+      key: 'phase',
+      title: 'Phase',
+      row: { manager: 'Boss' } as never,
+      phases: [{ label: 'ID', row: { manager: 'Pat', phase: 'ID' } as never }],
     });
     const pMember = stubProject({
       key: 'mem',
@@ -51,16 +57,24 @@ describe('employee project filters', () => {
       row: { manager: 'Boss' } as never,
     });
     const roles = new Map([['mem', 'member' as const]]);
+    const base = { phase: '', client: '' };
     assert.equal(
-      matchesEmployeeProjectFilters(pLead, 'Pat', roles, { role: 'lead', phase: '', client: '' }),
+      matchesEmployeeProjectFilters(pProjectLead, 'Pat', roles, {
+        role: 'project_lead',
+        ...base,
+      }),
       true,
     );
     assert.equal(
-      matchesEmployeeProjectFilters(pMember, 'Pat', roles, { role: 'lead', phase: '', client: '' }),
+      matchesEmployeeProjectFilters(pPhaseLead, 'Pat', roles, { role: 'project_lead', ...base }),
       false,
     );
     assert.equal(
-      matchesEmployeeProjectFilters(pMember, 'Pat', roles, { role: 'member', phase: '', client: '' }),
+      matchesEmployeeProjectFilters(pPhaseLead, 'Pat', roles, { role: 'phase_lead', ...base }),
+      true,
+    );
+    assert.equal(
+      matchesEmployeeProjectFilters(pMember, 'Pat', roles, { role: 'member', ...base }),
       true,
     );
   });

@@ -109,17 +109,41 @@ export function buildProjectPhaseBudgetBars(input: {
   return bars.sort((a, b) => b.pct - a.pct);
 }
 
-/** Max burn % among phases the employee manages (for project gallery). */
-export function maxPhaseBudgetPctForManager(
-  phases: PhaseNode[],
-  employeeName: string,
-): number | null {
-  let max: number | null = null;
-  for (const ph of phases) {
-    if (!managerNameMatches(ph.row.manager, employeeName)) continue;
-    const pct = phaseBudgetPct(ph.row);
-    if (pct == null) continue;
-    max = max == null ? pct : Math.max(max, pct);
+export type ProjectBudgetUsage = {
+  pct: number;
+  spent: number;
+  contract: number;
+  completed: boolean;
+};
+
+/** Total project spent ÷ contract (phase totals when present). */
+export function projectBudgetUsage(
+  project: Pick<ProjectNode, 'phases' | 'row' | 'contract'>,
+): ProjectBudgetUsage | null {
+  let contract = 0;
+  let spent = 0;
+
+  if (project.phases.length) {
+    contract = project.phases.reduce((a, ph) => a + (ph.row.contract || 0), 0);
+    spent = project.phases.reduce((a, ph) => a + phaseBudgetSpent(ph.row), 0);
   }
-  return max;
+
+  if (contract <= 0) {
+    contract = project.contract || project.row?.contract || 0;
+    spent = project.row ? phaseBudgetSpent(project.row) : 0;
+  }
+
+  if (contract <= 0) return null;
+
+  const status =
+    project.row?.status ??
+    project.phases.find((ph) => (ph.row.status || '').trim())?.row.status ??
+    null;
+
+  return {
+    pct: spent / contract,
+    spent,
+    contract,
+    completed: isPhaseBudgetCompleted(status),
+  };
 }

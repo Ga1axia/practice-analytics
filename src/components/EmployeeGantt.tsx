@@ -17,6 +17,7 @@ import {
   type GanttFilter,
   type GanttTickScale,
 } from '../lib/scheduleGantt';
+import { ganttBarBackground } from '../lib/ganttBarColors';
 import {
   formatScheduleDate,
   fromDateInputValue,
@@ -385,13 +386,22 @@ export function EmployeeGantt({
                         0.5,
                       );
                       const hi = selected?.id === bar.id;
+                      const fill = ganttBarBackground({
+                        tone: bar.tone,
+                        kind: bar.kind,
+                        paletteIndex: bar.paletteIndex,
+                      });
                       if (bar.milestone) {
                         return (
                           <button
                             key={bar.id}
                             type="button"
-                            className={`gantt-milestone tone-${bar.tone} emp-gantt-seg${hi ? ' selected' : ''}`}
-                            style={{ left: `${left}%` }}
+                            className={`gantt-milestone emp-gantt-seg emp-gantt-seg-colored${hi ? ' selected' : ''}`}
+                            style={{
+                              left: `${left}%`,
+                              background: fill.background,
+                              borderColor: fill.borderColor,
+                            }}
                             title={`${bar.label}\n${fmtShort(bar.start)}\nClick to edit dates`}
                             onClick={() => setSelected(bar)}
                           />
@@ -401,8 +411,13 @@ export function EmployeeGantt({
                         <button
                           key={bar.id}
                           type="button"
-                          className={`gantt-bar tone-${bar.tone} emp-gantt-seg${hi ? ' selected' : ''}`}
-                          style={{ left: `${left}%`, width: `${width}%` }}
+                          className={`gantt-bar emp-gantt-seg emp-gantt-seg-colored${hi ? ' selected' : ''}`}
+                          style={{
+                            left: `${left}%`,
+                            width: `${width}%`,
+                            background: fill.background,
+                            borderColor: fill.borderColor,
+                          }}
                           title={`${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}\nClick to edit dates`}
                           onClick={() => setSelected(bar)}
                         >

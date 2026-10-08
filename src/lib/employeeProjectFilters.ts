@@ -1,17 +1,23 @@
 import type { ProjectNode } from './projectListHierarchy';
 import type { ProjectMemberRole } from './projectMembers';
+import { managerNameMatches } from './projectManagerMatch';
 
-function employeeIsProjectLead(
+function employeeIsProjectHeaderLead(
   project: ProjectNode,
   employeeName: string,
   membership: ProjectMemberRole | null,
 ): boolean {
   if (membership === 'lead') return true;
-  if (project.row?.manager === employeeName) return true;
-  return Boolean(project.phases?.some((ph) => ph.row.manager === employeeName));
+  return managerNameMatches(project.row?.manager, employeeName);
 }
 
-export type EmployeeProjectRoleFilter = 'all' | 'lead' | 'member';
+function employeeIsPhaseLead(project: ProjectNode, employeeName: string): boolean {
+  return Boolean(
+    project.phases?.some((ph) => managerNameMatches(ph.row.manager, employeeName)),
+  );
+}
+
+export type EmployeeProjectRoleFilter = 'all' | 'project_lead' | 'phase_lead' | 'member';
 
 export type EmployeeProjectFilters = {
   role: EmployeeProjectRoleFilter;
@@ -36,10 +42,15 @@ export function readEmployeeProjectFilters(employeeName: string): EmployeeProjec
     const raw = localStorage.getItem(projectFiltersStorageKey(employeeName));
     if (!raw) return { ...DEFAULT_FILTERS };
     const parsed = JSON.parse(raw) as Partial<EmployeeProjectFilters>;
+    const storedRole = (parsed as { role?: string }).role;
+    const roleRaw = storedRole === 'lead' ? 'project_lead' : storedRole;
     return {
       role:
-        parsed.role === 'lead' || parsed.role === 'member' || parsed.role === 'all'
-          ? parsed.role
+        roleRaw === 'project_lead' ||
+        roleRaw === 'phase_lead' ||
+        roleRaw === 'member' ||
+        roleRaw === 'all'
+          ? roleRaw
           : 'all',
       phase: typeof parsed.phase === 'string' ? parsed.phase : '',
       client: typeof parsed.client === 'string' ? parsed.client : '',
@@ -64,7 +75,7 @@ export function phasesManagedByEmployee(
   project: ProjectNode,
   employeeName: string,
 ): { row: ProjectNode['phases'][0]['row']; label: string }[] {
-  return project.phases.filter((ph) => ph.row.manager === employeeName);
+  return project.phases.filter((ph) => managerNameMatches(ph.row.manager, employeeName));
 }
 
 export function collectMyPhaseOptions(
@@ -99,10 +110,13 @@ export function matchesEmployeeProjectFilters(
   filters: EmployeeProjectFilters,
 ): boolean {
   const membership = memberRoles.get(project.key) || null;
-  const lead = employeeIsProjectLead(project, employeeName, membership);
+  const projectLead = employeeIsProjectHeaderLead(project, employeeName, membership);
+  const phaseLead = employeeIsPhaseLead(project, employeeName);
+  const anyLead = projectLead || phaseLead;
 
-  if (filters.role === 'lead' && !lead) return false;
-  if (filters.role === 'member' && lead) return false;
+  if (filters.role === 'project_lead' && !projectLead) return false;
+  if (filters.role === 'phase_lead' && !phaseLead) return false;
+  if (filters.role === 'member' && anyLead) return false;
 
   if (filters.client) {
     const client = (project.clientName || project.row?.client || '').trim();

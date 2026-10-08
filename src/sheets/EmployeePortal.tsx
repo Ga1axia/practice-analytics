@@ -31,15 +31,13 @@ import {
   staffNameOptions,
   type ProjectMemberRole,
 } from '../lib/projectMembers';
-import { managerNameMatches } from '../lib/projectManagerMatch';
-import { maxPhaseBudgetPctForManager } from '../lib/phaseBudget';
+import { budgetBurnFillColor, projectBudgetUsage } from '../lib/phaseBudget';
 import {
   buildClientHierarchy,
   isActiveProjectForEmployee,
   type ProjectNode,
 } from '../lib/projectListHierarchy';
 import { normalizeProjectStatus } from '../lib/projectStatus';
-import { rowOutstanding } from '../lib/receivable';
 import type { DashboardData } from '../lib/types';
 import { InteriorScopeToggle } from '../components/InteriorScopeToggle';
 import { useDemoMode } from '../hooks/useDemoMode';
@@ -655,7 +653,8 @@ export function EmployeePortal({
                 title="My role"
               >
                 <option value="all">Role: all</option>
-                <option value="lead">Role: I lead</option>
+                <option value="project_lead">Role: project lead</option>
+                <option value="phase_lead">Role: phase lead</option>
                 <option value="member">Role: member</option>
               </select>
               <select
@@ -756,15 +755,9 @@ export function EmployeePortal({
                 const phaseRaw =
                   p.row?.phase || p.phases.find((ph) => ph.row.phase)?.row.phase || null;
                 const city = p.row?.city || p.phases.find((ph) => ph.row.city)?.row.city || null;
-                const myPhases = p.phases.filter((ph) =>
-                  managerNameMatches(ph.row.manager, employeeName),
-                );
-                const myPhaseBudgetPct = maxPhaseBudgetPctForManager(p.phases, employeeName);
-                const out = myPhases.length
-                  ? myPhases.reduce((a, x) => a + rowOutstanding(x.row), 0)
-                  : p.outstanding;
                 const selected = selectedKey === p.key;
                 const lead = isProjectLead(p, employeeName, memberRoles.get(p.key) || null);
+                const budgetUsage = lead ? projectBudgetUsage(p) : null;
                 return (
                   <button
                     key={p.key}
@@ -794,35 +787,28 @@ export function EmployeePortal({
                         <span>{lead ? 'Lead' : 'Member'}</span>
                       </>
                     </p>
-                    <div className="emp-gallery-stats">
-                      {lead ? (
-                        <>
-                          <div>
-                            <span className="k">Contract</span>
-                            <span className="v">{fmtUSD(p.contract)}</span>
-                          </div>
-                          <div>
-                            <span className="k">Outstanding</span>
-                            <span className="v">{fmtUSD(Math.max(0, out))}</span>
-                          </div>
-                        </>
-                      ) : (
-                        <div>
-                          <span className="k">Access</span>
-                          <span className="v">Team member</span>
+                    {budgetUsage ? (
+                      <div className="emp-gallery-budget">
+                        <div className="emp-gallery-budget-label">
+                          <span>Project budget</span>
+                          <span
+                            className="mono"
+                            style={{ color: budgetBurnFillColor(budgetUsage.pct, budgetUsage.completed) }}
+                          >
+                            {Math.round(budgetUsage.pct * 100)}% used
+                          </span>
                         </div>
-                      )}
-                      <div>
-                        <span className="k">Phases</span>
-                        <span className="v">{myPhases.length || p.phases.length}</span>
+                        <div className="emp-gallery-budget-track">
+                          <div
+                            className="emp-gallery-budget-fill"
+                            style={{
+                              width: `${Math.min(Math.max(budgetUsage.pct, 0) * 100, 100)}%`,
+                              background: budgetBurnFillColor(budgetUsage.pct, budgetUsage.completed),
+                            }}
+                          />
+                        </div>
                       </div>
-                      {myPhaseBudgetPct != null ? (
-                        <div>
-                          <span className="k">Phase budget</span>
-                          <span className="v">{Math.round(myPhaseBudgetPct * 100)}% used</span>
-                        </div>
-                      ) : null}
-                    </div>
+                    ) : null}
                   </button>
                 );
               })}

@@ -10,6 +10,7 @@ import {
   ganttTimelineBounds,
   type GanttFilter,
 } from '../lib/scheduleGantt';
+import { ganttBarBackground } from '../lib/ganttBarColors';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 
 function fmtShort(d: Date) {
@@ -176,6 +177,11 @@ export function ScheduleGantt({
                 const left = barLeftPct(bar.start, bounds.start, totalDays);
                 const width = Math.max(barWidthPct(bar.start, bar.end, totalDays), 0.6);
                 const hi = highlighted === bar.id;
+                const fill = ganttBarBackground({
+                  tone: bar.tone,
+                  kind: bar.kind,
+                  paletteIndex: bar.paletteIndex,
+                });
                 return (
                   <div
                     key={bar.id}
@@ -202,14 +208,23 @@ export function ScheduleGantt({
                       ) : null}
                       {bar.milestone ? (
                         <div
-                          className={`gantt-milestone tone-${bar.tone}`}
-                          style={{ left: `${left}%` }}
+                          className="gantt-milestone gantt-seg-colored"
+                          style={{
+                            left: `${left}%`,
+                            background: fill.background,
+                            borderColor: fill.borderColor,
+                          }}
                           title={`${bar.label} · ${fmtShort(bar.start)}${bar.status ? ` · ${bar.status}` : ''}`}
                         />
                       ) : (
                         <div
-                          className={`gantt-bar tone-${bar.tone}`}
-                          style={{ left: `${left}%`, width: `${width}%` }}
+                          className="gantt-bar gantt-seg-colored"
+                          style={{
+                            left: `${left}%`,
+                            width: `${width}%`,
+                            background: fill.background,
+                            borderColor: fill.borderColor,
+                          }}
                           title={`${bar.label}\n${fmtShort(bar.start)} → ${fmtShort(bar.end)}${bar.status ? `\n${bar.status}` : ''}`}
                         >
                           <span className="gantt-bar-label">

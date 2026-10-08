@@ -14,6 +14,8 @@ export type GanttBar = {
   milestone: boolean;
   /** 0 = phase rollup, 1 = task, 2 = subtask */
   depth: number;
+  /** Phase/section index for Gantt color differentiation. */
+  paletteIndex: number;
 };
 
 export type GanttFilter = 'all' | 'tasks' | 'subtasks' | 'deadlines';
@@ -73,7 +75,8 @@ export function buildGanttBars(
   const sections = groupScheduleSections(rows);
   const bars: GanttBar[] = [];
 
-  for (const section of sections) {
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    const section = sections[sectionIndex]!;
     const childBars: GanttBar[] = [];
 
     for (const row of section.items) {
@@ -93,6 +96,7 @@ export function buildGanttBars(
         tone: statusTone(status),
         milestone: range.milestone,
         depth: row.row_kind === 'subtask' ? 2 : 1,
+        paletteIndex: sectionIndex,
       };
 
       if (filter === 'tasks' && row.row_kind !== 'task') continue;
@@ -126,6 +130,7 @@ export function buildGanttBars(
         tone: statusTone(phaseStatus),
         milestone: dayMs(minStart) === dayMs(maxEnd),
         depth: 0,
+        paletteIndex: sectionIndex,
       });
     }
 

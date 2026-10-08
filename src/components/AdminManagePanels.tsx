@@ -4,6 +4,7 @@ import {
   listEmployeesDirectory,
   listMembersOverview,
   listPracticeRoster,
+  clearAllSchedules,
   loadManagementOverview,
   removePracticeRosterMember,
   seedDefaultPracticeRoster,
@@ -100,6 +101,41 @@ export function AdminOverviewPanel({
               Schedules assigned <strong>{data.schedulesAssigned}</strong>
             </span>
           </div>
+          <h3>Employee schedules &amp; tasks</h3>
+          <p className="pd-muted">
+            Deletes every row in <span className="mono">pa_schedules</span> and{' '}
+            <span className="mono">pa_schedule_rows</span>. Project List data is unchanged. Staff
+            will see empty projects and can use <strong>Start schedule</strong> per job.
+          </p>
+          <button
+            type="button"
+            className="signout-btn admin-danger-btn"
+            disabled={busy}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  'Delete ALL project schedules and checklist tasks for the whole firm? This cannot be undone.',
+                )
+              ) {
+                return;
+              }
+              void (async () => {
+                onBusy(true);
+                onError(null);
+                try {
+                  const res = await clearAllSchedules();
+                  onMsg(res.message || 'All schedules cleared.');
+                  await load();
+                } catch (e) {
+                  onError(e instanceof Error ? e.message : 'Clear schedules failed');
+                } finally {
+                  onBusy(false);
+                }
+              })();
+            }}
+          >
+            Clear all schedules &amp; tasks
+          </button>
           <h3>Portal roles</h3>
           <ul className="admin-data-table-counts">
             {Object.entries(data.roles)

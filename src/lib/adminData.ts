@@ -170,14 +170,81 @@ export function clearAllSchedules() {
   return adminData<{ ok: boolean; message?: string }>({ action: 'clear_schedules' });
 }
 
+export type SyncAllSchedulesResponse = {
+  ok: boolean;
+  projects: number;
+  synced: number;
+  skippedNoPhases: number;
+  errors: string[];
+  startIndex?: number;
+  nextIndex?: number;
+  hasMore?: boolean;
+};
+
+export function syncAllSchedulesFromCoreChunk(opts?: {
+  startIndex?: number;
+  maxProjects?: number;
+  resetStoredOffset?: boolean;
+}) {
+  return adminData<SyncAllSchedulesResponse>({
+    action: 'sync_all_schedules_from_core',
+    startIndex: opts?.startIndex,
+    maxProjects: opts?.maxProjects,
+    resetStoredOffset: opts?.resetStoredOffset,
+  });
+}
+
+function isVercelHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  return h !== 'localhost' && h !== '127.0.0.1';
+}
+
+/** Run until every ACTIVE project has been processed (many short API calls on Vercel). */
+export async function syncAllSchedulesFromCorePaged(
+  onProgress?: (message: string) => void,
+): Promise<SyncAllSchedulesResponse> {
+  const onVercel = isVercelHost();
+  const maxProjects = onVercel ? 2 : 0;
+  let startIndex = 0;
+  let totals: SyncAllSchedulesResponse = {
+    ok: true,
+    projects: 0,
+    synced: 0,
+    skippedNoPhases: 0,
+    errors: [],
+  };
+  let first = true;
+  for (;;) {
+    onProgress?.(
+      first
+        ? 'Aligning employee schedules from CORE…'
+        : `Aligning schedules (from project ${startIndex + 1})…`,
+    );
+    const res = await syncAllSchedulesFromCoreChunk({
+      startIndex,
+      maxProjects,
+      resetStoredOffset: first,
+    });
+    first = false;
+    totals = {
+      ok: true,
+      projects: res.projects,
+      synced: totals.synced + res.synced,
+      skippedNoPhases: totals.skippedNoPhases + res.skippedNoPhases,
+      errors: [...totals.errors, ...res.errors],
+      nextIndex: res.nextIndex,
+      hasMore: res.hasMore,
+    };
+    if (!res.hasMore) break;
+    startIndex = res.nextIndex ?? 0;
+  }
+  return totals;
+}
+
+/** @deprecated Prefer syncAllSchedulesFromCorePaged on production. */
 export function syncAllSchedulesFromCore() {
-  return adminData<{
-    ok: boolean;
-    projects: number;
-    synced: number;
-    skippedNoPhases: number;
-    errors: string[];
-  }>({ action: 'sync_all_schedules_from_core' });
+  return syncAllSchedulesFromCorePaged();
 }
 
 export function resyncScheduleFromCore(projectKey: string) {

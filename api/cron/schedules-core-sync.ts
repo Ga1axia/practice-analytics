@@ -21,7 +21,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const sb = serviceSupabase();
-    const result = await syncAllSchedulesFromCore(sb);
+    const result = await syncAllSchedulesFromCore(sb, {
+      persistOffset: true,
+      activeOnly: true,
+    });
     res.status(200).json({
       ...result,
       ranAt: new Date().toISOString(),

@@ -19,7 +19,10 @@ import {
   mapCoreProjects,
   type ProjectInsert,
 } from '../_lib/bqeSyncBuild.js';
-import { loadExistingProjectKeys } from '../_lib/projectHoursFilter.js';
+import {
+  loadExistingProjectKeys,
+  projectLibraryHasRows,
+} from '../_lib/projectHoursFilter.js';
 import {
   persistFetchedTimeEntries,
   runTimeEntrySync,
@@ -227,9 +230,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         const warnings: string[] = [];
         const page = Number(body.page) > 0 ? Math.floor(Number(body.page)) : 0;
-        const pageSize = Math.min(Math.max(Number(body.pageSize) || 100, 25), 200);
-        const existingKeys = await loadExistingProjectKeys(sb);
-        const libraryExists = existingKeys.size > 0;
+        const onVercelHost = process.env.VERCEL === '1';
+        const defaultPageSize = onVercelHost ? 40 : 100;
+        const pageSize = Math.min(
+          Math.max(Number(body.pageSize) || defaultPageSize, 20),
+          onVercelHost ? 50 : 200,
+        );
+        const libraryExists = await projectLibraryHasRows(sb);
         const rawWhere = (body.projectWhere || '').trim();
         const query: Record<string, string> = {
           fields: BQE_PROJECT_LIST_FIELDS,
@@ -244,7 +251,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let projects: BqeProject[] = [];
         let hasMore = false;
         let usedUnfilteredFallback = false;
-        const onVercel = process.env.VERCEL === '1';
         if (page > 0) {
           const payload = await bqeGet<unknown>('/project', {
             ...query,
@@ -271,8 +277,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
           projects = await bqeListAll<BqeProject>('/project', 500, query);
         }
-        if (projects.length) {
-          projects = await hydrateProjectParents(projects, onVercel ? 6 : 40);
+        if (projects.length && !onVercelHost) {
+          projects = await hydrateProjectParents(projects, 40);
+        } else if (projects.length) {
+          projects = await hydrateProjectParents(projects, 3);
         }
 
         const mapped = mapCoreProjects(projects);
@@ -287,7 +295,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         let insertedProjects = 0;
         if (mapped.rows.length) {
-          const rows = await preserveExistingProjectFinancials(sb, mapped.rows);
+          const rows = onVercelHost
+            ? mapped.rows
+            : await preserveExistingProjectFinancials(sb, mapped.rows);
           const { error: upErr } = await sb
             .from('pa_projects')
             .upsert(rows as unknown as Record<string, unknown>[], {

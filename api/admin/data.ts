@@ -98,6 +98,12 @@ type Body = {
   employee?: string;
   team?: string;
   rosterId?: number;
+  /** sync_all_schedules_from_core */
+  startIndex?: number;
+  maxProjects?: number;
+  resetStoredOffset?: boolean;
+  persistOffset?: boolean;
+  activeOnly?: boolean;
 };
 
 async function countTable(sb: SupabaseClient, table: AdminTable): Promise<number> {
@@ -452,7 +458,13 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'sync_all_schedules_from_core') {
       const { syncAllSchedulesFromCore } = await import('../_lib/syncAllSchedulesFromCore.js');
-      const result = await syncAllSchedulesFromCore(sb);
+      const result = await syncAllSchedulesFromCore(sb, {
+        startIndex: body.startIndex,
+        maxProjects: body.maxProjects,
+        resetStoredOffset: body.resetStoredOffset === true,
+        persistOffset: body.persistOffset === true,
+        activeOnly: body.activeOnly !== false,
+      });
       res.status(200).json({ ok: true, ...result });
       return;
     }

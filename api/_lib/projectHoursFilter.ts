@@ -178,6 +178,15 @@ export async function loadExistingProjectKeys(sb: SupabaseClient): Promise<Set<s
   return keys;
 }
 
+/** Hobby-safe: one round trip instead of scanning the whole library on every BQE page. */
+export async function projectLibraryHasRows(sb: SupabaseClient): Promise<boolean> {
+  const { count, error } = await sb
+    .from('pa_projects')
+    .select('project', { count: 'exact', head: true });
+  if (error) throw new Error(`Load project library: ${error.message}`);
+  return (count ?? 0) > 0;
+}
+
 function walkToRoot(coreId: string, idToParentId: Map<string, string | null>): string {
   let cur = coreId;
   const seen = new Set<string>();

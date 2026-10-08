@@ -5,7 +5,7 @@ import {
   listMembersOverview,
   listPracticeRoster,
   clearAllSchedules,
-  syncAllSchedulesFromCore,
+  syncAllSchedulesFromCorePaged,
   loadManagementOverview,
   removePracticeRosterMember,
   seedDefaultPracticeRoster,
@@ -122,7 +122,7 @@ export function AdminOverviewPanel({
                 onBusy(true);
                 onError(null);
                 try {
-                  const res = await syncAllSchedulesFromCore();
+                  const res = await syncAllSchedulesFromCorePaged((line) => onMsg(line));
                   onMsg(
                     `CORE schedule sync: ${res.synced} project(s), ${res.skippedNoPhases} skipped (no phases), ${res.errors.length} error(s).`,
                   );

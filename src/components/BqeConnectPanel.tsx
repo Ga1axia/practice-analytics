@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useDashboard } from '../hooks/useDashboard';
 import { authHeaders } from '../lib/authToken';
+import { syncAllSchedulesFromCorePaged } from '../lib/adminData';
 
 type BqeStatus = {
   configured: boolean;
@@ -241,7 +242,7 @@ export function BqeConnectPanel() {
         }>({
           mode: 'projects',
           page,
-          pageSize: 80,
+          pageSize: onVercel ? 40 : 80,
           reset: page === 1,
           requireRecentHours: false,
         });
@@ -252,12 +253,16 @@ export function BqeConnectPanel() {
       }
 
       setMsg(
-        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written. Dashboard is refreshing…`,
+        `Step 2 — aligning employee schedules from CORE (paged on Vercel)…`,
+      );
+      const sched = await syncAllSchedulesFromCorePaged((line) => setMsg(line));
+      setMsg(
+        `Sync complete: ${teFetched} time rows · ${totalProjects} project rows · ${sched.synced} schedule(s) aligned (${sched.skippedNoPhases} skipped, ${sched.errors.length} errors). Refreshing…`,
       );
       await refreshStatus();
       await reload();
       setMsg(
-        `Sync complete: ${teFetched} time rows this run · ${totalProjects} project rows written (CORE status and billing type).`,
+        `Sync complete: ${totalProjects} CORE project rows · ${sched.synced} employee schedule(s) aligned from CORE phases.`,
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Sync failed');
@@ -374,9 +379,10 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync copies the CORE project list (status and hourly/fixed on every
-            phase). It does not re-import 96k time rows. Hobby functions die after ~10s —
-            Incremental time is a separate paged button. Set{' '}
+            Production sync pages the CORE project list (40 rows per step), then aligns
+            employee schedules from those phases (also paged). It does not re-import 96k time
+            rows — use Incremental time for new hours. Hobby functions cap at ~10s per step;
+            keep Sync from CORE running until it finishes. Set{' '}
             <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
             to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
           </>

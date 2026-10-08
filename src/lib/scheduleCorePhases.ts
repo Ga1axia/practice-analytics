@@ -1,6 +1,7 @@
 import { phaseDisplayName } from './phaseAbbrev';
 import type { ProjectNode } from './projectListHierarchy';
 import { ensureLeadMembership } from './projectMembers';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 export type CoreProjectPhase = {
@@ -15,11 +16,14 @@ export async function loadCorePhaseTitles(projectKey: string): Promise<string[]>
   return phases.map((p) => p.title);
 }
 
-export async function loadCorePhases(projectKey: string): Promise<CoreProjectPhase[]> {
+export async function loadCorePhases(
+  projectKey: string,
+  client: SupabaseClient = supabase,
+): Promise<CoreProjectPhase[]> {
   const key = projectKey.trim();
   if (!key) return [];
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('pa_projects')
     .select('project, phase, parent_project, sort_order, manager')
     .eq('row_kind', 'phase')

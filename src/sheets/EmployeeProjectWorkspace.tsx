@@ -44,17 +44,16 @@ import {
   dismissScheduleStartLater,
   getProjectStartDate,
   inferSchedulePresetKind,
-  parseProjectStartDate,
   scheduleNeedsStartPrompt,
   setProjectStartDate,
   type SchedulePresetKind,
 } from '../lib/scheduleAutofill';
 import { buildDeadlineEvents } from '../lib/scheduleDates';
 import { corePhasesFromProject } from '../lib/scheduleCorePhases';
-import { resyncProjectScheduleFromCore } from '../lib/scheduleCoreResync';
 import {
   applyProjectSchedulePreset,
   ensureProjectSchedule,
+  ensureProjectSchedulePhasesFromCore,
   saveProjectScheduleStartDate,
 } from '../lib/scheduleEnsure';
 import { fromDateInputValue, toDateInputValue } from '../lib/scheduleMutations';
@@ -158,8 +157,6 @@ export function EmployeeProjectWorkspace({
   const [startError, setStartError] = useState<string | null>(null);
   const [startDateText, setStartDateText] = useState('');
   const [teamMembers, setTeamMembers] = useState<ProjectMember[]>([]);
-  const [resyncBusy, setResyncBusy] = useState(false);
-  const [resyncMsg, setResyncMsg] = useState<string | null>(null);
   const [hoursScope, setHoursScopeState] = useState(() =>
     readHoursPhaseScope(employeeName, portalPrefs),
   );
@@ -246,16 +243,30 @@ export function EmployeeProjectWorkspace({
           autoDate: false,
           forceRefresh: true,
         });
+        const phased = isDemo
+          ? ensured
+          : await ensureProjectSchedulePhasesFromCore({
+              projectKey: project.key,
+              clientName: project.clientName,
+              title: project.title,
+              corePhases: corePhasesFromProject(project),
+              headerManager: project.row?.manager,
+              syncLeadMembership: true,
+              includeChecklistTasks: false,
+            });
         if (cancelled) return;
-        setDbRows(ensured.rows);
-        setScheduleMeta(ensured.meta);
+        const loaded = phased.error && !phased.rows.length ? ensured : phased;
+        setDbRows(loaded.rows);
+        setScheduleMeta(loaded.meta ?? ensured.meta);
         const savedStart =
           (ensured.meta?.start_date || '').trim() || getProjectStartDate(project.key);
         setStartDateText(savedStart ? toDateInputValue(savedStart) : toDateInputValue(new Date()));
-        const needs = scheduleNeedsStartPrompt(ensured.rows);
+        const needs = scheduleNeedsStartPrompt(loaded.rows);
         if (needs) clearScheduleStartDismiss(project.key);
         setShowStartPrompt(needs);
-        if (ensured.error) setStartError(ensured.error);
+        if (loaded.error || ensured.error) {
+          setStartError(loaded.error || ensured.error || null);
+        }
       } catch (e) {
         if (cancelled) return;
         setDbRows([]);
@@ -270,7 +281,7 @@ export function EmployeeProjectWorkspace({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [project.key, project.clientName, project.title]);
+  }, [project, isDemo]);
 
   async function onStartSchedule(input: { kickoff: Date; preset: SchedulePresetKind }) {
     setStartBusy(true);
@@ -318,46 +329,6 @@ export function EmployeeProjectWorkspace({
       setShowStartPrompt(true);
     } finally {
       setStartBusy(false);
-    }
-  }
-
-  async function onResyncFromCore() {
-    if (!scheduleMeta?.id || resyncBusy || usingDemo) return;
-    if (
-      !window.confirm(
-        'Resync schedule from CORE? Phase names and leads will update, and missing checklist tasks will be added. Existing tasks are kept.',
-      )
-    ) {
-      return;
-    }
-    setResyncBusy(true);
-    setResyncMsg(null);
-    try {
-      const res = await resyncProjectScheduleFromCore({
-        projectKey: project.key,
-        scheduleId: scheduleMeta.id,
-        preset: defaultPreset,
-        kickoff: startDateText
-          ? parseProjectStartDate(fromDateInputValue(startDateText)) ?? undefined
-          : undefined,
-        corePhases: corePhasesFromProject(project),
-        headerManager: project.row?.manager,
-        projectTitle: project.title,
-        projectCode: project.code,
-        clientName: project.clientName,
-      });
-      if (!res.ok) {
-        setResyncMsg(res.error);
-        return;
-      }
-      setDbRows(res.rows);
-      setResyncMsg(
-        `Updated ${res.stats.phasesAligned + res.stats.phasesAdded} phase(s), added ${res.stats.tasksAdded} task(s), refreshed ${res.stats.leadsEnsured} lead(s).`,
-      );
-    } catch (e) {
-      setResyncMsg(e instanceof Error ? e.message : 'Resync failed');
-    } finally {
-      setResyncBusy(false);
     }
   }
 
@@ -733,7 +704,6 @@ export function EmployeeProjectWorkspace({
             <p className="pd-muted">Loading tasks…</p>
           ) : (
             <>
-              {resyncMsg ? <p className="plist-upload-err">{resyncMsg}</p> : null}
               <ProjectTaskList
               projectKey={project.key}
               projectTitle={project.title}
@@ -744,8 +714,6 @@ export function EmployeeProjectWorkspace({
               canAssign={isLead && !usingDemo}
               assigneeOptions={teamMembers.map((m) => m.employee_name)}
               onRowsChange={setDbRows}
-              onResyncFromCore={isLead && !usingDemo && scheduleMeta?.id ? onResyncFromCore : undefined}
-              resyncBusy={resyncBusy}
               isLead={isLead}
               onStartSchedule={
                 needsSchedule

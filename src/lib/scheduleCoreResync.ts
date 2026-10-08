@@ -8,9 +8,12 @@ import type { SchedulePresetKind } from './scheduleAutofill';
 import { parseProjectStartDate } from './scheduleAutofill';
 import { buildDatedScheduleRows } from './scheduleDating';
 import { buildResyncedScheduleRows } from './scheduleCoreResyncMerge';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ScheduleRow } from './scheduleTypes';
 import { supabase } from './supabase';
 import { syncProjectMembersFromTimeEntries } from './projectMembers';
+
+type Db = SupabaseClient;
 
 export type ResyncStats = {
   phasesAligned: number;
@@ -21,17 +24,20 @@ export type ResyncStats = {
 
 export { buildResyncedScheduleRows } from './scheduleCoreResyncMerge';
 
-export async function persistResyncedScheduleRows(input: {
-  projectKey: string;
-  scheduleId: string;
-  merged: ScheduleRow[];
-  existing: ScheduleRow[];
-}): Promise<{ ok: true; rows: ScheduleRow[] } | { ok: false; error: string }> {
+export async function persistResyncedScheduleRows(
+  input: {
+    projectKey: string;
+    scheduleId: string;
+    merged: ScheduleRow[];
+    existing: ScheduleRow[];
+  },
+  client: Db = supabase,
+): Promise<{ ok: true; rows: ScheduleRow[] } | { ok: false; error: string }> {
   const mergedIds = new Set(input.merged.filter((r) => r.id).map((r) => r.id));
   const toDelete = input.existing.filter((r) => r.id && !mergedIds.has(r.id)).map((r) => r.id);
 
   for (const id of toDelete) {
-    const { error } = await supabase.from('pa_schedule_rows').delete().eq('id', id);
+    const { error } = await client.from('pa_schedule_rows').delete().eq('id', id);
     if (error) return { ok: false, error: error.message };
   }
 
@@ -56,7 +62,7 @@ export async function persistResyncedScheduleRows(input: {
     };
 
     if (row.id) {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('pa_schedule_rows')
         .update(payload)
         .eq('id', row.id)
@@ -65,7 +71,7 @@ export async function persistResyncedScheduleRows(input: {
       if (error || !data) return { ok: false, error: error?.message || 'Update failed' };
       final.push(data as ScheduleRow);
     } else {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('pa_schedule_rows')
         .insert(payload)
         .select('*')
@@ -80,17 +86,20 @@ export async function persistResyncedScheduleRows(input: {
   return { ok: true, rows: final };
 }
 
-export async function resyncProjectScheduleFromCore(input: {
-  projectKey: string;
-  scheduleId: string;
-  kickoff?: Date;
-  preset?: SchedulePresetKind;
-  corePhases?: CoreProjectPhase[];
-  headerManager?: string | null;
-  projectTitle?: string;
-  projectCode?: string | null;
-  clientName?: string;
-}): Promise<
+export async function resyncProjectScheduleFromCore(
+  input: {
+    projectKey: string;
+    scheduleId: string;
+    kickoff?: Date;
+    preset?: SchedulePresetKind;
+    corePhases?: CoreProjectPhase[];
+    headerManager?: string | null;
+    projectTitle?: string;
+    projectCode?: string | null;
+    clientName?: string;
+  },
+  client: Db = supabase,
+): Promise<
   | { ok: true; rows: ScheduleRow[]; stats: ResyncStats }
   | { ok: false; error: string }
 > {
@@ -99,7 +108,7 @@ export async function resyncProjectScheduleFromCore(input: {
     return { ok: false, error: 'Schedule not ready' };
   }
 
-  const { data: existing, error: loadErr } = await supabase
+  const { data: existing, error: loadErr } = await client
     .from('pa_schedule_rows')
     .select('*')
     .eq('schedule_id', input.scheduleId)
@@ -108,7 +117,7 @@ export async function resyncProjectScheduleFromCore(input: {
   if (loadErr) return { ok: false, error: loadErr.message };
 
   const corePhases =
-    input.corePhases?.length ? input.corePhases : await loadCorePhases(projectKey);
+    input.corePhases?.length ? input.corePhases : await loadCorePhases(projectKey, client);
   if (!corePhases.length) {
     return { ok: false, error: 'No CORE phases on this project — sync from CORE first.' };
   }
@@ -117,7 +126,7 @@ export async function resyncProjectScheduleFromCore(input: {
     input.kickoff ||
     parseProjectStartDate(
       (
-        await supabase
+        await client
           .from('pa_schedules')
           .select('start_date')
           .eq('id', input.scheduleId)
@@ -139,12 +148,15 @@ export async function resyncProjectScheduleFromCore(input: {
     templateDrafts,
   });
 
-  const saved = await persistResyncedScheduleRows({
-    projectKey,
-    scheduleId: input.scheduleId,
-    merged,
-    existing: (existing || []) as ScheduleRow[],
-  });
+  const saved = await persistResyncedScheduleRows(
+    {
+      projectKey,
+      scheduleId: input.scheduleId,
+      merged,
+      existing: (existing || []) as ScheduleRow[],
+    },
+    client,
+  );
   if (!saved.ok) return saved;
 
   const leads = await ensureCorePhaseLeads({

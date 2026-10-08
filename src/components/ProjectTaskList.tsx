@@ -64,8 +64,6 @@ export function ProjectTaskList({
   assigneeOptions = [],
   onRowsChange,
   onStartSchedule,
-  onResyncFromCore,
-  resyncBusy = false,
   isLead = false,
 }: {
   projectKey: string;
@@ -81,9 +79,6 @@ export function ProjectTaskList({
   onRowsChange?: (rows: ScheduleRow[]) => void;
   /** Shown when there are zero checklist tasks. */
   onStartSchedule?: () => void;
-  /** Lead-only: align phases/tasks/leads with CORE. */
-  onResyncFromCore?: () => void | Promise<void>;
-  resyncBusy?: boolean;
 }) {
   const [view, setView] = useState<'open' | 'all' | 'done'>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -493,22 +488,11 @@ export function ProjectTaskList({
             {adding ? 'Close' : 'Add task'}
           </button>
         ) : null}
-        {onResyncFromCore && scheduleId ? (
-          <button
-            type="button"
-            className="cp-text-btn emp-resync-core-btn"
-            disabled={resyncBusy || Boolean(busyId)}
-            title="Align phases with CORE, add missing checklist tasks, refresh phase leads"
-            onClick={() => void onResyncFromCore()}
-          >
-            {resyncBusy ? 'Resyncing…' : 'Resync from CORE'}
-          </button>
-        ) : null}
       </div>
 
       <p className="pd-muted emp-project-tasks-hint">
-        Check off work, use the edit button for details and subtasks, or resync phases from CORE to
-        fill in checklist tasks.
+        Phases come from the Project List (CORE). Check off work or use the edit button for details
+        and subtasks; project leads can start the checklist when it is empty.
       </p>
 
       {adding && scheduleId ? (

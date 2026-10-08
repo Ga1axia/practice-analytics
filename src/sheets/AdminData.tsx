@@ -11,6 +11,7 @@ import {
   queryAdminTable,
   seedMembersFromTimeEntries,
   seedSchedulesFromTimeEntries,
+  resyncScheduleFromCore,
   setScheduleStartDate,
   updateAdminRows,
   upsertAdminRows,
@@ -600,6 +601,34 @@ export function AdminData() {
                       >
                         Save
                       </button>
+                      {r.schedule_id ? (
+                        <button
+                          type="button"
+                          className="signout-btn"
+                          disabled={busy}
+                          style={{ marginLeft: 6 }}
+                          onClick={() =>
+                            void run('Resync CORE', async () => {
+                              if (
+                                !window.confirm(
+                                  `Resync schedule from CORE for “${r.project}”? Adds missing checklist tasks and aligns phase leads.`,
+                                )
+                              ) {
+                                return 'cancelled';
+                              }
+                              const res = await resyncScheduleFromCore(r.project);
+                              await loadSchedules();
+                              if (!res.ok) throw new Error('Resync failed');
+                              const s = res.stats;
+                              return s
+                                ? `phases ${s.phasesAligned + s.phasesAdded}, +${s.tasksAdded} tasks, ${s.leadsEnsured} leads`
+                                : `${res.rowCount ?? 0} rows`;
+                            })
+                          }
+                        >
+                          Resync CORE
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

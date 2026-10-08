@@ -170,6 +170,20 @@ export function clearAllSchedules() {
   return adminData<{ ok: boolean; message?: string }>({ action: 'clear_schedules' });
 }
 
+export function resyncScheduleFromCore(projectKey: string) {
+  return adminData<{
+    ok: boolean;
+    stats?: {
+      phasesAligned: number;
+      phasesAdded: number;
+      tasksAdded: number;
+      leadsEnsured: number;
+    };
+    rowCount?: number;
+    error?: string;
+  }>({ action: 'resync_schedule_from_core', projectKey });
+}
+
 export function clearProjectList() {
   return adminData<{ ok: boolean; result?: unknown }>({ action: 'clear_projects' });
 }

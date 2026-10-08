@@ -12,7 +12,14 @@ import {
   presetIncludesDates,
   setProjectStartDate,
 } from './scheduleAutofill';
-import { loadCorePhaseTitles } from './scheduleCorePhases';
+import {
+  ensureCorePhaseLeads,
+  loadCorePhases,
+  loadCorePhaseTitles,
+  type CoreProjectPhase,
+} from './scheduleCorePhases';
+import { persistResyncedScheduleRows } from './scheduleCoreResync';
+import { buildResyncedScheduleRows } from './scheduleCoreResyncMerge';
 import {
   buildDatedScheduleRows,
   proposeMissingDates,
@@ -602,10 +609,24 @@ export async function applyProjectSchedulePreset(input: {
     }
   }
 
+  const aligned = await ensureProjectSchedulePhasesFromCore({
+    projectKey: input.projectKey,
+    clientName: input.clientName,
+    title: input.title,
+    corePhases: undefined,
+    syncLeadMembership: true,
+    includeChecklistTasks: false,
+    kickoff: input.kickoff,
+    preset: input.preset,
+  });
+  if (aligned.rows.length) list = aligned.rows;
+  if (aligned.meta) meta = aligned.meta;
+
   const result: EnsureScheduleResult = {
     projectKey: input.projectKey,
     created,
     dated: list.filter((r) => r.target_end).length,
+    error: aligned.error || undefined,
     meta,
     rows: list,
   };
@@ -638,3 +659,166 @@ export async function ensureProjectSchedules(
 
   return { created, dated, errors };
 }
+
+async function getOrCreateScheduleMeta(input: {
+  projectKey: string;
+  clientName: string;
+  title: string;
+}): Promise<{ meta: ScheduleMeta | null; created: boolean; error?: string }> {
+  const found = await loadScheduleMeta(input.projectKey);
+  if (found.error) return { meta: null, created: false, error: found.error };
+  if (found.meta) return { meta: found.meta, created: false };
+
+  const insertPayload: Record<string, string> = {
+    project_key: input.projectKey,
+    client_name: input.clientName,
+    title: `Project Schedule — ${input.title}`,
+  };
+
+  let { data, error } = await supabase
+    .from('pa_schedules')
+    .insert(insertPayload)
+    .select(SCHEDULE_META_COLS)
+    .single();
+
+  if (error && /start_date/i.test(error.message)) {
+    const legacy = await supabase
+      .from('pa_schedules')
+      .insert(insertPayload)
+      .select(SCHEDULE_META_COLS_LEGACY)
+      .single();
+    data = legacy.data as typeof data;
+    error = legacy.error;
+  }
+
+  if (error && /duplicate|unique|already exists/i.test(error.message)) {
+    const again = await loadScheduleMeta(input.projectKey);
+    return { meta: again.meta, created: false, error: again.error };
+  }
+
+  if (error || !data) {
+    return { meta: null, created: false, error: error?.message || 'Failed to create schedule' };
+  }
+
+  return { meta: data as ScheduleMeta, created: true };
+}
+
+/**
+ * Ensure schedule phase rows match CORE (names + phase managers).
+ * Does not add checklist tasks unless `includeChecklistTasks` is true (admin resync).
+ */
+export async function ensureProjectSchedulePhasesFromCore(input: {
+  projectKey: string;
+  clientName: string;
+  title: string;
+  corePhases?: CoreProjectPhase[];
+  headerManager?: string | null;
+  syncLeadMembership?: boolean;
+  includeChecklistTasks?: boolean;
+  kickoff?: Date;
+  preset?: SchedulePresetKind;
+}): Promise<EnsureScheduleResult> {
+  invalidateScheduleCache(input.projectKey);
+
+  const metaRes = await getOrCreateScheduleMeta({
+    projectKey: input.projectKey,
+    clientName: input.clientName,
+    title: input.title,
+  });
+  if (!metaRes.meta) {
+    return {
+      projectKey: input.projectKey,
+      created: metaRes.created,
+      dated: 0,
+      error: metaRes.error,
+      meta: null,
+      rows: [],
+    };
+  }
+
+  const meta = metaRes.meta;
+  const { data: existingRows, error: loadErr } = await supabase
+    .from('pa_schedule_rows')
+    .select('*')
+    .eq('schedule_id', meta.id)
+    .order('sort_order', { ascending: true });
+
+  if (loadErr) {
+    return {
+      projectKey: input.projectKey,
+      created: metaRes.created,
+      dated: 0,
+      error: loadErr.message,
+      meta,
+      rows: [],
+    };
+  }
+
+  const corePhases =
+    input.corePhases?.length ? input.corePhases : await loadCorePhases(input.projectKey);
+  if (!corePhases.length) {
+    const rows = (existingRows || []) as ScheduleRow[];
+    const result: EnsureScheduleResult = {
+      projectKey: input.projectKey,
+      created: metaRes.created,
+      dated: 0,
+      meta,
+      rows,
+    };
+    setCachedSchedule(result);
+    return result;
+  }
+
+  const kickoff = input.kickoff || new Date();
+  const templateDrafts = input.includeChecklistTasks
+    ? buildDatedScheduleRows(kickoff, {
+        preset: input.preset,
+        includeDates: false,
+        corePhaseTitles: corePhases.map((p) => p.title),
+      })
+    : [];
+
+  const { rows: merged } = buildResyncedScheduleRows({
+    scheduleId: meta.id,
+    existing: (existingRows || []) as ScheduleRow[],
+    corePhases,
+    templateDrafts,
+  });
+
+  const saved = await persistResyncedScheduleRows({
+    projectKey: input.projectKey,
+    scheduleId: meta.id,
+    merged,
+    existing: (existingRows || []) as ScheduleRow[],
+  });
+
+  if (!saved.ok) {
+    return {
+      projectKey: input.projectKey,
+      created: metaRes.created,
+      dated: 0,
+      error: saved.error,
+      meta,
+      rows: (existingRows || []) as ScheduleRow[],
+    };
+  }
+
+  if (input.syncLeadMembership) {
+    await ensureCorePhaseLeads({
+      projectKey: input.projectKey,
+      headerManager: input.headerManager,
+      phases: corePhases,
+    });
+  }
+
+  const result: EnsureScheduleResult = {
+    projectKey: input.projectKey,
+    created: metaRes.created,
+    dated: saved.rows.filter((r) => r.target_end).length,
+    meta,
+    rows: saved.rows,
+  };
+  setCachedSchedule(result);
+  return result;
+}
+

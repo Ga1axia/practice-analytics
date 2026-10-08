@@ -450,6 +450,49 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (action === 'resync_schedule_from_core') {
+      const projectKey = String(body.projectKey || '').trim();
+      if (!projectKey) {
+        res.status(400).json({ error: 'projectKey required' });
+        return;
+      }
+      const { data: sched, error: schedErr } = await sb
+        .from('pa_schedules')
+        .select('id, start_date, client_name, title')
+        .eq('project_key', projectKey)
+        .maybeSingle();
+      if (schedErr) throw new Error(schedErr.message);
+      if (!sched?.id) {
+        res.status(400).json({ error: 'No schedule assigned — set a start date or create a schedule first.' });
+        return;
+      }
+      const { resyncProjectScheduleFromCore } = await import(
+        '../../src/lib/scheduleCoreResync.js'
+      );
+      const { data: header } = await sb
+        .from('pa_projects')
+        .select('manager, client, project')
+        .eq('row_kind', 'project')
+        .eq('project', projectKey)
+        .maybeSingle();
+      const result = await resyncProjectScheduleFromCore(
+        {
+          projectKey,
+          scheduleId: sched.id as string,
+          headerManager: (header?.manager as string) || null,
+          projectTitle: projectKey,
+          clientName: (header?.client as string) || (sched.client_name as string) || '',
+        },
+        sb,
+      );
+      if (!result.ok) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.status(200).json({ ok: true, stats: result.stats, rowCount: result.rows.length });
+      return;
+    }
+
     if (action === 'set_schedule_start') {
       const projectKey = String(body.projectKey || '').trim();
       if (!projectKey) {
@@ -1114,6 +1157,7 @@ async function handleAdminData(req: VercelRequest, res: VercelResponse) {
         'sql_count',
         'project_schedules',
         'set_schedule_start',
+        'resync_schedule_from_core',
         'management_overview',
         'employees_directory',
         'members_overview',

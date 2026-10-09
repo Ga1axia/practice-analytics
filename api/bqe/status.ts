@@ -51,6 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hasClientId: !!cfg.clientId,
       hasClientSecret: !!cfg.clientSecret,
       hasRedirectUri: !!cfg.redirectUri,
+      redirectUri: cfg.redirectUri || null,
       hasServiceRole: serviceOk,
       connected: !!conn,
       apiEndpoint: conn?.api_endpoint || null,

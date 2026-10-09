@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { BQE_IDENTITY_BASE, BQE_SCOPES, requireBqeConfig } from '../_lib/bqe.js';
+import { saveBqeOAuthState } from '../_lib/bqeOAuthState.js';
 import { requireAdmin } from '../_lib/requireAdmin.js';
 
 /**
@@ -21,7 +22,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       JSON.stringify({ n: Math.random().toString(36).slice(2), u: admin.userId }),
     ).toString('base64url');
 
-    // Persist state briefly via cookie for CSRF check on callback
+    await saveBqeOAuthState(state, admin.userId);
+
+    // Cookie backup when DB state table is unavailable
     const secure =
       process.env.NODE_ENV === 'production' ||
       (process.env.BQE_APP_ORIGIN || '').startsWith('https://');
@@ -37,7 +40,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('state', state);
 
-    res.status(200).json({ authorizeUrl: url.toString() });
+    res.status(200).json({
+      authorizeUrl: url.toString(),
+      redirectUri,
+      hint:
+        'Register redirectUri exactly in the BQE Developer Portal. CSP console errors on a blank BQE page usually mean redirect_uri mismatch.',
+    });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'BQE connect failed' });
   }

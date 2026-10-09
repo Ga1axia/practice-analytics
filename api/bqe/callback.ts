@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { exchangeCodeForTokens, saveConnection } from '../_lib/bqe.js';
+import { consumeBqeOAuthState } from '../_lib/bqeOAuthState.js';
 
 /**
  * OAuth redirect target. Exchanges ?code= for tokens and stores them.
@@ -32,10 +33,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const cookie = String(req.headers.cookie || '');
   const match = cookie.match(/(?:^|;\s*)bqe_oauth_state=([^;]+)/);
-  const expected = match?.[1] ? decodeURIComponent(match[1]) : '';
-  if (!code || !state || !expected || state !== expected) {
+  const cookieState = match?.[1] ? decodeURIComponent(match[1]) : '';
+  const dbState = state ? await consumeBqeOAuthState(state) : null;
+  const stateOk =
+    !!code &&
+    !!state &&
+    (dbState != null || (!!cookieState && state === cookieState));
+  if (!stateOk) {
     res.setHeader('Set-Cookie', clearCookie);
-    res.redirect(302, `${appOrigin}/?sheet=exec&bqe=error&error=invalid_state`);
+    const detail =
+      !code || !state
+        ? 'missing_code_or_state'
+        : 'invalid_state — use the same site URL as BQE_REDIRECT_URI (Vercel env + BQE Developer Portal)';
+    res.redirect(302, `${appOrigin}/?sheet=exec&bqe=error&error=${encodeURIComponent(detail)}`);
     return;
   }
 

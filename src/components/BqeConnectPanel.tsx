@@ -9,6 +9,7 @@ type BqeStatus = {
   hasClientId: boolean;
   hasClientSecret: boolean;
   hasRedirectUri: boolean;
+  redirectUri?: string | null;
   hasServiceRole?: boolean;
   connected: boolean;
   apiEndpoint: string | null;
@@ -189,8 +190,17 @@ export function BqeConnectPanel() {
     setMsg(null);
     setErr(null);
     try {
-      const res = await fetch('/api/bqe/connect', { headers: await authHeaders() });
-      const body = await readApiJson<{ authorizeUrl?: string; error?: string; detail?: string }>(res);
+      const res = await fetch('/api/bqe/connect', {
+        headers: await authHeaders(),
+        credentials: 'same-origin',
+      });
+      const body = await readApiJson<{
+        authorizeUrl?: string;
+        redirectUri?: string;
+        hint?: string;
+        error?: string;
+        detail?: string;
+      }>(res);
       if (!res.ok || !body.authorizeUrl) {
         throw new Error(apiErrorMessage(body, 'Could not start BQE connect'));
       }
@@ -420,7 +430,9 @@ export function BqeConnectPanel() {
             <span className="mono">CORE_CLIENT_SECRET</span> (not a generic CORE_* prefix).
             Also set <span className="mono">BQE_REDIRECT_URI</span> /{' '}
             <span className="mono">BQE_APP_ORIGIN</span> to this site URL and register the
-            callback in the BQE Developer Portal.
+            callback in the BQE Developer Portal. If Reconnect shows a broken BQE page with CSP
+            errors in the console, BQE rejected the redirect URI — match the callback URL above
+            exactly in the Developer Portal.
           </>
         ) : (
           <>
@@ -439,6 +451,18 @@ export function BqeConnectPanel() {
             Env: {status.configured ? 'ready' : `missing ${missing.join(', ') || 'config'}`}
             {onVercel ? ' · host: Vercel' : ' · host: local'}
           </div>
+          {status.redirectUri ? (
+            <div>
+              OAuth callback: <span className="mono">{status.redirectUri}</span>
+              {typeof window !== 'undefined' &&
+              status.redirectUri !== `${window.location.origin}/api/bqe/callback` ? (
+                <span style={{ color: 'var(--danger, #c0392b)' }}>
+                  {' '}
+                  — does not match this browser origin; fix BQE_REDIRECT_URI or use that host.
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <div>
             Status:{' '}
             {status.connected

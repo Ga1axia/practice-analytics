@@ -68,7 +68,7 @@ async function readApiJson<T>(res: Response): Promise<T> {
     const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 280);
     if (/A server error has occurred/i.test(snippet)) {
       throw new Error(
-        'Vercel timed out (Hobby ~10s). Sync now runs in small steps — retry Sync from CORE. Or upgrade to Pro for longer functions. Ensure CORE_* + SUPABASE_SERVICE_ROLE_KEY are set in Vercel Project → Settings → Environment Variables.',
+        'Vercel timed out (Hobby ~10s per step). Leave Sync from CORE running — each page is fetch + save. Or upgrade to Pro. Server env: CORE_CLIENT_ID, CORE_CLIENT_SECRET, BQE_REDIRECT_URI, BQE_APP_ORIGIN, SUPABASE_SERVICE_ROLE_KEY (Status “Env: ready” means these are set).',
       );
     }
     if (/ECONNREFUSED|Local API is not running/i.test(snippet)) {
@@ -233,23 +233,57 @@ export function BqeConnectPanel() {
 
       let page = 1;
       let totalProjects = 0;
+      const projectPageSize = onVercel ? 12 : 80;
       for (;;) {
-        setMsg(`Projects page ${page}…`);
-        const pBody = await postSync<{
-          hasMore?: boolean;
-          insertedProjects?: number;
-          message?: string;
-        }>({
-          mode: 'projects',
-          page,
-          pageSize: onVercel ? 40 : 80,
-          reset: page === 1,
-          requireRecentHours: false,
-        });
-        totalProjects += pBody.insertedProjects || 0;
-        if (!pBody.hasMore) break;
+        if (onVercel) {
+          setMsg(`Projects page ${page} — fetch from CORE…`);
+          const fetched = await postSync<{
+            hasMore?: boolean;
+            rows?: Record<string, unknown>[];
+            coreProjects?: number;
+            warnings?: string[];
+          }>({
+            mode: 'projects_fetch',
+            page,
+            pageSize: projectPageSize,
+            reset: page === 1,
+            requireRecentHours: false,
+          });
+          setMsg(`Projects page ${page} — save to library…`);
+          const pBody = await postSync<{
+            hasMore?: boolean;
+            insertedProjects?: number;
+            message?: string;
+          }>({
+            mode: 'projects_commit',
+            page,
+            pageSize: projectPageSize,
+            reset: page === 1,
+            rows: fetched.rows,
+            hasMore: fetched.hasMore,
+            coreProjects: fetched.coreProjects,
+            syncWarnings: fetched.warnings,
+          });
+          totalProjects += pBody.insertedProjects || 0;
+          if (!fetched.hasMore) break;
+        } else {
+          setMsg(`Projects page ${page}…`);
+          const pBody = await postSync<{
+            hasMore?: boolean;
+            insertedProjects?: number;
+            message?: string;
+          }>({
+            mode: 'projects',
+            page,
+            pageSize: projectPageSize,
+            reset: page === 1,
+            requireRecentHours: false,
+          });
+          totalProjects += pBody.insertedProjects || 0;
+          if (!pBody.hasMore) break;
+        }
         page += 1;
-        if (page > 120) break;
+        if (page > 200) break;
       }
 
       setMsg(
@@ -379,12 +413,14 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync pages the CORE project list (40 rows per step), then aligns
-            employee schedules from those phases (also paged). It does not re-import 96k time
-            rows — use Incremental time for new hours. Hobby functions cap at ~10s per step;
-            keep Sync from CORE running until it finishes. Set{' '}
-            <span className="mono">BQE_REDIRECT_URI</span> / <span className="mono">BQE_APP_ORIGIN</span>{' '}
-            to this site URL in Vercel env, and register the same callback in the BQE Developer Portal.
+            Production sync pulls CORE in small steps (12 projects per step: fetch, then save),
+            then aligns employee schedules (also paged). Time is separate — use Incremental
+            time for new hours. OAuth uses{' '}
+            <span className="mono">CORE_CLIENT_ID</span> and{' '}
+            <span className="mono">CORE_CLIENT_SECRET</span> (not a generic CORE_* prefix).
+            Also set <span className="mono">BQE_REDIRECT_URI</span> /{' '}
+            <span className="mono">BQE_APP_ORIGIN</span> to this site URL and register the
+            callback in the BQE Developer Portal.
           </>
         ) : (
           <>

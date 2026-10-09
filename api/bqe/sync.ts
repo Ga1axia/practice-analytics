@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   BQE_PROJECT_LIST_FIELDS,
+  BQE_PROJECT_LIST_FIELDS_VERCEL,
   BqeHttpError,
   bqeGet,
   bqeListAll,
@@ -33,7 +34,14 @@ import { requireAdmin } from '../_lib/requireAdmin.js';
 type Sb = ReturnType<typeof serviceSupabase>;
 
 type SyncBody = {
-  mode?: 'historical' | 'incremental' | 'dry_run' | 'aggregates' | 'projects';
+  mode?:
+    | 'historical'
+    | 'incremental'
+    | 'dry_run'
+    | 'aggregates'
+    | 'projects'
+    | 'projects_fetch'
+    | 'projects_commit';
   since?: string;
   until?: string;
   /** Months of time/expense lookback for aggregates (default 2; invoices are all dates on active projects). */
@@ -52,6 +60,11 @@ type SyncBody = {
    * Kept so older clients that still send this flag do not fail.
    */
   requireRecentHours?: boolean;
+  /** projects_commit — rows from a prior projects_fetch call */
+  rows?: ProjectInsert[];
+  hasMore?: boolean;
+  coreProjects?: number;
+  syncWarnings?: string[];
 };
 
 async function clearTable(sb: Sb, table: string) {
@@ -164,6 +177,140 @@ function parseBody(req: VercelRequest): SyncBody {
   return raw as SyncBody;
 }
 
+function vercelProjectPageSize(body: SyncBody): number {
+  const onVercelHost = process.env.VERCEL === '1';
+  const defaultPageSize = onVercelHost ? 12 : 100;
+  return Math.min(
+    Math.max(Number(body.pageSize) || defaultPageSize, 8),
+    onVercelHost ? 20 : 200,
+  );
+}
+
+async function pullCoreProjectPage(body: SyncBody): Promise<{
+  page: number;
+  pageSize: number;
+  projects: BqeProject[];
+  rows: ProjectInsert[];
+  hasMore: boolean;
+  warnings: string[];
+  usedUnfilteredFallback: boolean;
+  projectWhere: string | null;
+}> {
+  const warnings: string[] = [];
+  const page = Number(body.page) > 0 ? Math.floor(Number(body.page)) : 0;
+  const onVercelHost = process.env.VERCEL === '1';
+  const pageSize = vercelProjectPageSize(body);
+  const rawWhere = (body.projectWhere || '').trim();
+  const query: Record<string, string> = {
+    fields: onVercelHost ? BQE_PROJECT_LIST_FIELDS_VERCEL : BQE_PROJECT_LIST_FIELDS,
+  };
+  if (rawWhere && rawWhere !== '*' && !/^all$/i.test(rawWhere)) {
+    query.where = rawWhere;
+  }
+  if (query.where) warnings.push(`CORE project fetch (${query.where})`);
+  else warnings.push('CORE project fetch (all statuses — phase Completed included)');
+
+  let projects: BqeProject[] = [];
+  let hasMore = false;
+  let usedUnfilteredFallback = false;
+  if (page > 0) {
+    const payload = await bqeGet<unknown>('/project', {
+      ...query,
+      page: `${page},${pageSize}`,
+    });
+    projects = asProjectList(payload);
+    if (
+      page === 1 &&
+      !rawWhere &&
+      projects.length === 0 &&
+      query.where === CORE_PROJECT_WHERE_ACTIVE
+    ) {
+      delete query.where;
+      usedUnfilteredFallback = true;
+      warnings.push('CORE status=0 returned 0 rows — paging all projects');
+      const retry = await bqeGet<unknown>('/project', {
+        ...query,
+        page: `${page},${pageSize}`,
+      });
+      projects = asProjectList(retry);
+    }
+    hasMore = projects.length >= pageSize;
+  } else {
+    projects = await bqeListAll<BqeProject>('/project', 500, query);
+  }
+
+  if (projects.length && !onVercelHost) {
+    projects = await hydrateProjectParents(projects, 40);
+  }
+
+  const mapped = mapCoreProjects(projects);
+  if (mapped.excludedCount) {
+    warnings.push(
+      `Excluded ${mapped.excludedCount} test / Internal Office rows from this page`,
+    );
+  }
+
+  return {
+    page,
+    pageSize,
+    projects,
+    rows: mapped.rows,
+    hasMore,
+    warnings,
+    usedUnfilteredFallback,
+    projectWhere: query.where || null,
+  };
+}
+
+async function commitCoreProjectPage(
+  sb: Sb,
+  body: SyncBody,
+  pulled: {
+    page: number;
+    rows: ProjectInsert[];
+    hasMore: boolean;
+    warnings: string[];
+    coreProjects: number;
+  },
+): Promise<{ insertedProjects: number; libraryExists: boolean; message: string }> {
+  const page = pulled.page;
+  const libraryExists = await projectLibraryHasRows(sb);
+  if (!libraryExists && (body.reset || page <= 1)) {
+    await clearTable(sb, 'pa_projects');
+  }
+
+  let insertedProjects = 0;
+  if (pulled.rows.length) {
+    const onVercelHost = process.env.VERCEL === '1';
+    const rows = onVercelHost
+      ? pulled.rows
+      : await preserveExistingProjectFinancials(sb, pulled.rows);
+    const { error: upErr } = await sb
+      .from('pa_projects')
+      .upsert(rows as unknown as Record<string, unknown>[], { onConflict: 'project' });
+    if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
+    insertedProjects = rows.length;
+  }
+
+  const msg =
+    page > 0
+      ? `Projects page ${page}: CORE ${pulled.coreProjects} → +${insertedProjects} rows` +
+        (pulled.hasMore ? ' (more…)' : ' (done)')
+      : `Projects sync: ${pulled.coreProjects} CORE → ${insertedProjects} rows`;
+
+  await sb
+    .from('pa_bqe_connection')
+    .update({
+      last_sync_at: new Date().toISOString(),
+      last_sync_status: pulled.warnings.length ? 'ok_partial' : 'ok',
+      last_sync_message: msg.slice(0, 900),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', 1);
+
+  return { insertedProjects, libraryExists, message: msg };
+}
+
 /** Allow longer CORE pagination + DB replace on Vercel. */
 export const config = { maxDuration: 300 };
 
@@ -224,117 +371,90 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // --- Projects (paged on Vercel; full list locally) ---
+    if (mode === 'projects_fetch') {
+      try {
+        const pulled = await pullCoreProjectPage(body);
+        res.status(200).json({
+          ok: true,
+          mode: 'projects_fetch',
+          page: pulled.page || null,
+          pageSize: pulled.page > 0 ? pulled.pageSize : null,
+          hasMore: pulled.hasMore,
+          coreProjects: pulled.projects.length,
+          rows: pulled.rows,
+          usedUnfilteredFallback: pulled.usedUnfilteredFallback,
+          projectWhere: pulled.projectWhere,
+          warnings: pulled.warnings,
+          message: `Fetched CORE page ${pulled.page} (${pulled.projects.length} records)`,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'projects fetch failed';
+        res.status(500).json({ error: msg });
+      }
+      return;
+    }
+
+    if (mode === 'projects_commit') {
+      const sb = serviceSupabase();
+      try {
+        const page = Number(body.page) > 0 ? Math.floor(Number(body.page)) : 0;
+        const rows = Array.isArray(body.rows) ? (body.rows as ProjectInsert[]) : [];
+        const warnings = Array.isArray(body.syncWarnings)
+          ? body.syncWarnings.map(String)
+          : [];
+        const coreProjects =
+          typeof body.coreProjects === 'number' ? body.coreProjects : rows.length;
+        const hasMore = body.hasMore === true;
+        const committed = await commitCoreProjectPage(sb, body, {
+          page,
+          rows,
+          hasMore,
+          warnings,
+          coreProjects,
+        });
+        res.status(200).json({
+          ok: true,
+          mode: 'projects_commit',
+          page: page || null,
+          hasMore,
+          coreProjects,
+          insertedProjects: committed.insertedProjects,
+          libraryExists: committed.libraryExists,
+          warnings,
+          message: committed.message,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'projects commit failed';
+        res.status(500).json({ error: msg });
+      }
+      return;
+    }
+
+    // --- Projects (single call — local; Vercel should use fetch + commit) ---
     if (mode === 'projects') {
       const sb = serviceSupabase();
       try {
-        const warnings: string[] = [];
-        const page = Number(body.page) > 0 ? Math.floor(Number(body.page)) : 0;
-        const onVercelHost = process.env.VERCEL === '1';
-        const defaultPageSize = onVercelHost ? 40 : 100;
-        const pageSize = Math.min(
-          Math.max(Number(body.pageSize) || defaultPageSize, 20),
-          onVercelHost ? 50 : 200,
-        );
-        const libraryExists = await projectLibraryHasRows(sb);
-        const rawWhere = (body.projectWhere || '').trim();
-        const query: Record<string, string> = {
-          fields: BQE_PROJECT_LIST_FIELDS,
-        };
-        // '*' / 'all' mean unfiltered — CORE WHERE cannot be `*`.
-        if (rawWhere && rawWhere !== '*' && !/^all$/i.test(rawWhere)) {
-          query.where = rawWhere;
-        }
-        if (query.where) warnings.push(`CORE project fetch (${query.where})`);
-        else warnings.push('CORE project fetch (all statuses — phase Completed included)');
-
-        let projects: BqeProject[] = [];
-        let hasMore = false;
-        let usedUnfilteredFallback = false;
-        if (page > 0) {
-          const payload = await bqeGet<unknown>('/project', {
-            ...query,
-            page: `${page},${pageSize}`,
-          });
-          projects = asProjectList(payload);
-          // Hobby-safe: if Active filter returns nothing, page the full catalog once.
-          if (
-            page === 1 &&
-            !rawWhere &&
-            projects.length === 0 &&
-            query.where === CORE_PROJECT_WHERE_ACTIVE
-          ) {
-            delete query.where;
-            usedUnfilteredFallback = true;
-            warnings.push('CORE status=0 returned 0 rows — paging all projects');
-            const retry = await bqeGet<unknown>('/project', {
-              ...query,
-              page: `${page},${pageSize}`,
-            });
-            projects = asProjectList(retry);
-          }
-          hasMore = projects.length >= pageSize;
-        } else {
-          projects = await bqeListAll<BqeProject>('/project', 500, query);
-        }
-        if (projects.length && !onVercelHost) {
-          projects = await hydrateProjectParents(projects, 40);
-        } else if (projects.length) {
-          projects = await hydrateProjectParents(projects, 3);
-        }
-
-        const mapped = mapCoreProjects(projects);
-        if (mapped.excludedCount) {
-          warnings.push(
-            `Excluded ${mapped.excludedCount} test / Internal Office rows from this page`,
-          );
-        }
-
-        if (!libraryExists && (body.reset || page <= 1)) {
-          await clearTable(sb, 'pa_projects');
-        }
-        let insertedProjects = 0;
-        if (mapped.rows.length) {
-          const rows = onVercelHost
-            ? mapped.rows
-            : await preserveExistingProjectFinancials(sb, mapped.rows);
-          const { error: upErr } = await sb
-            .from('pa_projects')
-            .upsert(rows as unknown as Record<string, unknown>[], {
-              onConflict: 'project',
-            });
-          if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
-          insertedProjects = rows.length;
-        }
-        const msg =
-          page > 0
-            ? `Projects page ${page}: CORE ${projects.length} → +${insertedProjects} rows` +
-              (hasMore ? ' (more…)' : ' (done)')
-            : `Projects sync: ${projects.length} CORE → ${insertedProjects} rows`;
-
-        await sb
-          .from('pa_bqe_connection')
-          .update({
-            last_sync_at: new Date().toISOString(),
-            last_sync_status: warnings.length ? 'ok_partial' : 'ok',
-            last_sync_message: msg.slice(0, 900),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', 1);
-
+        const pulled = await pullCoreProjectPage(body);
+        const committed = await commitCoreProjectPage(sb, body, {
+          page: pulled.page,
+          rows: pulled.rows,
+          hasMore: pulled.hasMore,
+          warnings: pulled.warnings,
+          coreProjects: pulled.projects.length,
+        });
         res.status(200).json({
           ok: true,
           mode: 'projects',
-          page: page || null,
-          pageSize: page > 0 ? pageSize : null,
-          hasMore,
-          coreProjects: projects.length,
-          insertedProjects,
-          libraryExists,
-          usedUnfilteredFallback,
-          projectWhere: query.where || null,
-          warnings,
-          message: msg,
+          page: pulled.page || null,
+          pageSize: pulled.page > 0 ? pulled.pageSize : null,
+          hasMore: pulled.hasMore,
+          coreProjects: pulled.projects.length,
+          insertedProjects: committed.insertedProjects,
+          libraryExists: committed.libraryExists,
+          usedUnfilteredFallback: pulled.usedUnfilteredFallback,
+          projectWhere: pulled.projectWhere,
+          warnings: pulled.warnings,
+          message: committed.message,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'projects sync failed';

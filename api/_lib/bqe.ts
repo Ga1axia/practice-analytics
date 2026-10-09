@@ -376,6 +376,10 @@ export function bqeWhereDateTime(d: Date): string {
 export const BQE_PROJECT_LIST_FIELDS =
   'id,name,displayName,code,client,clientId,manager,managerId,status,contractType,contractAmount,serviceContract,expenseContract,phaseName,phaseDescription,parentId,parent,rootProjectId,address,percentComplete,completedOn,createdOn';
 
+/** Fewer columns — faster CORE responses on Vercel Hobby (~10s cap). */
+export const BQE_PROJECT_LIST_FIELDS_VERCEL =
+  'id,name,displayName,code,client,manager,status,contractType,contractAmount,serviceContract,phaseName,parentId,parent,rootProjectId,createdOn';
+
 /** CORE ProjectStatus Active = 0 (docs: /project?where=status=0). Spaces break the filter. */
 export const CORE_PROJECT_WHERE_ACTIVE = 'status=0';
 

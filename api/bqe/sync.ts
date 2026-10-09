@@ -60,11 +60,15 @@ type SyncBody = {
    * Kept so older clients that still send this flag do not fail.
    */
   requireRecentHours?: boolean;
-  /** projects_commit — rows from a prior projects_fetch call */
-  rows?: ProjectInsert[];
+  /** projects_commit or time persist — rows from a prior fetch */
+  rows?: ProjectInsert[] | Record<string, unknown>[];
   hasMore?: boolean;
   coreProjects?: number;
   syncWarnings?: string[];
+  phase?: 'fetch' | 'persist' | 'full';
+  syncRunId?: string;
+  finalize?: boolean;
+  fetchMeta?: { fetched: number; skipped: number; maxUpdated: string | null };
 };
 
 async function clearTable(sb: Sb, table: string) {
@@ -344,6 +348,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         page: body.page,
         pageSize: body.pageSize,
         initiatedBy: admin.userId,
+        phase: body.phase,
+        syncRunId: body.syncRunId,
+        rows: body.rows as import('../_lib/bqeTimeEntrySync.js').TimeEntryRow[] | undefined,
+        hasMore: body.hasMore,
+        finalize: body.finalize,
+        fetchMeta: body.fetchMeta,
       });
       const statusCode = result.status === 'failed' ? 500 : 200;
       res.status(statusCode).json({
@@ -363,6 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         page: result.page,
         warnings: result.warnings,
         error: result.error,
+        rows: result.rows,
         message:
           result.status === 'failed'
             ? result.error

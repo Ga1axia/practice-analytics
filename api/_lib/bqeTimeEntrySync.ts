@@ -19,6 +19,17 @@ export type TimeEntrySyncRequest = {
   page?: number;
   pageSize?: number;
   initiatedBy?: string | null;
+  /** Vercel Hobby: fetch CORE only, or persist rows from a prior fetch. */
+  phase?: 'fetch' | 'persist' | 'full';
+  syncRunId?: string;
+  rows?: TimeEntryRow[];
+  hasMore?: boolean;
+  finalize?: boolean;
+  fetchMeta?: {
+    fetched: number;
+    skipped: number;
+    maxUpdated: string | null;
+  };
 };
 
 export type TimeEntrySyncResult = {
@@ -37,6 +48,8 @@ export type TimeEntrySyncResult = {
   page: number | null;
   warnings: string[];
   error: string | null;
+  /** Present when phase=fetch */
+  rows?: TimeEntryRow[];
 };
 
 export type TimeEntryRow = {
@@ -325,6 +338,7 @@ async function existingIds(
 export async function upsertTimeEntryRows(
   sb: SupabaseClient,
   rows: TimeEntryRow[],
+  opts?: { skipExistenceCheck?: boolean },
 ): Promise<{ inserted: number; updated: number }> {
   if (!rows.length) return { inserted: 0, updated: 0 };
 
@@ -337,20 +351,25 @@ export async function upsertTimeEntryRows(
   }
   const unique = [...byId.values()];
 
+  const skipCheck = opts?.skipExistenceCheck === true;
   const ids = unique.map((r) => r.bqe_time_entry_id);
-  const before = await existingIds(sb, ids);
+  const before = skipCheck ? new Set<string>() : await existingIds(sb, ids);
   let inserted = 0;
   let updated = 0;
-  const chunk = 150;
+  const chunk = skipCheck ? 40 : 150;
   for (let i = 0; i < unique.length; i += chunk) {
     const slice = unique.slice(i, i + chunk);
     const { error } = await sb.from('pa_time_entries').upsert(slice, {
       onConflict: 'bqe_time_entry_id',
     });
     if (error) throw new Error(`Upsert time entries failed: ${error.message}`);
-    for (const r of slice) {
-      if (before.has(r.bqe_time_entry_id)) updated += 1;
-      else inserted += 1;
+    if (skipCheck) {
+      inserted += slice.length;
+    } else {
+      for (const r of slice) {
+        if (before.has(r.bqe_time_entry_id)) updated += 1;
+        else inserted += 1;
+      }
     }
   }
   return { inserted, updated };
@@ -465,7 +484,7 @@ export async function runTimeEntrySync(
 
   const onVercel = process.env.VERCEL === '1';
   if (onVercel && req.mode === 'incremental') {
-    const floor = daysAgoYmd(7);
+    const floor = daysAgoYmd(3);
     if (!since || since < floor) {
       since = floor;
       warnings.push(`Vercel incremental since capped to ${floor}`);
@@ -481,21 +500,180 @@ export async function runTimeEntrySync(
 
   const pageRequested = Number(req.page) > 0;
   const page = pageRequested ? Math.floor(Number(req.page)) : onVercel ? 1 : 0;
-  const pageSize = Math.min(Math.max(Number(req.pageSize) || (onVercel ? 80 : 500), 25), 200);
+  const pageSize = Math.min(
+    Math.max(Number(req.pageSize) || (onVercel ? 12 : 500), 8),
+    onVercel ? 20 : 200,
+  );
+
+  const phase = req.phase || 'full';
+  const phaseLookup = new Map<string, PhaseContext>();
+  if (phase !== 'persist') {
+    warnings.push('Phase labels from time-entry project names (no full CORE project crawl)');
+  }
+
+  let where = since ? `date >= '${since}'` : '';
+  if (until) {
+    where = where ? `${where} AND date <= '${until}'` : `date <= '${until}'`;
+  }
+
+  if (phase === 'fetch') {
+    try {
+      let timeEntries: BqeTimeEntry[] = [];
+      let hasMore = false;
+      const payload = await bqeGet<unknown>('/timeentry', {
+        where,
+        fields: BQE_TIME_ENTRY_PERSIST_FIELDS,
+        page: `${page},${pageSize}`,
+      });
+      timeEntries = asTimeEntryList(payload);
+      hasMore = timeEntries.length >= pageSize;
+
+      const nowIso = new Date().toISOString();
+      const rows: TimeEntryRow[] = [];
+      let skipped = 0;
+      let maxUpdated: string | null = null;
+      for (const te of timeEntries) {
+        const row = mapBqeTimeEntryToRow(te, phaseLookup, nowIso);
+        if (!row) {
+          skipped += 1;
+          continue;
+        }
+        if (onVercel) {
+          row.raw_payload = { id: row.bqe_time_entry_id };
+        }
+        rows.push(row);
+        if (row.bqe_last_updated_at && (!maxUpdated || row.bqe_last_updated_at > maxUpdated)) {
+          maxUpdated = row.bqe_last_updated_at;
+        }
+      }
+
+      return {
+        syncRunId: req.syncRunId || '',
+        status: 'succeeded',
+        mode: req.mode,
+        since,
+        until,
+        fetched: timeEntries.length,
+        inserted: 0,
+        updated: 0,
+        skipped,
+        cursor: until || ymd(new Date()),
+        lastUpdatedCursor: maxUpdated || nowIso,
+        hasMore,
+        page: page || null,
+        warnings,
+        error: null,
+        rows,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'time entry fetch failed';
+      return {
+        syncRunId: '',
+        status: 'failed',
+        mode: req.mode,
+        since,
+        until,
+        fetched: 0,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        cursor: null,
+        lastUpdatedCursor: null,
+        hasMore: false,
+        page: page || null,
+        warnings,
+        error: msg,
+        rows: [],
+      };
+    }
+  }
+
+  if (phase === 'persist') {
+    const rows = Array.isArray(req.rows) ? req.rows : [];
+    const meta = req.fetchMeta;
+    const hasMore = req.hasMore === true;
+    const finalize = req.finalize === true || !hasMore;
+    let runId = req.syncRunId || '';
+    try {
+      if (!runId) {
+        runId = await startRun(sb, req, since, until);
+      }
+      let inserted = 0;
+      let updated = 0;
+      if (req.mode !== 'dry_run' && rows.length) {
+        const result = await upsertTimeEntryRows(sb, rows, {
+          skipExistenceCheck: onVercel,
+        });
+        inserted = result.inserted;
+        updated = result.updated;
+      }
+      const nowIso = new Date().toISOString();
+      const cursor = until || ymd(new Date());
+      if (finalize) {
+        await finishRun(sb, runId, {
+          status: 'succeeded',
+          entries_fetched: meta?.fetched ?? rows.length,
+          entries_inserted: inserted,
+          entries_updated: updated,
+          entries_skipped: meta?.skipped ?? 0,
+          last_cursor: cursor,
+          last_updated_cursor: meta?.maxUpdated || nowIso,
+          metadata: {
+            phase: 'persist',
+            overlapHours: req.mode === 'incremental' ? 48 : 0,
+          },
+          error: null,
+        });
+      }
+      return {
+        syncRunId: runId,
+        status: 'succeeded',
+        mode: req.mode,
+        since,
+        until,
+        fetched: meta?.fetched ?? rows.length,
+        inserted,
+        updated,
+        skipped: meta?.skipped ?? 0,
+        cursor,
+        lastUpdatedCursor: meta?.maxUpdated || nowIso,
+        hasMore,
+        page: page || null,
+        warnings,
+        error: null,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'time entry persist failed';
+      if (runId) {
+        try {
+          await finishRun(sb, runId, { status: 'failed', error: msg.slice(0, 900) });
+        } catch {
+          /* ignore */
+        }
+      }
+      return {
+        syncRunId: runId,
+        status: 'failed',
+        mode: req.mode,
+        since,
+        until,
+        fetched: 0,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        cursor: null,
+        lastUpdatedCursor: null,
+        hasMore: false,
+        page: page || null,
+        warnings,
+        error: msg,
+      };
+    }
+  }
 
   const runId = await startRun(sb, req, since, until);
 
   try {
-    // Skip full /project crawl (5k+ rows) — exceeds Vercel Hobby limits.
-    // mapBqeTimeEntryToRow falls back to parsing "Parent - Phase" from te.project.
-    const phaseLookup = new Map<string, PhaseContext>();
-    warnings.push('Phase labels from time-entry project names (no full CORE project crawl)');
-
-    let where = since ? `date >= '${since}'` : '';
-    if (until) {
-      where = where ? `${where} AND date <= '${until}'` : `date <= '${until}'`;
-    }
-
     let timeEntries: BqeTimeEntry[] = [];
     let hasMore = false;
     if (page > 0) {
@@ -535,7 +713,7 @@ export async function runTimeEntrySync(
     let inserted = 0;
     let updated = 0;
     if (req.mode !== 'dry_run') {
-      const result = await upsertTimeEntryRows(sb, rows);
+      const result = await upsertTimeEntryRows(sb, rows, { skipExistenceCheck: onVercel });
       inserted = result.inserted;
       updated = result.updated;
     } else {

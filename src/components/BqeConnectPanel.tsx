@@ -112,6 +112,62 @@ async function postSync<T>(
   }
 }
 
+const VERCEL_TIME_PAGE = 12;
+
+async function syncTimeEntriesOnVercel(
+  mode: 'historical' | 'incremental',
+  label: string,
+  setMsg: (s: string) => void,
+  window?: { since: string; until: string },
+): Promise<{ fetched: number; inserted: number; updated: number }> {
+  let page = 1;
+  let syncRunId: string | undefined;
+  let fetched = 0;
+  let inserted = 0;
+  let updated = 0;
+  for (;;) {
+    setMsg(`${label} page ${page} — fetch from CORE…`);
+    const f = await postSync<{
+      rows?: Record<string, unknown>[];
+      hasMore?: boolean;
+      fetched?: number;
+      skipped?: number;
+      lastUpdatedCursor?: string | null;
+    }>({
+      mode,
+      phase: 'fetch',
+      page,
+      pageSize: VERCEL_TIME_PAGE,
+      ...(window ? { since: window.since, until: window.until } : {}),
+    });
+    setMsg(`${label} page ${page} — save…`);
+    const c = await postSync<{ inserted?: number; updated?: number; syncRunId?: string }>({
+      mode,
+      phase: 'persist',
+      page,
+      pageSize: VERCEL_TIME_PAGE,
+      rows: f.rows,
+      syncRunId,
+      hasMore: f.hasMore,
+      finalize: !f.hasMore,
+      fetchMeta: {
+        fetched: f.fetched ?? 0,
+        skipped: f.skipped ?? 0,
+        maxUpdated: f.lastUpdatedCursor ?? null,
+      },
+      ...(window ? { since: window.since, until: window.until } : {}),
+    });
+    syncRunId = c.syncRunId || syncRunId;
+    fetched += f.fetched ?? 0;
+    inserted += c.inserted ?? 0;
+    updated += c.updated ?? 0;
+    if (!f.hasMore) break;
+    page += 1;
+    if (page > 200) break;
+  }
+  return { fetched, inserted, updated };
+}
+
 function apiErrorMessage(body: { error?: string; detail?: string }, fallback: string): string {
   const err = body.error || '';
   if (/invalid or expired session/i.test(err) || /auth session missing/i.test(err + (body.detail || ''))) {
@@ -327,59 +383,23 @@ export function BqeConnectPanel() {
         let updated = 0;
         for (let i = 0; i < windows.length; i += 1) {
           const m = windows[i]!;
-          let page = 1;
-          for (;;) {
-            setMsg(`Historical ${m.label} p${page} (${i + 1}/${windows.length})…`);
-            const body = await postSync<{
-              fetched?: number;
-              inserted?: number;
-              updated?: number;
-              hasMore?: boolean;
-            }>({
-              mode: 'historical',
-              since: m.since,
-              until: m.until,
-              page,
-              pageSize: 80,
-            });
-            fetched += body.fetched || 0;
-            inserted += body.inserted || 0;
-            updated += body.updated || 0;
-            if (!body.hasMore) break;
-            page += 1;
-            if (page > 30) break;
-          }
+          const part = await syncTimeEntriesOnVercel(
+            'historical',
+            `Historical ${m.label} (${i + 1}/${windows.length})`,
+            setMsg,
+            m,
+          );
+          fetched += part.fetched;
+          inserted += part.inserted;
+          updated += part.updated;
         }
         setMsg(
           `Historical import done: fetched ${fetched}, inserted ${inserted}, updated ${updated} across ${windows.length} windows.`,
         );
       } else if (mode === 'incremental' && onVercel) {
-        let page = 1;
-        let fetched = 0;
-        let inserted = 0;
-        let updated = 0;
-        for (;;) {
-          setMsg(`Incremental time page ${page}…`);
-          const body = await postSync<{
-            fetched?: number;
-            inserted?: number;
-            updated?: number;
-            hasMore?: boolean;
-            message?: string;
-          }>({
-            mode: 'incremental',
-            page,
-            pageSize: 80,
-          });
-          fetched += body.fetched || 0;
-          inserted += body.inserted || 0;
-          updated += body.updated || 0;
-          if (!body.hasMore) break;
-          page += 1;
-          if (page > 40) break;
-        }
+        const part = await syncTimeEntriesOnVercel('incremental', 'Incremental time', setMsg);
         setMsg(
-          `Incremental time done: fetched ${fetched}, inserted ${inserted}, updated ${updated}.`,
+          `Incremental time done: fetched ${part.fetched}, inserted ${part.inserted}, updated ${part.updated}.`,
         );
       } else {
         const res = await fetch('/api/bqe/sync', {
@@ -423,9 +443,9 @@ export function BqeConnectPanel() {
       <p className="plist-upload-help">
         {onVercel ? (
           <>
-            Production sync pulls CORE in small steps (12 projects per step: fetch, then save),
-            then aligns employee schedules (also paged). Time is separate — use Incremental
-            time for new hours. OAuth uses{' '}
+            On standard Vercel (Hobby), each API step must finish in ~10s. Sync uses many
+            small steps (12 rows: fetch CORE, then save). Leave the button running until done.
+            Time is separate — Incremental time uses the same fetch/save pattern. OAuth uses{' '}
             <span className="mono">CORE_CLIENT_ID</span> and{' '}
             <span className="mono">CORE_CLIENT_SECRET</span> (not a generic CORE_* prefix).
             Also set <span className="mono">BQE_REDIRECT_URI</span> /{' '}

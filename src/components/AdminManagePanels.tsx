@@ -730,13 +730,35 @@ export function AdminProfilesPanel({
                     />
                     Toggles
                   </label>
+                  <label
+                    className="admin-portal-pref"
+                    title="Allow firm-wide interior roster (all firm jobs with an Interior Design phase)"
+                  >
+                    <input
+                      type="checkbox"
+                      defaultChecked={pp.firmWideInteriorRosterOption}
+                      id={`pp-firm-${r.profile_id}`}
+                    />
+                    Firm ID roster
+                  </label>
                   <label className="admin-portal-pref" title="Default project list to interior phases">
                     <input
                       type="checkbox"
                       defaultChecked={pp.defaultInteriorProjects}
                       id={`pp-proj-${r.profile_id}`}
                     />
-                    Def. jobs
+                    Def. my ID
+                  </label>
+                  <label
+                    className="admin-portal-pref"
+                    title="Default to firm-wide interior roster"
+                  >
+                    <input
+                      type="checkbox"
+                      defaultChecked={pp.defaultFirmWideInteriorRoster}
+                      id={`pp-firmdef-${r.profile_id}`}
+                    />
+                    Def. firm ID
                   </label>
                   <label className="admin-portal-pref" title="Default hours chart to interior phases">
                     <input
@@ -769,8 +791,14 @@ export function AdminProfilesPanel({
                         interiorProjectsOption: (
                           document.getElementById(`pp-opt-${id}`) as HTMLInputElement | null
                         )?.checked,
+                        firmWideInteriorRosterOption: (
+                          document.getElementById(`pp-firm-${id}`) as HTMLInputElement | null
+                        )?.checked,
                         defaultInteriorProjects: (
                           document.getElementById(`pp-proj-${id}`) as HTMLInputElement | null
+                        )?.checked,
+                        defaultFirmWideInteriorRoster: (
+                          document.getElementById(`pp-firmdef-${id}`) as HTMLInputElement | null
                         )?.checked,
                         defaultInteriorHours: (
                           document.getElementById(`pp-hrs-${id}`) as HTMLInputElement | null

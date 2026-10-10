@@ -108,6 +108,7 @@ export function matchesEmployeeProjectFilters(
   employeeName: string,
   memberRoles: Map<string, ProjectMemberRole>,
   filters: EmployeeProjectFilters,
+  opts?: { firmInteriorRoster?: boolean },
 ): boolean {
   const membership = memberRoles.get(project.key) || null;
   const projectLead = employeeIsProjectHeaderLead(project, employeeName, membership);
@@ -124,9 +125,9 @@ export function matchesEmployeeProjectFilters(
   }
 
   if (filters.phase) {
-    const onPhase = phasesManagedByEmployee(project, employeeName).some(
-      (ph) => ph.label === filters.phase,
-    );
+    const onPhase = opts?.firmInteriorRoster
+      ? project.phases.some((ph) => (ph.label || ph.row.phase || '').trim() === filters.phase)
+      : phasesManagedByEmployee(project, employeeName).some((ph) => ph.label === filters.phase);
     if (!onPhase) return false;
   }
 

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   isInteriorDesignPhaseLabel,
   projectHasInteriorDesignPhase,
+  readProjectListScope,
   resolveEmployeePortalPrefs,
 } from './employeePortalPrefs';
 import type { ProjectNode } from './projectListHierarchy';
@@ -11,8 +12,11 @@ describe('employeePortalPrefs', () => {
   it('defaults Arnita to interior-focused portal prefs', () => {
     const prefs = resolveEmployeePortalPrefs({ employeeName: 'Arnita Serri' });
     assert.equal(prefs.interiorProjectsOption, true);
+    assert.equal(prefs.firmWideInteriorRosterOption, true);
+    assert.equal(prefs.defaultFirmWideInteriorRoster, true);
     assert.equal(prefs.defaultInteriorProjects, true);
     assert.equal(prefs.defaultInteriorHours, true);
+    assert.equal(readProjectListScope('Arnita Serri', prefs), 'firm_interior');
   });
 
   it('detects interior design phases on projects', () => {

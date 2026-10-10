@@ -5,22 +5,30 @@ import type { ProjectNode } from './projectListHierarchy';
 export type EmployeePortalPrefsAdmin = {
   /** Show Interior vs all-projects toggle on My projects. */
   interiorProjectsOption?: boolean;
+  /** Allow “Firm interior roster” — all firm jobs with an Interior Design phase. */
+  firmWideInteriorRosterOption?: boolean;
   /** Default My projects list to jobs with an Interior Design phase. */
   defaultInteriorProjects?: boolean;
+  /** Default My projects to firm-wide interior roster (requires firmWideInteriorRosterOption). */
+  defaultFirmWideInteriorRoster?: boolean;
   /** Default project hours chart to Interior phase hours only. */
   defaultInteriorHours?: boolean;
 };
 
 export type ResolvedEmployeePortalPrefs = {
   interiorProjectsOption: boolean;
+  firmWideInteriorRosterOption: boolean;
   defaultInteriorProjects: boolean;
+  defaultFirmWideInteriorRoster: boolean;
   defaultInteriorHours: boolean;
 };
 
 const BUILTIN_DEFAULTS: Record<string, EmployeePortalPrefsAdmin> = {
   'arnita serri': {
     interiorProjectsOption: true,
+    firmWideInteriorRosterOption: true,
     defaultInteriorProjects: true,
+    defaultFirmWideInteriorRoster: true,
     defaultInteriorHours: true,
   },
 };
@@ -28,7 +36,7 @@ const BUILTIN_DEFAULTS: Record<string, EmployeePortalPrefsAdmin> = {
 const PROJECT_LIST_SCOPE_KEY = 'pa-emp-project-list-scope-v1';
 const HOURS_PHASE_SCOPE_KEY = 'pa-emp-hours-phase-scope-v1';
 
-export type InteriorScope = 'interior' | 'all';
+export type InteriorScope = 'interior' | 'all' | 'firm_interior';
 
 function normEmployee(name: string): string {
   return name.trim().toLowerCase();
@@ -39,7 +47,9 @@ export function parsePortalPrefsAdmin(raw: unknown): EmployeePortalPrefsAdmin {
   const o = raw as Record<string, unknown>;
   return {
     interiorProjectsOption: o.interiorProjectsOption === true,
+    firmWideInteriorRosterOption: o.firmWideInteriorRosterOption === true,
     defaultInteriorProjects: o.defaultInteriorProjects === true,
+    defaultFirmWideInteriorRoster: o.defaultFirmWideInteriorRoster === true,
     defaultInteriorHours: o.defaultInteriorHours === true,
   };
 }
@@ -53,7 +63,9 @@ export function resolveEmployeePortalPrefs(input: {
   const merged = { ...builtin, ...fromProfile };
   return {
     interiorProjectsOption: merged.interiorProjectsOption === true,
+    firmWideInteriorRosterOption: merged.firmWideInteriorRosterOption === true,
     defaultInteriorProjects: merged.defaultInteriorProjects === true,
+    defaultFirmWideInteriorRoster: merged.defaultFirmWideInteriorRoster === true,
     defaultInteriorHours: merged.defaultInteriorHours === true,
   };
 }
@@ -84,7 +96,7 @@ function readScope(key: string, employeeName: string): InteriorScope | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, string>;
     const v = parsed[normEmployee(employeeName)];
-    return v === 'interior' || v === 'all' ? v : null;
+    return v === 'interior' || v === 'all' || v === 'firm_interior' ? v : null;
   } catch {
     return null;
   }
@@ -106,8 +118,28 @@ export function readProjectListScope(
   prefs: ResolvedEmployeePortalPrefs,
 ): InteriorScope {
   const saved = readScope(PROJECT_LIST_SCOPE_KEY, employeeName);
+  if (saved === 'firm_interior' && !prefs.firmWideInteriorRosterOption) {
+    return prefs.defaultInteriorProjects ? 'interior' : 'all';
+  }
   if (saved) return saved;
+  if (prefs.defaultFirmWideInteriorRoster && prefs.firmWideInteriorRosterOption) {
+    return 'firm_interior';
+  }
   return prefs.defaultInteriorProjects ? 'interior' : 'all';
+}
+
+/** Phase labels for firm interior roster filters (any interior phase on the job). */
+export function collectFirmInteriorPhaseOptions(
+  projects: ProjectNode[],
+): string[] {
+  const set = new Set<string>();
+  for (const p of projects) {
+    for (const ph of p.phases) {
+      const label = (ph.label || ph.row.phase || '').trim();
+      if (label && isInteriorDesignPhaseLabel(label)) set.add(label);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
 export function writeProjectListScope(employeeName: string, scope: InteriorScope) {

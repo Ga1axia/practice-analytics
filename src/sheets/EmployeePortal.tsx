@@ -42,10 +42,12 @@ import type { DashboardData } from '../lib/types';
 import { InteriorScopeToggle } from '../components/InteriorScopeToggle';
 import { useDemoMode } from '../hooks/useDemoMode';
 import {
+  collectFirmInteriorPhaseOptions,
   projectHasInteriorDesignPhase,
   readProjectListScope,
   resolveEmployeePortalPrefs,
   writeProjectListScope,
+  type InteriorScope,
 } from '../lib/employeePortalPrefs';
 import { EmployeeCalendar } from './EmployeeCalendar';
 import { EmployeeProjectWorkspace } from './EmployeeProjectWorkspace';
@@ -143,7 +145,7 @@ export function EmployeePortal({
     setProjectListScopeState(readProjectListScope(employeeName, prefs));
   }, [employeeName, profilePortalPrefs]);
 
-  function setProjectListScope(scope: 'interior' | 'all') {
+  function setProjectListScope(scope: InteriorScope) {
     setProjectListScopeState(scope);
     writeProjectListScope(employeeName, scope);
   }
@@ -233,29 +235,43 @@ export function EmployeePortal({
       );
   }, [hierarchy, employeeName, memberRoles, isDemo]);
 
+  const firmWideList =
+    projectListScope === 'firm_interior' && portalPrefs.firmWideInteriorRosterOption;
+
+  const firmCatalogProjects = useMemo(() => {
+    return hierarchy
+      .flatMap((c) =>
+        c.projects
+          .filter((p) => isDemo || !isDemoSeedProject(p))
+          .map((p) => ({ ...p, clientName: c.client })),
+      );
+  }, [hierarchy, isDemo]);
+
+  const rosterProjects = firmWideList ? firmCatalogProjects : assignedProjects;
+
   const assignedKey = useMemo(
-    () => assignedProjects.map((p) => p.key).join('|'),
-    [assignedProjects],
+    () => rosterProjects.map((p) => p.key).join('|'),
+    [rosterProjects],
   );
 
   const isLeadForKey = useMemo(() => {
     const byKey = new Map<string, boolean>();
-    for (const p of assignedProjects) {
+    for (const p of rosterProjects) {
       byKey.set(
         p.key,
         isProjectLead(p, employeeName, memberRoles.get(p.key) || null),
       );
     }
     return (key: string) => byKey.get(key) ?? false;
-  }, [assignedProjects, employeeName, memberRoles]);
+  }, [rosterProjects, employeeName, memberRoles]);
 
   useEffect(() => {
     const needsHours = projectSort === 'recent' || projectSort === 'lead_first';
-    if (!needsHours || !assignedProjects.length) return;
+    if (!needsHours || !rosterProjects.length) return;
     let cancelled = false;
     void loadEmployeeLastHoursByProject({
       employeeName,
-      projects: assignedProjects.map((p) => ({ key: p.key, title: p.title, code: p.code })),
+      projects: rosterProjects.map((p) => ({ key: p.key, title: p.title, code: p.code })),
     }).then((map) => {
       if (!cancelled) setLastHoursByKey(map);
     });
@@ -290,10 +306,10 @@ export function EmployeePortal({
     );
 
   const allProjects = useMemo(
-    () => sortProjects(assignedProjects),
+    () => sortProjects(rosterProjects),
     // sortProjects closes over sort state
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [assignedProjects, projectSort, lastHoursByKey, isLeadForKey],
+    [rosterProjects, projectSort, lastHoursByKey, isLeadForKey],
   );
 
   const activeProjects = useMemo(
@@ -302,13 +318,16 @@ export function EmployeePortal({
   );
 
   const phaseFilterOptions = useMemo(
-    () => collectMyPhaseOptions(assignedProjects, employeeName),
-    [assignedProjects, employeeName],
+    () =>
+      firmWideList
+        ? collectFirmInteriorPhaseOptions(firmCatalogProjects)
+        : collectMyPhaseOptions(rosterProjects, employeeName),
+    [firmWideList, firmCatalogProjects, rosterProjects, employeeName],
   );
 
   const clientFilterOptions = useMemo(
-    () => collectClientOptions(assignedProjects),
-    [assignedProjects],
+    () => collectClientOptions(firmWideList ? firmCatalogProjects : rosterProjects),
+    [firmWideList, firmCatalogProjects, rosterProjects],
   );
 
   const hasExtraFilters =
@@ -317,16 +336,29 @@ export function EmployeePortal({
   const scopedProjects = useMemo(() => {
     const base = statusFilter === 'active' ? activeProjects : allProjects;
     return base.filter((p) =>
-      matchesEmployeeProjectFilters(p, employeeName, memberRoles, projectFilters),
+      matchesEmployeeProjectFilters(p, employeeName, memberRoles, projectFilters, {
+        firmInteriorRoster: firmWideList,
+      }),
     );
-  }, [statusFilter, activeProjects, allProjects, employeeName, memberRoles, projectFilters]);
+  }, [
+    statusFilter,
+    activeProjects,
+    allProjects,
+    employeeName,
+    memberRoles,
+    projectFilters,
+    firmWideList,
+  ]);
 
   const interiorScopedProjects = useMemo(() => {
+    if (firmWideList) {
+      return scopedProjects.filter((p) => projectHasInteriorDesignPhase(p));
+    }
     if (!portalPrefs.interiorProjectsOption || projectListScope === 'all') {
       return scopedProjects;
     }
     return scopedProjects.filter((p) => projectHasInteriorDesignPhase(p));
-  }, [scopedProjects, portalPrefs.interiorProjectsOption, projectListScope]);
+  }, [scopedProjects, portalPrefs.interiorProjectsOption, projectListScope, firmWideList]);
 
   const filteredProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -607,7 +639,12 @@ export function EmployeePortal({
                   scope={projectListScope}
                   onChange={setProjectListScope}
                   compact
-                  labels={{ interior: 'Interior jobs', all: 'All my projects' }}
+                  allowFirmWide={portalPrefs.firmWideInteriorRosterOption}
+                  labels={{
+                    firm: 'Firm interior',
+                    interior: 'My interior',
+                    all: 'All my projects',
+                  }}
                 />
               ) : null}
               <div className="emp-status-toggle emp-toolbar-toggle" role="group" aria-label="Status">

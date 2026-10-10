@@ -139,6 +139,8 @@ export function EmployeeProjectWorkspace({
   rosterNames = [],
   portalPrefs = {
     interiorProjectsOption: false,
+    firmWideInteriorRosterOption: false,
+    defaultFirmWideInteriorRoster: false,
     defaultInteriorProjects: false,
     defaultInteriorHours: false,
   },
@@ -645,7 +647,9 @@ export function EmployeeProjectWorkspace({
         <div className="emp-project-hours-scope">
           <InteriorScopeToggle
             scope={hoursScope}
-            onChange={setHoursScope}
+            onChange={(scope) => {
+              if (scope === 'interior' || scope === 'all') setHoursScope(scope);
+            }}
             labels={{ interior: 'Interior hours', all: 'All phase hours' }}
           />
         </div>

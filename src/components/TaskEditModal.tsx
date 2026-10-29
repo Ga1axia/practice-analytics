@@ -185,6 +185,7 @@ export function TaskEditModal({
       targetStart: startRaw,
       targetEnd: dueRaw,
       rows,
+      cascade: false,
     });
     if (!dateRes.ok) {
       setError(dateRes.error);

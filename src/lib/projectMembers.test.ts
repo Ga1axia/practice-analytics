@@ -11,6 +11,14 @@ describe('isProjectListManager', () => {
     assert.equal(isProjectListManager(project, 'avery cobe'), true);
     assert.equal(isProjectListManager(project, 'Avery Cobe'), true);
     assert.equal(isProjectListManager(project, 'Nobody'), false);
+    assert.equal(isProjectListManager(project, 'AveryCobe'), true);
+    assert.equal(
+      isProjectListManager(
+        { row: { manager: 'AveryCobe' }, phases: [{ row: { manager: 'AVERY-V1COBE' } }] },
+        'Avery Cobe',
+      ),
+      true,
+    );
   });
 
   it('matches phase managers', () => {

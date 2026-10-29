@@ -30,6 +30,11 @@ import {
   type TimeEntrySyncMode,
 } from '../_lib/bqeTimeEntrySync.js';
 import { requireAdmin } from '../_lib/requireAdmin.js';
+import {
+  canonicalEmployeeName,
+  DEFAULT_EMPLOYEE_ROSTER,
+  mergeRosterNames,
+} from '../../src/lib/employeeRoster.js';
 
 type Sb = ReturnType<typeof serviceSupabase>;
 
@@ -582,16 +587,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let insertedProjects = 0;
       if (built.projects.length) {
+        const { data: rosterRows, error: rosterError } = await sb
+          .from('pa_employee_roster')
+          .select('employee');
+        if (rosterError) throw new Error(rosterError.message);
+        const rosterNames = mergeRosterNames(
+          (rosterRows || []).map((row) => String((row as { employee?: string }).employee || '')),
+          DEFAULT_EMPLOYEE_ROSTER.map((row) => row.employee),
+        );
+        const projectRows = (built.projects as ProjectInsert[]).map((row) => ({
+          ...row,
+          manager: row.manager ? canonicalEmployeeName(row.manager, rosterNames) : row.manager,
+        }));
         if (libraryExists) {
           const { error: upErr } = await sb
             .from('pa_projects')
-            .upsert(built.projects as unknown as Record<string, unknown>[], {
+            .upsert(projectRows as unknown as Record<string, unknown>[], {
               onConflict: 'project',
             });
           if (upErr) throw new Error(`Upsert projects failed: ${upErr.message}`);
           insertedProjects = built.projects.length;
         } else {
-          insertedProjects = await insertChunks(sb, 'pa_projects', built.projects);
+          insertedProjects = await insertChunks(sb, 'pa_projects', projectRows);
         }
       }
       await insertChunks(sb, 'pa_employee_monthly', built.empMonthly);

@@ -54,6 +54,43 @@ export function normalizeEmployeeName(name: string): string {
   return name.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Same person across BQE spellings.
+ * "Avery Cobe", "AveryCobe", and "AVERY-V1 COBE" share one key.
+ */
+export function employeeIdentityKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/-v\d+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Roster spelling when the name is the same person; otherwise the trimmed input. */
+export function canonicalEmployeeName(name: string, rosterNames: readonly string[]): string {
+  const trimmed = normalizeEmployeeName(name);
+  if (!trimmed) return '';
+  const key = employeeIdentityKey(trimmed);
+  if (!key) return trimmed;
+  const hit = rosterNames.find((n) => employeeIdentityKey(n) === key);
+  return hit ? normalizeEmployeeName(hit) : trimmed;
+}
+
+/** First spelling wins for each person. Later lists only fill people not already present. */
+export function mergeRosterNames(...lists: readonly (readonly string[])[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const list of lists) {
+    for (const raw of list) {
+      const name = normalizeEmployeeName(raw || '');
+      const key = employeeIdentityKey(name);
+      if (!name || !key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
 /** Team → sorted names — only rows stored in pa_employee_roster (exhaustive allow-list). */
 export function buildEmployeeRoster(rosterRows: RosterRow[]): Record<string, string[]> {
   const byTeam = new Map<string, Set<string>>();

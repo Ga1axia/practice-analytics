@@ -2968,6 +2968,13 @@ footer{
   padding:14px 12px;
   background:#F7F8FA;
   border:1px solid var(--border);
+  max-height:calc(100vh - 24px);
+  overflow:auto;
+}
+.emp-tasks-search-note{
+  margin:0;
+  font-size:12px;
+  line-height:1.4;
 }
 .emp-tasks-nav-kicker{
   margin:0;
@@ -2978,6 +2985,7 @@ footer{
   color:var(--ink-soft);
 }
 .emp-tasks-nav .emp-started-toggle{ width:100%; }
+.emp-tasks-nav .emp-filter-field{ width:100%; }
 .emp-tasks-nav-filters{
   display:flex;
   flex-direction:column;

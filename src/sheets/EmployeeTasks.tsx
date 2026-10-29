@@ -33,6 +33,10 @@ import {
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { parseScheduleDate, startOfDay } from '../lib/scheduleDates';
 import { applyEmployeeTaskScope } from '../lib/employeeTaskScope';
+import {
+  isExplicitlyActiveSchedulePhase,
+  taskMatchesScheduleSearch,
+} from '../lib/activeSchedulePhase';
 
 type StatusView = 'current' | 'incomplete' | 'overdue' | 'not_started' | 'complete';
 
@@ -105,6 +109,31 @@ function withLifecycle(task: EmployeeTask): EmployeeTask {
   return { ...task, status: taskLifecycleStatus(task) };
 }
 
+function applyStatusView(
+  list: EmployeeTask[],
+  view: StatusView,
+  startedOnly: boolean,
+  today: Date,
+): EmployeeTask[] {
+  let next = list;
+  if (startedOnly && view !== 'not_started') {
+    next = next.filter((t) => taskHasStarted(t, today));
+  }
+  if (view === 'current') next = next.filter((t) => taskInCurrentWindow(t, today));
+  else if (view === 'incomplete') next = next.filter((t) => t.status === 'incomplete');
+  else if (view === 'overdue') next = next.filter((t) => t.status === 'overdue');
+  else if (view === 'not_started') next = next.filter((t) => t.status === 'not_started');
+  else if (view === 'complete') next = next.filter((t) => t.status === 'complete');
+  return next;
+}
+
+function matchesQuery(task: EmployeeTask, query: string): boolean {
+  return taskMatchesScheduleSearch(
+    { ...task, statusLabel: lifecycleStatusLabel(task.status) },
+    query,
+  );
+}
+
 export function EmployeeTasks({
   projects,
   employeeName,
@@ -128,6 +157,9 @@ export function EmployeeTasks({
   const [startedOnly, setStartedOnly] = useState(true);
   const [addAssignees, setAddAssignees] = useState<string[]>([]);
   const [query, setQuery] = useState('');
+  const [searchWide, setSearchWide] = useState(false);
+  const [projectFilter, setProjectFilter] = useState('');
+  const [phaseFilter, setPhaseFilter] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editTask, setEditTask] = useState<EmployeeTask | null>(null);
   const [adding, setAdding] = useState(false);
@@ -224,38 +256,83 @@ export function EmployeeTasks({
     [tasks, employeeName, taskScope],
   );
 
+  const activeScoped = useMemo(() => {
+    if (taskScope !== 'all') return scopedTasks;
+    return scopedTasks.filter((t) => {
+      const project = projects.find((p) => p.key === t.projectKey);
+      return project ? isExplicitlyActiveSchedulePhase(project, t.phase) : false;
+    });
+  }, [scopedTasks, taskScope, projects]);
+
+  const projectOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const t of activeScoped) {
+      if (!byKey.has(t.projectKey)) byKey.set(t.projectKey, t.projectTitle);
+    }
+    return [...byKey.entries()].sort((a, b) =>
+      a[1].localeCompare(b[1], undefined, { sensitivity: 'base' }),
+    );
+  }, [activeScoped]);
+
+  const phaseOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of activeScoped) {
+      if (projectFilter && t.projectKey !== projectFilter) continue;
+      if (t.phase.trim()) set.add(t.phase);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [activeScoped, projectFilter]);
+
+  useEffect(() => {
+    if (projectFilter && !projectOptions.some(([key]) => key === projectFilter)) {
+      setProjectFilter('');
+    }
+  }, [projectFilter, projectOptions]);
+
+  useEffect(() => {
+    if (phaseFilter && !phaseOptions.includes(phaseFilter)) setPhaseFilter('');
+  }, [phaseFilter, phaseOptions]);
+
+  const narrowed = useMemo(() => {
+    let list = activeScoped;
+    if (projectFilter) list = list.filter((t) => t.projectKey === projectFilter);
+    if (phaseFilter) list = list.filter((t) => t.phase === phaseFilter);
+    return list;
+  }, [activeScoped, projectFilter, phaseFilter]);
+
+  useEffect(() => {
+    setSearchWide(false);
+  }, [query, view, startedOnly, projectFilter, phaseFilter, taskScope]);
+
+  const statusScoped = useMemo(
+    () => (searchWide ? narrowed : applyStatusView(narrowed, view, startedOnly, today)),
+    [narrowed, searchWide, view, startedOnly, today],
+  );
+
   const filtered = useMemo(() => {
-    let list = scopedTasks;
-    // "Not started" view must ignore the started-only toggle so those tasks remain visible.
-    if (startedOnly && view !== 'not_started') {
-      list = list.filter((t) => taskHasStarted(t, today));
-    }
-    if (view === 'current') list = list.filter((t) => taskInCurrentWindow(t, today));
-    else if (view === 'incomplete') list = list.filter((t) => t.status === 'incomplete');
-    else if (view === 'overdue') list = list.filter((t) => t.status === 'overdue');
-    else if (view === 'not_started') list = list.filter((t) => t.status === 'not_started');
-    else if (view === 'complete') list = list.filter((t) => t.status === 'complete');
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (t) =>
-          t.task.toLowerCase().includes(q) ||
-          t.projectTitle.toLowerCase().includes(q) ||
-          t.clientName.toLowerCase().includes(q) ||
-          t.phase.toLowerCase().includes(q) ||
-          t.phaseManagerName.toLowerCase().includes(q) ||
-          t.assigneeName.toLowerCase().includes(q) ||
-          lifecycleStatusLabel(t.status).toLowerCase().includes(q) ||
-          t.priority.toLowerCase().includes(q),
-      );
-    }
+    const q = query.trim();
+    const list = q ? statusScoped.filter((t) => matchesQuery(t, q)) : statusScoped;
     return sortEmployeeTasks(list, sortKey, sortDir);
-  }, [scopedTasks, view, query, sortKey, sortDir, startedOnly, today]);
+  }, [statusScoped, query, sortKey, sortDir]);
+
+  const searchHitsOutsideStatus = useMemo(() => {
+    const q = query.trim();
+    if (!q || searchWide) return 0;
+    if (statusScoped.some((t) => matchesQuery(t, q))) return 0;
+    return narrowed.filter((t) => matchesQuery(t, q)).length;
+  }, [query, searchWide, statusScoped, narrowed]);
+
+  const searchHitsOutsideProject = useMemo(() => {
+    const q = query.trim();
+    if (!q || (!projectFilter && !phaseFilter)) return 0;
+    if (narrowed.some((t) => matchesQuery(t, q))) return 0;
+    return activeScoped.filter((t) => matchesQuery(t, q)).length;
+  }, [query, projectFilter, phaseFilter, narrowed, activeScoped]);
 
   // Reset the render window whenever the filtered set identity changes.
   useEffect(() => {
     setVisibleCount(TASK_PAGE_SIZE);
-  }, [view, query, sortKey, sortDir, startedOnly, taskScope, projectsKey]);
+  }, [view, query, sortKey, sortDir, startedOnly, taskScope, projectsKey, projectFilter, phaseFilter]);
 
   const visibleTasks = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -289,16 +366,16 @@ export function EmployeeTasks({
   }, [hasMoreTasks, filtered.length, visibleTasks.length]);
 
   const counts = useMemo(() => {
-    const started = scopedTasks.filter((t) => taskHasStarted(t, today));
-    const base = startedOnly ? started : scopedTasks;
+    const started = narrowed.filter((t) => taskHasStarted(t, today));
+    const base = startedOnly ? started : narrowed;
     return {
       current: base.filter((t) => taskInCurrentWindow(t, today)).length,
       incomplete: base.filter((t) => t.status === 'incomplete').length,
       overdue: base.filter((t) => t.status === 'overdue').length,
-      notStarted: scopedTasks.filter((t) => t.status === 'not_started').length,
+      notStarted: narrowed.filter((t) => t.status === 'not_started').length,
       complete: base.filter((t) => t.status === 'complete').length,
     };
-  }, [scopedTasks, startedOnly, today]);
+  }, [narrowed, startedOnly, today]);
 
   async function onToggleComplete(task: EmployeeTask) {
     if (busyId || !task.writable) return;
@@ -341,6 +418,7 @@ export function EmployeeTasks({
       rowId: task.rowId,
       targetStart: field === 'target_start' ? value : undefined,
       targetEnd: field === 'target_end' ? value : undefined,
+      cascade: false,
     });
     setBusyId(null);
     if (!res.ok) {
@@ -454,8 +532,43 @@ export function EmployeeTasks({
         <p className="pd-muted emp-tasks-scope-note">
           {taskScope === 'assigned'
             ? 'Showing tasks assigned to you on your projects.'
-            : 'Showing every task on projects you’re on.'}
+            : 'Showing tasks in phases CORE marks Active.'}
         </p>
+        <label className="emp-filter-field">
+          <span>Project</span>
+          <select
+            className="emp-filter-select"
+            value={projectFilter}
+            onChange={(e) => {
+              setProjectFilter(e.target.value);
+              setPhaseFilter('');
+            }}
+            aria-label="Filter by project"
+          >
+            <option value="">All projects</option>
+            {projectOptions.map(([key, title]) => (
+              <option key={key} value={key}>
+                {title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="emp-filter-field">
+          <span>Phase</span>
+          <select
+            className="emp-filter-select"
+            value={phaseFilter}
+            onChange={(e) => setPhaseFilter(e.target.value)}
+            aria-label="Filter by phase"
+          >
+            <option value="">All phases</option>
+            {phaseOptions.map((phase) => (
+              <option key={phase} value={phase}>
+                {phase}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className={`emp-started-toggle${startedOnly ? ' on' : ''}`}>
           <input
             type="checkbox"
@@ -505,11 +618,26 @@ export function EmployeeTasks({
           <span className="visually-hidden">Search tasks</span>
           <input
             type="search"
-            placeholder="Search task, project, phase…"
+            placeholder="Search name, task, project…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
+        {query.trim() ? (
+          <p className="pd-muted emp-tasks-search-note">
+            {searchWide
+              ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'} in every status`
+              : `${filtered.length} match${filtered.length === 1 ? '' : 'es'} in this filter`}
+            {searchWide ? (
+              <>
+                {' '}
+                <button type="button" className="sched-text-btn" onClick={() => setSearchWide(false)}>
+                  Use status filter
+                </button>
+              </>
+            ) : null}
+          </p>
+        ) : null}
         <button
           type="button"
           className="emp-primary-btn emp-tasks-nav-add"
@@ -529,7 +657,7 @@ export function EmployeeTasks({
           <h1 className="display">Task schedule</h1>
           <p className="emp-lede">
             Create tasks, edit names and deadlines, and check work off across your assigned
-            projects. By default only tasks that have started are listed (including completed).
+            projects. Search stays inside the project, phase, and status you pick.
           </p>
         </header>
 
@@ -594,7 +722,40 @@ export function EmployeeTasks({
             No schedule tasks yet. Use <strong>Add task</strong> or open a project to build the list.
           </div>
         ) : !filtered.length ? (
-          <div className="plist-empty">No tasks match this filter.</div>
+          <div className="plist-empty">
+            {query.trim() ? (
+              <>
+                <p>No tasks match “{query.trim()}” in this filter.</p>
+                {searchHitsOutsideStatus > 0 ? (
+                  <button
+                    type="button"
+                    className="sched-text-btn"
+                    onClick={() => setSearchWide(true)}
+                  >
+                    Show {searchHitsOutsideStatus} match
+                    {searchHitsOutsideStatus === 1 ? '' : 'es'} in every status
+                  </button>
+                ) : null}
+                {searchHitsOutsideProject > 0 ? (
+                  <button
+                    type="button"
+                    className="sched-text-btn"
+                    onClick={() => {
+                      setProjectFilter('');
+                      setPhaseFilter('');
+                    }}
+                  >
+                    Clear project and phase ({searchHitsOutsideProject} match
+                    {searchHitsOutsideProject === 1 ? '' : 'es'})
+                  </button>
+                ) : null}
+              </>
+            ) : taskScope === 'all' && !projectFilter && !phaseFilter ? (
+              'No tasks in phases CORE marks Active.'
+            ) : (
+              'No tasks match this filter.'
+            )}
+          </div>
         ) : (
           <div className="emp-tasks-scroll" ref={scrollRef}>
             <table className="emp-tasks-table">

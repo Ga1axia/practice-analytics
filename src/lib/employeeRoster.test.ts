@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildEmployeeRoster,
-  DEFAULT_EMPLOYEE_ROSTER,
+  canonicalEmployeeName,
   compareTeamName,
+  DEFAULT_EMPLOYEE_ROSTER,
+  employeeIdentityKey,
 } from './employeeRoster';
 
 describe('buildEmployeeRoster', () => {
@@ -22,6 +24,27 @@ describe('buildEmployeeRoster', () => {
     const roster = buildEmployeeRoster(DEFAULT_EMPLOYEE_ROSTER);
     assert.equal(roster['US Team']?.length, 12);
     assert.equal(roster['Pak Team']?.length, 8);
+  });
+});
+
+describe('employeeIdentityKey', () => {
+  it('treats spaced, compacted, and BQE version spellings as one person', () => {
+    const key = employeeIdentityKey('Avery Cobe');
+    assert.equal(employeeIdentityKey('AveryCobe'), key);
+    assert.equal(employeeIdentityKey('AVERY-V1 COBE'), key);
+    assert.equal(employeeIdentityKey('AVERY-V1COBE'), key);
+    assert.equal(employeeIdentityKey('NiNi'), employeeIdentityKey('Ni Ni'));
+  });
+});
+
+describe('canonicalEmployeeName', () => {
+  const roster = DEFAULT_EMPLOYEE_ROSTER.map((r) => r.employee);
+
+  it('rewrites BQE manager spellings to the roster name', () => {
+    assert.equal(canonicalEmployeeName('AveryCobe', roster), 'Avery Cobe');
+    assert.equal(canonicalEmployeeName('AVERY-V1 COBE', roster), 'Avery Cobe');
+    assert.equal(canonicalEmployeeName('NiNi', roster), 'Ni Ni');
+    assert.equal(canonicalEmployeeName('  Someone Else  ', roster), 'Someone Else');
   });
 });
 

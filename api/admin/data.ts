@@ -4,8 +4,11 @@ import { requireAdmin } from '../_lib/requireAdmin.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildEmployeeRoster,
+  canonicalEmployeeName,
   DEFAULT_EMPLOYEE_ROSTER,
+  employeeIdentityKey,
   isPracticeRosterTeam,
+  mergeRosterNames,
   normalizeEmployeeName,
 } from '../../src/lib/employeeRoster.js';
 
@@ -121,6 +124,14 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
   projectHeaders: number;
 }> {
   const sb = serviceSupabase();
+  const { data: rosterRows, error: rosterError } = await sb
+    .from('pa_employee_roster')
+    .select('employee');
+  if (rosterError) throw new Error(rosterError.message);
+  const rosterNames = mergeRosterNames(
+    (rosterRows || []).map((row) => String((row as { employee?: string }).employee || '')),
+    DEFAULT_EMPLOYEE_ROSTER.map((row) => row.employee),
+  );
 
   const projects: {
     project: string;
@@ -146,7 +157,7 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
   for (const row of projects) {
     if (row.row_kind === 'project') {
       const entry = { key: row.project, leads: new Set<string>() };
-      if (row.manager?.trim()) entry.leads.add(row.manager.trim());
+      if (row.manager?.trim()) entry.leads.add(canonicalEmployeeName(row.manager, rosterNames));
       byKey.set(row.project, entry);
       const code = extractCode(row.project);
       if (code) byCode.set(code, entry);
@@ -165,7 +176,9 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
       const code = extractCode(row.parent_project || row.project);
       if (code) entry = byCode.get(code);
     }
-    if (entry && row.manager?.trim()) entry.leads.add(row.manager.trim());
+    if (entry && row.manager?.trim()) {
+      entry.leads.add(canonicalEmployeeName(row.manager, rosterNames));
+    }
   }
 
   const peopleByCode = new Map<string, Set<string>>();
@@ -179,7 +192,7 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
     if (!data?.length) break;
     scannedTe += data.length;
     for (const row of data) {
-      const name = String(row.employee_name || '').trim();
+      const name = canonicalEmployeeName(String(row.employee_name || ''), rosterNames);
       if (!name) continue;
       const entries = new Set<{ key: string; leads: Set<string> }>();
       for (const code of [extractCode(row.parent_project_name), extractCode(row.project_name)]) {
@@ -217,40 +230,59 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
     if (data.length < 1000) break;
   }
 
-  const have = new Map<string, Map<string, string>>();
+  const have = new Map<string, Map<string, { role: string; name: string }>>();
+  const drops: { project_key: string; employee_name: string }[] = [];
   for (const m of existing) {
     let inner = have.get(m.project_key);
     if (!inner) {
       inner = new Map();
       have.set(m.project_key, inner);
     }
-    inner.set(norm(m.employee_name), m.role);
+    const key = employeeIdentityKey(m.employee_name);
+    if (!key) continue;
+    const canonical = canonicalEmployeeName(m.employee_name, rosterNames);
+    const prev = inner.get(key);
+    if (!prev) {
+      inner.set(key, { role: m.role, name: m.employee_name });
+      continue;
+    }
+    const keep =
+      prev.name === canonical || m.employee_name !== canonical ? prev.name : m.employee_name;
+    const drop = keep === prev.name ? m.employee_name : prev.name;
+    const keptRole = keep === prev.name ? prev.role : m.role;
+    if (drop !== keep) drops.push({ project_key: m.project_key, employee_name: drop });
+    inner.set(key, { role: keptRole, name: keep });
   }
 
   const inserts: { project_key: string; employee_name: string; role: string }[] = [];
   const promoteLeads: { project_key: string; employee_name: string }[] = [];
+  const renames: { project_key: string; from: string; to: string; role: string }[] = [];
 
   for (const entry of byKey.values()) {
     const names = peopleByCode.get(entry.key) || new Set();
     const current = have.get(entry.key) || new Map();
 
     for (const lead of entry.leads) {
-      const key = norm(lead);
-      const role = current.get(key);
-      if (!role) {
+      const key = employeeIdentityKey(lead);
+      if (!key) continue;
+      const hit = current.get(key);
+      if (!hit) {
         inserts.push({ project_key: entry.key, employee_name: lead, role: 'lead' });
-        current.set(key, 'lead');
-      } else if (role !== 'lead') {
-        promoteLeads.push({ project_key: entry.key, employee_name: lead });
-        current.set(key, 'lead');
+        current.set(key, { role: 'lead', name: lead });
+      } else if (hit.name !== lead) {
+        renames.push({ project_key: entry.key, from: hit.name, to: lead, role: 'lead' });
+        current.set(key, { role: 'lead', name: lead });
+      } else if (hit.role !== 'lead') {
+        promoteLeads.push({ project_key: entry.key, employee_name: hit.name });
+        current.set(key, { role: 'lead', name: hit.name });
       }
     }
 
     for (const name of names) {
-      const key = norm(name);
-      if (current.has(key)) continue;
+      const key = employeeIdentityKey(name);
+      if (!key || current.has(key)) continue;
       inserts.push({ project_key: entry.key, employee_name: name, role: 'member' });
-      current.set(key, 'member');
+      current.set(key, { role: 'member', name });
     }
     have.set(entry.key, current);
   }
@@ -258,6 +290,14 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
   let inserted = 0;
   let promoted = 0;
   if (!dryRun) {
+    for (const drop of drops) {
+      const { error } = await sb
+        .from('pa_project_members')
+        .delete()
+        .eq('project_key', drop.project_key)
+        .eq('employee_name', drop.employee_name);
+      if (error) throw new Error(error.message);
+    }
     for (let i = 0; i < inserts.length; i += 500) {
       const chunk = inserts.slice(i, i + 500);
       const { error } = await sb.from('pa_project_members').upsert(chunk, {
@@ -271,9 +311,40 @@ async function seedMembersFromTimeEntries(dryRun: boolean): Promise<{
         .from('pa_project_members')
         .update({ role: 'lead' })
         .eq('project_key', p.project_key)
-        .ilike('employee_name', p.employee_name);
+        .eq('employee_name', p.employee_name);
       if (error) throw new Error(error.message);
       promoted += 1;
+    }
+    for (const rename of renames) {
+      const { data: target, error: targetError } = await sb
+        .from('pa_project_members')
+        .select('id, role')
+        .eq('project_key', rename.project_key)
+        .eq('employee_name', rename.to)
+        .maybeSingle();
+      if (targetError) throw new Error(targetError.message);
+      if (target) {
+        if (rename.role === 'lead' && target.role !== 'lead') {
+          const { error } = await sb
+            .from('pa_project_members')
+            .update({ role: 'lead' })
+            .eq('id', target.id);
+          if (error) throw new Error(error.message);
+        }
+        const { error } = await sb
+          .from('pa_project_members')
+          .delete()
+          .eq('project_key', rename.project_key)
+          .eq('employee_name', rename.from);
+        if (error) throw new Error(error.message);
+        continue;
+      }
+      const { error } = await sb
+        .from('pa_project_members')
+        .update({ employee_name: rename.to, role: rename.role })
+        .eq('project_key', rename.project_key)
+        .eq('employee_name', rename.from);
+      if (error) throw new Error(error.message);
     }
   }
 

@@ -6,6 +6,12 @@ import {
   projectKeysForTimeEntry,
 } from './projectLoggedHours';
 import { isProjectListManager, managerNameMatches } from './projectManagerMatch';
+import {
+  canonicalEmployeeName,
+  DEFAULT_EMPLOYEE_ROSTER,
+  employeeIdentityKey,
+  mergeRosterNames,
+} from './employeeRoster';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
@@ -23,7 +29,31 @@ export type ProjectMember = {
 export type MutationResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
 
 function norm(name: string) {
-  return name.trim().toLowerCase();
+  return employeeIdentityKey(name);
+}
+
+let rosterNameCache: { at: number; names: string[] } | null = null;
+
+async function rosterNamesFor(client: SupabaseClient): Promise<string[]> {
+  if (rosterNameCache && Date.now() - rosterNameCache.at < 5 * 60_000) {
+    return rosterNameCache.names;
+  }
+  const { data, error } = await client.from('pa_employee_roster').select('employee');
+  const fromDb =
+    error || !data
+      ? []
+      : data.map((row) => String((row as { employee?: string }).employee || ''));
+  const names = mergeRosterNames(
+    fromDb,
+    DEFAULT_EMPLOYEE_ROSTER.map((row) => row.employee),
+  );
+  if (!error) rosterNameCache = { at: Date.now(), names };
+  return names;
+}
+
+function samePerson(a: string, b: string): boolean {
+  const key = norm(a);
+  return Boolean(key) && key === norm(b);
 }
 
 /** Portal membership or Project List header manager (not phase-only PM). */
@@ -122,18 +152,27 @@ export async function ensureLeadMembership(
   },
   client: SupabaseClient = supabase,
 ): Promise<MutationResult<ProjectMember | null>> {
-  const employeeName = input.employeeName.trim();
+  const roster = await rosterNamesFor(client);
+  const employeeName = canonicalEmployeeName(input.employeeName, roster);
   if (!employeeName) return { ok: true, data: null };
 
   const existing = await loadProjectMembers(input.projectKey, client);
   if (existing.error) return { ok: false, error: existing.error };
-  const hit = existing.members.find((m) => norm(m.employee_name) === norm(employeeName));
-  if (hit) {
-    if (hit.role === 'lead') return { ok: true, data: hit };
+  const hits = existing.members.filter((m) => samePerson(m.employee_name, employeeName));
+  if (hits.length) {
+    const keeper = hits.find((m) => m.employee_name === employeeName) || hits[0]!;
+    for (const extra of hits) {
+      if (extra.id === keeper.id) continue;
+      const { error } = await client.from('pa_project_members').delete().eq('id', extra.id);
+      if (error) return { ok: false, error: error.message };
+    }
+    if (keeper.employee_name === employeeName && keeper.role === 'lead') {
+      return { ok: true, data: keeper };
+    }
     const { data, error } = await client
       .from('pa_project_members')
-      .update({ role: 'lead' })
-      .eq('id', hit.id)
+      .update({ employee_name: employeeName, role: 'lead' })
+      .eq('id', keeper.id)
       .select('id, project_key, employee_name, role')
       .single();
     if (error || !data) return { ok: false, error: error?.message || 'Could not update lead' };
@@ -175,9 +214,36 @@ export async function addProjectMember(input: {
   employeeName: string;
   role?: ProjectMemberRole;
 }): Promise<MutationResult<ProjectMember>> {
-  const employeeName = input.employeeName.trim();
+  const roster = await rosterNamesFor(supabase);
+  const employeeName = canonicalEmployeeName(input.employeeName, roster);
   if (!employeeName) return { ok: false, error: 'Pick a team member' };
   const role = input.role || 'member';
+
+  const existing = await loadProjectMembers(input.projectKey);
+  if (existing.error) return { ok: false, error: existing.error };
+  const hit = existing.members.find((m) => samePerson(m.employee_name, employeeName));
+  if (hit) {
+    const nextRole = hit.role === 'lead' || role === 'lead' ? 'lead' : 'member';
+    if (hit.employee_name === employeeName && hit.role === nextRole) {
+      return { ok: true, data: hit };
+    }
+    const { data, error } = await supabase
+      .from('pa_project_members')
+      .update({ employee_name: employeeName, role: nextRole })
+      .eq('id', hit.id)
+      .select('id, project_key, employee_name, role')
+      .single();
+    if (error || !data) return { ok: false, error: error?.message || 'Could not add member' };
+    return {
+      ok: true,
+      data: {
+        id: data.id,
+        project_key: data.project_key,
+        employee_name: data.employee_name,
+        role: data.role === 'lead' ? 'lead' : 'member',
+      },
+    };
+  }
 
   const { data, error } = await supabase
     .from('pa_project_members')
@@ -273,7 +339,7 @@ export async function syncProjectMembersFromTimeEntries(input: {
     });
     if (res.ok && res.data) {
       ensuredLeads += 1;
-      have.add(norm(name));
+      have.add(norm(res.data.employee_name));
     }
   }
 

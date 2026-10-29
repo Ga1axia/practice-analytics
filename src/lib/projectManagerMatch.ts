@@ -1,11 +1,13 @@
+import { employeeIdentityKey } from './employeeRoster';
+
 export function managerNameMatches(
   manager: string | null | undefined,
   employeeName: string,
 ): boolean {
-  if (!manager?.trim() || !employeeName.trim()) return false;
-  return (
-    manager.trim().toLocaleLowerCase() === employeeName.trim().toLocaleLowerCase()
-  );
+  const managerKey = employeeIdentityKey(manager || '');
+  const employeeKey = employeeIdentityKey(employeeName);
+  if (!managerKey || !employeeKey) return false;
+  return managerKey === employeeKey;
 }
 
 /** True when the employee is the Project List manager (header or any phase). */

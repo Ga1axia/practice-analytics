@@ -704,6 +704,7 @@ export function EmployeeProjectWorkspace({
               assigneeOptions={teamMembers.map((m) => m.employee_name)}
               onRowsChange={setDbRows}
               isLead={isLead}
+              phases={project.phases}
               onStartSchedule={
                 needsSchedule
                   ? () => {

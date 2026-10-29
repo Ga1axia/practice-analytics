@@ -21,6 +21,7 @@ import {
 } from '../lib/scheduleMutations';
 import type { ScheduleRow } from '../lib/scheduleTypes';
 import { applyEmployeeTaskScope } from '../lib/employeeTaskScope';
+import { isExplicitlyActiveSchedulePhase, taskMatchesScheduleSearch } from '../lib/activeSchedulePhase';
 import { useEmployeeTaskScope } from '../hooks/useEmployeeTaskScope';
 import { TaskScopeToggle } from './TaskScopeToggle';
 
@@ -65,6 +66,7 @@ export function ProjectTaskList({
   onRowsChange,
   onStartSchedule,
   isLead = false,
+  phases = [],
 }: {
   projectKey: string;
   projectTitle: string;
@@ -79,6 +81,7 @@ export function ProjectTaskList({
   onRowsChange?: (rows: ScheduleRow[]) => void;
   /** Shown when there are zero checklist tasks. */
   onStartSchedule?: () => void;
+  phases?: { label: string; row: { status?: string | null; phase?: string | null } }[];
 }) {
   const [view, setView] = useState<'open' | 'all' | 'done'>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -138,10 +141,11 @@ export function ProjectTaskList({
     [projectKey, projectTitle, clientName, localRows, employeeName, writable],
   );
 
-  const scopedTasks = useMemo(
-    () => applyEmployeeTaskScope(tasks, employeeName, taskScope, { isLead }),
-    [tasks, employeeName, taskScope, isLead],
-  );
+  const scopedTasks = useMemo(() => {
+    const scoped = applyEmployeeTaskScope(tasks, employeeName, taskScope, { isLead });
+    if (taskScope !== 'all' && !isLead) return scoped;
+    return scoped.filter((t) => isExplicitlyActiveSchedulePhase({ phases }, t.phase));
+  }, [tasks, employeeName, taskScope, isLead, phases]);
 
   const counts = useMemo(() => {
     const open = scopedTasks.filter((t) => !t.complete).length;
@@ -165,14 +169,16 @@ export function ProjectTaskList({
     else if (view === 'done') list = list.filter((t) => t.complete);
     if (mineOnly) {
       list = list.filter(
-        (t) => t.assigneeName.toLowerCase() === employeeName.trim().toLowerCase(),
+        (t) => t.assigneeName.trim().toLowerCase() === employeeName.trim().toLowerCase(),
       );
     }
     if (phaseFilter) list = list.filter((t) => t.phase === phaseFilter);
     if (assigneeFilter === '__unassigned__') {
       list = list.filter((t) => !t.assigneeName.trim());
     } else if (assigneeFilter) {
-      list = list.filter((t) => t.assigneeName === assigneeFilter);
+      list = list.filter(
+        (t) => t.assigneeName.trim().toLowerCase() === assigneeFilter.trim().toLowerCase(),
+      );
     }
     if (statusFilter === 'incomplete') {
       list = list.filter((t) => taskLifecycleStatus(t) === 'incomplete');
@@ -181,14 +187,13 @@ export function ProjectTaskList({
     } else if (statusFilter === 'not_started') {
       list = list.filter((t) => taskLifecycleStatus(t) === 'not_started');
     }
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (q) {
-      list = list.filter(
-        (t) =>
-          t.task.toLowerCase().includes(q) ||
-          t.phase.toLowerCase().includes(q) ||
-          t.assigneeName.toLowerCase().includes(q) ||
-          t.phaseManagerName.toLowerCase().includes(q),
+      list = list.filter((t) =>
+        taskMatchesScheduleSearch(
+          { ...t, statusLabel: lifecycleStatusLabel(t.status) },
+          q,
+        ),
       );
     }
     return sortEmployeeTasks(list, 'due', 'asc');
@@ -298,6 +303,7 @@ export function ProjectTaskList({
       targetStart: field === 'target_start' ? value : undefined,
       targetEnd: field === 'target_end' ? value : undefined,
       rows: localRows,
+      cascade: false,
     });
     setBusyId(null);
     if (!res.ok) {
@@ -463,7 +469,7 @@ export function ProjectTaskList({
                 <input
                   type="search"
                   className="emp-filter-select"
-                  placeholder="Task, phase, assignee…"
+                  placeholder="Name, task, phase…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />

@@ -101,12 +101,17 @@ export async function setScheduleRowDates(input: {
   action?: string;
   /** Optional in-memory rows (avoids a reload; cascade uses these). */
   rows?: ScheduleRow[];
+  /**
+   * When true, moving a due date shifts every later task by the same day count.
+   * Task-list edits pass false so each date stays a manual value.
+   */
+  cascade?: boolean;
 }): Promise<
   MutationResult<{
     target_start: string;
     target_end: string;
     action: string;
-    /** Full row list after cascade (when end date shifted followers). */
+    /** Full row list after the edit (followers included only when cascade ran). */
     rows: ScheduleRow[];
   }>
 > {
@@ -117,8 +122,8 @@ export async function setScheduleRowDates(input: {
       getCachedSchedule(input.projectKey)?.meta?.id,
     ));
 
-  // End-date edits cascade later deadlines; start-only edits stay local.
-  if (input.targetEnd !== undefined) {
+  // End-date edits can cascade later deadlines. Task lists opt out.
+  if (input.targetEnd !== undefined && input.cascade !== false) {
     const nextRows = cascadeRowsAfterEndEdit(baseRows, input.rowId, input.targetEnd);
     // If start was also provided on the edited row, apply it after cascade.
     const withStart =
@@ -177,6 +182,7 @@ export async function setScheduleRowDates(input: {
 
   const fields: { target_start?: string; target_end?: string; action?: string } = {};
   if (input.targetStart !== undefined) fields.target_start = input.targetStart;
+  if (input.targetEnd !== undefined) fields.target_end = input.targetEnd;
   if (input.action !== undefined) {
     fields.action = clearScheduleDateSourceMarker(input.action);
   } else {
@@ -192,11 +198,12 @@ export async function setScheduleRowDates(input: {
   const cached = getCachedSchedule(input.projectKey);
   if (cached) setCachedSchedule({ ...cached, rows: nextRows });
 
+  const edited = nextRows.find((r) => r.id === input.rowId);
   return {
     ok: true,
     data: {
-      target_start: fields.target_start ?? '',
-      target_end: '',
+      target_start: edited?.target_start ?? fields.target_start ?? '',
+      target_end: edited?.target_end ?? fields.target_end ?? '',
       action: fields.action ?? '',
       rows: nextRows,
     },
